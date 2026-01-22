@@ -1,0 +1,13 @@
+* Ratatoskr-emacs
+My emacs config
+
+** Run project
+#+begin_src sh
+  \emacs --init-directory ~/workspace/ratatoskr-emacs
+#+end_src
+
+or create an alias
+
+#+begin_src sh
+  alias \emacs-dev="emacs --init-directory ~/workspace/ratatoskr-emacs"
+#+end_src

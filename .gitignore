@@ -15,3 +15,17 @@ dist/
 
 # Undo-tree save-files
 *.~undo-tree
+
+# Env vars
+.envrc
+
+# LLMs
+AGENTS.md
+CONVENTIONS.md
+
+# Emacs runtime stuff
+auto-save-list/*
+elpa/*
+eln-cache/*
+history
+transient/history.el
