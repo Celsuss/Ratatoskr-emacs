@@ -23,9 +23,19 @@ dist/
 AGENTS.md
 CONVENTIONS.md
 
-# Emacs runtime stuff
-auto-save-list/*
-elpa/*
-eln-cache/*
+# Org
+org-roam.db
+
+# Dependencies and compilation
+/elpa/
+/eln-cache/
+/straight/
+/quelpa/
+
+# State and history (unless you use no-littering)
+/auto-save-list/
+/server/
+*.elc
+recentf
 history
 transient/history.el

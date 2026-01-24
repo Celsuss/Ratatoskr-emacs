@@ -67,20 +67,23 @@
         embark-become-indicator 'highlight
         embark-prompter 'embark-completing-read-prompter))
 
-;; --- Embark Keybindings ---
-;; Set up keybindings for Embark actions
-(with-eval-after-load 'vertico
-  (general-define-key
-   :keymaps 'vertico-map
-   "C-." 'embark-act  ; Embark action on candidate
-   "C-;" 'embark-export)) ; Export candidate to buffer
 
-;; --- 8. Embark Consult Integration ---
+;; --- Embark Consult Integration ---
 ;; Integration between Embark and Consult for enhanced functionality
 ;; https://github.com/emacs-straight/embark-consult
 (use-package embark-consult
   :after (embark consult)
   :hook
   (embark-collect-mode . consult-preview-at-point-mode))
+
+;; --- Embark Keybindings ---
+;; Set up keybindings for Embark actions
+;; TODO Fix this it's not working
+(with-eval-after-load 'vertico
+  (general-define-key
+   :keymaps 'vertico-map
+   "C-." 'embark-act  ; Embark action on candidate
+   "C-;" 'embark-export)) ; Export candidate to buffer
+
 
 (provide 'init-completion)

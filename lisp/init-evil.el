@@ -30,6 +30,13 @@
 
 ;; --- 4. Leader Key Setup (General.el) ---
 ;; 'general' is the modern, declarative way to handle keybindings.
+;;
+;; How to add keybindings in other files
+;; (rata-leader
+;;  :states '(normal visual insert emacs)
+;;  "t"  '(:ignore t :which-key "tools")
+;;  "tc" '(calc :which-key "calculator")
+;;  "td" '(dired :which-key "dired"))
 (use-package general
   :config
   ;; Setup the leader key as Space, just like Spacemacs
@@ -115,5 +122,24 @@
 
    ;; A binding to restart emacs easily while you are tweaking config
    "qr"  '((lambda () (interactive) (load-file user-init-file)) :which-key "reload init.el")))
+
+(use-package winum
+  :ensure t
+  :config
+  (winum-mode)
+  :init
+  (rata-leader
+   :states '(normal visual insert emacs)
+   ;; 0 is usually reserved for the sidebar (like treemacs)
+   "0" '(winum-select-window-0-or-10 :which-key "window 0")
+   "1" '(winum-select-window-1 :which-key "window 1")
+   "2" '(winum-select-window-2 :which-key "window 2")
+   "3" '(winum-select-window-3 :which-key "window 3")
+   "4" '(winum-select-window-4 :which-key "window 4")
+   "5" '(winum-select-window-5 :which-key "window 5")
+   "6" '(winum-select-window-6 :which-key "window 6")
+   "7" '(winum-select-window-7 :which-key "window 7")
+   "8" '(winum-select-window-8 :which-key "window 8")
+   "9" '(winum-select-window-9 :which-key "window 9")))
 
 (provide 'init-evil)
