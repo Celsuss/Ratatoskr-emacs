@@ -11,9 +11,9 @@
       blink-cursor-mode 0)   ;; Solid cursor, not blinking
 
 ;; Install and load the Doom One theme (very popular Spacemacs look)
-(use-package doom-themes
+(use-package gruvbox-theme
   :config
-  (load-theme 'doom-one t))
+  (load-theme 'gruvbox-dark-medium t))
 
 (use-package which-key
   :init (which-key-mode)

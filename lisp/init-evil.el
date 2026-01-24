@@ -49,11 +49,14 @@
    "bb"  '(consult-buffer :which-key "switch buffer")
    "bk"  '(kill-current-buffer :which-key "kill buffer")
 
+   ;; Window management
    "w"   '(:ignore t :which-key "window")               ; Group name
    "wl"  '(evil-window-right :which-key "window right")
    "wh"  '(evil-window-left :which-key "window left")
    "wk"  '(evil-window-up :which-key "window up")
    "wj"  '(evil-window-down :which-key "window down")
+   ;; TODO Add window management using numbers
+   ;; "0..9" '(evil-window-down :which-key "Go to window")
 
    ;; Enhanced file operations
    "fr"  '(consult-recent-file :which-key "recent file")

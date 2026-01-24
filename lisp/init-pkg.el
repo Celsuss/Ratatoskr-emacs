@@ -2,8 +2,17 @@
 
 (require 'package)
 
-;; Add MELPA to your package archives (standard for most plugins)
-(add-to-list 'package-archives '("melpa" . "https://melpa.org/packages/") t)
+;; Define package repos
+(setq package-archives
+      '(("gnu"    . "https://elpa.gnu.org/packages/")  ;; The "Core" repo. Official packages signed by the FSF.
+        ("nongnu" . "https://elpa.nongnu.org/nongnu/") ;; The "Extra" repo. Curated, stable packages
+        ("melpa"  . "https://melpa.org/packages/")))   ;; The "AUR". Massive selection, community-maintained, built automatically from Git.
+
+;; Priorities repos, higher number higher prio.
+(setq package-archive-priorities
+      '(("gnu"    . 5)
+        ("nongnu" . 5)
+        ("melpa"  . 10)))
 
 (package-initialize)
 
