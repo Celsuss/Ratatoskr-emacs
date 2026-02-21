@@ -39,6 +39,7 @@
 
 ;; --- Flycheck ---
 (use-package flycheck
+  :after general
   :config
   (global-flycheck-mode)
   (setq flycheck-display-errors-delay 0.3)

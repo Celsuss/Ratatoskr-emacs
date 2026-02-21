@@ -29,8 +29,8 @@
 early-init.el          — disables package.el, UI chrome, maxes GC
 init.el                — elpaca bootstrap, module loader
   ├── init-pkg         (elpaca use-package defaults)                        ✓ DONE
-  ├── init-system      (no-littering, exec-path-from-shell + TODO: shackle, TRAMP, ediff, recentf)
-  ├── init-ui          (gruvbox, doom-modeline, nerd-icons, which-key + TODO: rainbow, helpful, golden-ratio)
+  ├── init-system      (no-littering, exec-path-from-shell, recentf, ediff, TRAMP, shackle)  ✓ DONE
+  ├── init-ui          (gruvbox, doom-modeline, nerd-icons, which-key, rainbow-delimiters, helpful, golden-ratio)  ✓ DONE
   ├── init-evil        (evil, general, winum, undo-fu, surround, commenter, avy + TODO: matchit, args, textobj-ts, evil-mc, smartparens)
   ├── init-completion  (vertico, orderless, marginalia, consult, embark, corfu, cape, nerd-icons-corfu + TODO: wgrep)
   ├── init-dev         (lsp, lsp-ui, flycheck, apheleia, magit, forge, vterm, direnv, projectile + TODO: vterm-toggle, dirvish, esup, flyspell)
@@ -86,12 +86,11 @@ All modules now follow this rule. The `init-org.el` `:init` bug has been fixed.
 
 ## 4. Module Specs
 
-### 4.1 `init-system.el` — PARTIAL
+### 4.1 `init-system.el` — DONE
 
-**Implemented:** `no-littering`, `exec-path-from-shell`
-**TODO:** `shackle`, TRAMP config, ediff config, `recentf-mode`
-**Note:** `savehist-mode` currently lives in `init-completion.el` (alongside vertico). Consider
-moving to init-system.el or leaving it — either is fine.
+**Implemented:** `no-littering`, `exec-path-from-shell`, `recentf-mode`, ediff config,
+TRAMP config (SSH + Docker, `rata-tramp-buffer-p` helper), `shackle`
+**Note:** `savehist-mode` lives in `init-completion.el` (alongside vertico). Left there intentionally.
 
 **Packages:** `no-littering`, `exec-path-from-shell`, `shackle`
 
@@ -156,11 +155,10 @@ moving to init-system.el or leaving it — either is fine.
           ("*Messages*"       :align below :size 0.25 :popup t))))
 ```
 
-### 4.2 `init-ui.el` — PARTIAL
+### 4.2 `init-ui.el` — DONE
 
-**Implemented:** `gruvbox-theme`, `nerd-icons`, `doom-modeline`, `which-key`, relative line numbers
-**TODO:** `rainbow-delimiters`, `helpful`, `golden-ratio` (off by default), change which-key
-delay from 0.3s → 0.1s
+**Implemented:** `gruvbox-theme`, `nerd-icons`, `doom-modeline`, `which-key` (0.1s delay), relative line numbers,
+`rainbow-delimiters`, `helpful` (with SPC h f/v/k bindings + remap), `golden-ratio` (off by default, SPC t g toggle)
 
 **Additions remaining:**
 - `rainbow-delimiters`: Rainbow-colored parens by nesting depth. Hook on `prog-mode`.
@@ -920,10 +918,10 @@ SPC y    yank
 ### Completed
 
 1. ~~**Migrate init-pkg.el to elpaca**~~ — DONE. Bootstrapped, `just run` works.
-2. ~~**Create init-system.el**~~ — PARTIAL. no-littering + exec-path-from-shell done.
+2. ~~**Create init-system.el**~~ — DONE. no-littering, exec-path-from-shell, recentf, ediff, TRAMP, shackle.
 3. ~~**Fix init-evil.el**~~ — PARTIAL. elpaca-wait, keybinding ordering, undo-fu, surround,
    commenter, avy done.
-4. ~~**Extend init-ui.el**~~ — PARTIAL. doom-modeline + nerd-icons done.
+4. ~~**Extend init-ui.el**~~ — DONE. doom-modeline, nerd-icons, rainbow-delimiters, helpful, golden-ratio, which-key 0.1s.
 5. ~~**Extend init-completion.el**~~ — PARTIAL. corfu + cape + nerd-icons-corfu done.
    Embark keybindings wired.
 6. ~~**Create init-dev.el**~~ — PARTIAL. lsp-mode + lsp-ui + flycheck + apheleia + magit +
@@ -938,8 +936,8 @@ SPC y    yank
 
 Work these in any order — all can be done independently:
 
-- [ ] **init-system.el:** Add shackle, ediff config, TRAMP config, recentf-mode.
-- [ ] **init-ui.el:** Add rainbow-delimiters, helpful, golden-ratio (off by default).
+- [x] **init-system.el:** Add shackle, ediff config, TRAMP config, recentf-mode.
+- [x] **init-ui.el:** Add rainbow-delimiters, helpful, golden-ratio (off by default).
       Change which-key delay 0.3s → 0.1s.
 - [ ] **init-evil.el:** Add evil-matchit, evil-args, evil-textobj-tree-sitter, evil-mc,
       smartparens. Disable electric-pair-mode.
