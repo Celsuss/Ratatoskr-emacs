@@ -22,6 +22,7 @@
 (use-package ellama
   :after general
   :config
+  (require 'llm-ollama)
   (setq ellama-provider
         (make-llm-ollama :chat-model "mistral:latest" :embedding-model "nomic-embed-text"))
   (rata-leader

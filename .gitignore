@@ -40,3 +40,4 @@ org-roam.db
 recentf
 history
 transient/history.el
+/var/

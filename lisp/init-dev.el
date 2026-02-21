@@ -1,6 +1,11 @@
 ;;; -*- lexical-binding: t; -*-
 ;;; init-dev.el --- Development tools (LSP, flycheck, magit, vterm, etc.)
 
+;; --- Transient (newer version required by magit, forge, gptel) ---
+(use-package transient
+  :demand t)
+(elpaca-wait)
+
 ;; --- LSP Mode ---
 (use-package lsp-mode
   :commands (lsp lsp-deferred)
