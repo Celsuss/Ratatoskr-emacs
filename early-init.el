@@ -1,12 +1,19 @@
-;; ~/.config/emacs-from-scratch/early-init.el
+;;; -*- lexical-binding: t; -*-
+;;; early-init.el --- Pre-initialization
 
-;; Disable package.el initialization at startup (we will handle it manually in init.el)
+;; Disable package.el — elpaca replaces it entirely
 (setq package-enable-at-startup nil)
 
-;; clean up the UI before the frame appears
+;; Clean up the UI before the frame appears
 (push '(menu-bar-lines . 0) default-frame-alist)
 (push '(tool-bar-lines . 0) default-frame-alist)
 (push '(vertical-scroll-bars . nil) default-frame-alist)
 
-;; Speed up startup by ignoring generic GC limits during init
+;; Speed up startup by deferring GC during init
 (setq gc-cons-threshold most-positive-fixnum)
+
+;; Local Variables:
+;; no-byte-compile: t
+;; no-native-compile: t
+;; no-update-autoloads: t
+;; End:

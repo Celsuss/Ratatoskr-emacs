@@ -1,0 +1,85 @@
+
+* Packages
+| Package                 | Description                                                               | Note                                    | Implemented |
+|-------------------------+---------------------------------------------------------------------------+-----------------------------------------+-------------|
+| *Package manager*         |                                                                           |                                         |             |
+|-------------------------+---------------------------------------------------------------------------+-----------------------------------------+-------------|
+| +package.el+              | Default emacs package manager                                             | I have decided not to use this          |             |
+| +straight.el+             | Purely functional and fully declarative, can clone from git               | I have decided not to use this          |             |
+| elpaca                  | Modern, async installation of packages                                    | Lets use this package manager           | [ ]         |
+|-------------------------+---------------------------------------------------------------------------+-----------------------------------------+-------------|
+| *Evil & Keybindings*      |                                                                           |                                         |             |
+|-------------------------+---------------------------------------------------------------------------+-----------------------------------------+-------------|
+| evil                    | The Extensible VI Layer (Vim emulation)                                   | Essential for Spacemacs feel            | [ ]         |
+| evil-collection         | Vim bindings for Magit, Dired, Ibuffer, etc.                              | Prevents "dead" buffers                 | [ ]         |
+| general.el              | Declarative keybinding manager                                            | Define SPC leader keys easily           | [ ]         |
+| evil-nerd-commenter     | Comment/uncomment lines efficiently                                       | Replaces SPC ;                          | [ ]         |
+| evil-surround           | Emulate vim-surround (cs, ys, ds)                                         |                                         | [ ]         |
+| undo-fu                 | Faster undo backend for Evil                                              | Better than undo-tree                   | [ ]         |
+|-------------------------+---------------------------------------------------------------------------+-----------------------------------------+-------------|
+| *Completion (Minibuffer)* |                                                                           |                                         |             |
+|-------------------------+---------------------------------------------------------------------------+-----------------------------------------+-------------|
+| +Helm+                    | Fully featured completion UI (~SPC SPC~).                                   | Used in spacemacs, lets not use this    |             |
+| +Ivy+                     |                                                                           | Lets not use this                       |             |
+| Vertico                 | Performant and minimalistic vertical completion UI (~SPC SPC~)              | I have decided to use this one          | [ ]         |
+| Consult                 | search and navigation for completion functions                            | Use with Vertico.                       | [ ]         |
+| Orderless               | completion style that divides the pattern into space-separated components | Use with Vertico.                       | [ ]         |
+| Marginalia              | Add annotations to completion UI.                                         | Use with Vertico.                       | [ ]         |
+|-------------------------+---------------------------------------------------------------------------+-----------------------------------------+-------------|
+| *Completion (In-Buffer)*  |                                                                           |                                         |             |
+|-------------------------+---------------------------------------------------------------------------+-----------------------------------------+-------------|
+| corfu                   | Completion in Region (Intellisense popup)                                 | Replaces Company                        | [ ]         |
+| cape                    | Completion At Point Extensions                                            | Mix LSP + File paths + Dict             | [ ]         |
+| kind-icon               | Icons for the popup (Cube for methods, etc)                               | Visual parity with Spacemacs            | [ ]         |
+| flycheck                | Modern syntax checking                                                    | Preferred by lsp-mode                   | [ ]         |
+|-------------------------+---------------------------------------------------------------------------+-----------------------------------------+-------------|
+| *Developer tools*         |                                                                           |                                         |             |
+|-------------------------+---------------------------------------------------------------------------+-----------------------------------------+-------------|
+| +Eglot+                   | Lightweight & built-in                                                    | +Don't support DAP mode+                  |             |
+| lsp-mode                | Full IDE features (Refactor, code actions)                                | Replaces Spacemacs LSP layer            | [ ]         |
+| lsp-ui                  | UI extensions (Doc popups, sideline info)                                 | Essential for Spacemacs feel            | [ ]         |
+| dap-mode                | Debug Adapter Protocol                                                    | For Python/Go/Rust debugging            | [ ]         |
+| magit                   | A Git Porcelain inside Emacs                                              |                                         | [ ]         |
+| forge                   | Access GitHub/GitLab issues/PRs from Magit                                |                                         | [ ]         |
+| apheleia                | Reformat buffer stably                                                    |                                         | [ ]         |
+| rustic                  | Rust development environment                                              | Keep (supports Arch dev)                | [ ]         |
+| go-mode                 | Major mode for go                                                         |                                         | [ ]         |
+| dockerfile-mode         | Major mode for dockerfiles                                                |                                         | [ ]         |
+| terraform-mode          | Major mode for terraform                                                  |                                         | [ ]         |
+| just-mode               | Major mode for just                                                       |                                         | [ ]         |
+| docker                  | Interface for docker                                                      |                                         | [ ]         |
+| pyvenv                  | Python virtual env interface                                              |                                         | [ ]         |
+| markdown-mode           | Major mode for Markdown                                                   |                                         | [ ]         |
+| direnv                  | Per-directory environment variables                                       | Loads .envrc automatically              | [ ]         |
+| vterm                   | Terminal emulator based on libvterm                                       | Best Linux terminal perf                | [ ]         |
+|-------------------------+---------------------------------------------------------------------------+-----------------------------------------+-------------|
+| *Org*                     |                                                                           |                                         |             |
+|-------------------------+---------------------------------------------------------------------------+-----------------------------------------+-------------|
+| org mode                | Manage .org files                                                         |                                         | [ ]         |
+| org-roam                | Second brain                                                              |                                         | [ ]         |
+| org-roam-ui             | UI for Roam                                                               |                                         | [ ]         |
+| consult-org-roam        | Search roam nodes using Vertico/Consult                                   | Essential for node finding              | [ ]         |
+| org-modern              | Make org mode look more modern                                            |                                         | [ ]         |
+| org-appear              | Toggle emphasis markers (*bold*) on hover                                   | Replaces org-hide-emphasis              | [ ]         |
+| org-auto-tangle         | Automatically tangle .org config to .el on save                           | For declarative config                  | [ ]         |
+| org-agenda              |                                                                           |                                         | [ ]         |
+| org-super-agenda        | Add features to org-agenda                                                |                                         | [ ]         |
+|-------------------------+---------------------------------------------------------------------------+-----------------------------------------+-------------|
+| *LLMs*                    |                                                                           |                                         |             |
+|-------------------------+---------------------------------------------------------------------------+-----------------------------------------+-------------|
+| ellama                  | LLM interaction                                                           | Great to use for simple tasks           | [ ]         |
+| Gptel                   | LLM interaction                                                           | Simple chat interface                   | [ ]         |
+| aidermacs               | Agentic coding                                                            |                                         | [ ]         |
+| claude-code-ide?        | Claude code integration                                                   | Is this best for claude code?           | [ ]         |
+| Emacs Agent Shell?      | Integrates with different cli agentic coding tools like claude and gemini | Only need one cli agent integration     | [ ]         |
+| ECA Emacs?              | Integrates ECA, agentic pair-programming                                  | Maybe not needed when using claude code | [ ]         |
+| mcp-server              | Exposes Emacs functionality                                               | Seems very promising                    | [ ]         |
+| mcp                     | Client to interface with MCP servers                                      | Seems very promising                    | [ ]         |
+|-------------------------+---------------------------------------------------------------------------+-----------------------------------------+-------------|
+| *System / Other*          |                                                                           |                                         |             |
+|-------------------------+---------------------------------------------------------------------------+-----------------------------------------+-------------|
+| no-littering            | Keeps ~/.emacs.d clean (moves auto-saves to var/)                         | Essential for clean config              | [ ]         |
+| exec-path-from-shell    | Ensures Emacs sees the same $PATH as shell                                | Critical for finding Cargo/Go           | [ ]         |
+| Writegood-mode          | Writing aid                                                               |                                         | [ ]         |
+| yatemplate              | "I created a new file, please fill it with boilerplate."                  |                                         | [ ]         |
+| YASnippet               | Create boilerplate snipppets that is quick to insert at the cursor        |                                         | [ ]         |

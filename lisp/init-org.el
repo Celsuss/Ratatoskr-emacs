@@ -1,48 +1,38 @@
-;; ~/.config/emacs-from-scratch/lisp/init-org.el
-
-;; Add keybindings to rata-leader (SPC)
-;; (rata-leader
-;;  :states 'normal
-;;  "t"  '(:ignore t :which-key "tools")
-;;  "tc" '(calc :which-key "calculator")
-;;  "td" '(dired :which-key "dired"))
+;;; -*- lexical-binding: t; -*-
+;;; init-org.el --- Org mode configuration
 
 (use-package org
   :defer t
-  :init
+  :after general
+  :config
   (rata-leader
    :states '(normal visual insert emacs)
    "o"  '(:ignore t :which-key "org")
-   "oc" '(org-capture :which-key "org capture"))
-  :config
+   "oc" '(org-capture :which-key "org capture")
+   "oa" '(org-agenda :which-key "org agenda")
+   "ot" '(org-todo-list :which-key "list all TODOs"))
+
   ;;;; Org Agenda
-  ;; Inhibit time-consuming startup processes for background agenda files.
   (setq org-agenda-inhibit-startup t)
-  ;; Disable dimming of blocked tasks, which can be slow.
   (setq org-agenda-dim-blocked-tasks nil)
-  ;; Skip deleted files
   (setq org-agenda-skip-unavailable-files t)
 
-  ;; Make buffer horizontal
-  (setq org-agenda-window-setup 'reorganize-frame) ;; 'reorganize-frame 'other-window 'current-window
+  ;; Agenda window layout
+  (setq org-agenda-window-setup 'reorganize-frame)
   (setq org-agenda-restore-windows-after-quit t)
   (setq org-agenda-window-frame-fractions '(0.8 . 0.9))
 
   (defadvice org-agenda (around split-vertically activate)
-    (let (
-          (split-width-threshold 40)    ; or whatever width makes sense for you
-          (split-height-threshold nil)) ; but never horizontally
+    (let ((split-width-threshold 40)
+          (split-height-threshold nil))
       ad-do-it))
 
-  ;; Default was: " %i %-12:c%?-12t% s" (The %c is the filename)
   (setq org-agenda-prefix-format
         '((agenda . " %i %?-12t% s")
           (todo   . " %i %?-12t% s")
           (tags   . " %i %?-12t% s")
           (search . " %i %?-12t% s")))
 
-  ;; (setq org-agenda-files (directory-files-recursively org-directory "\\\\.org$"))
-  ;; (setq org-agenda-files (directory-files-recursively "~/workspace/second-brain/" "\.org$"))
   (setq org-agenda-files '("~/workspace/second-brain/org-roam/todo.org"
                            "~/workspace/second-brain/org-roam/work_tasks.org"
                            "~/workspace/second-brain/org-roam/homelab_tasks.org"
@@ -53,26 +43,23 @@
                            "~/workspace/second-brain/org-roam/habits.org"))
   (org-super-agenda-mode)
 
-  ;; --- Org habits ---
+  ;; Org habits
   (add-to-list 'org-modules 'org-habit)
   (require 'org-habit)
   (setq org-habit-graph-column 60)
   (setq org-habit-show-habits-only-for-today nil)
-  ;; Allow completed habits to stay visible in the agenda log for satisfaction
-  (setq org-habit-show-habits-only-for-today nil)
   (setq org-agenda-skip-scheduled-if-done nil)
 
-  ;; Use a dedicated directory for all org files
+  ;; Org directory
   (setq org-directory "~/workspace/second-brain/org-roam/")
 
-  ;; Enable advanced dependency tracking
+  ;; Dependency tracking
   (setq org-enforce-todo-dependencies t)
   (setq org-enforce-todo-checkbox-dependencies t)
 
-  ;; Org capture templates
+  ;; Capture templates
   (setq org-capture-templates
-        '(
-          ("t" "TODO" entry (file "~/workspace/second-brain/org-roam/todo.org")
+        '(("t" "TODO" entry (file "~/workspace/second-brain/org-roam/todo.org")
            "** TODO %?\n  :PROPERTIES:\n  :CREATED: %U\n  :END:")
 
           ("w" "Work Task" entry (file "~/workspace/second-brain/org-roam/work_tasks.org")
@@ -94,69 +81,18 @@
            (file+headline "~/workspace/second-brain/org-roam/reading-list.org" "Reading List")
            "* TODO %a :reading:\nCaptured on: %U\n"
            :empty-lines 1
-           :immediate-finish t)
+           :immediate-finish t))))
 
-          ;; ("i" "Inbox" entry (file "~/workspace/second-brain/org-roam/inbox.org")
-          ;;  "** TODO %? :inbox:\n  :PROPERTIES:\n  :CREATED: %U\n  :END:")
-
-          ;; ("p" "Project Task" entry (file "~/workspace/second-brain/org-roam/projects.org")
-          ;;  "* TODO %? :project:\\n  :PROPERTIES:\\n  :PROJECT: %(completing-read \\"Project: \\" (org-get-outline-path t))\\n  :CREATED: %U\\n  :END:")
-          ))
-  )
-
-;; (use-package org-roam
-;;   :ensure t
-;;   :custom
-;;   (org-roam-directory (file-truename "/path/to/org-files/"))
-;;   :bind (("C-c n l" . org-roam-buffer-toggle)
-;;          ("C-c n f" . org-roam-node-find)
-;;          ("C-c n g" . org-roam-graph)
-;;          ("C-c n i" . org-roam-node-insert)
-;;          ("C-c n c" . org-roam-capture)
-;;          ;; Dailies
-;;          ("C-c n j" . org-roam-dailies-capture-today))
-;;   :config
-;;   ;; If you're using a vertical completion framework, you might want a more informative completion interface
-;;   (setq org-roam-node-display-template (concat "${title:*} " (propertize "${tags:10}" 'face 'org-tag)))
-;;   (org-roam-db-autosync-mode)
-;;   ;; If using org-roam-protocol
-;;   (require 'org-roam-protocol))
-
-
-;; ============================================================================
-;; Org-roam Configuration
-;; ============================================================================
-
-;; (global-set-key (kbd "C-c n f") 'org-roam-node-find)
-;; (global-set-key (kbd "C-c n i") 'org-roam-node-insert)
-;; (global-set-key (kbd "C-c n l") 'org-roam-buffer-toggle)
-;; (global-set-key (kbd "C-c n p") 'org-roam-alias-add)
-;; (global-set-key (kbd "C-c n a") 'org-id)
-;; (global-set-key (kbd "C-c n I") 'org-id-get-create)
+;; --- Org Roam ---
 (use-package org-roam
-  :after org
-  :init
-  (rata-leader
-   :states '(normal visual insert emacs)
-   "or"  '(:ignore t :which-key "Org roam")
-   "orl" '(org-roam-buffer-toggle :which-key "toggle buffer")
-   "orf" '(org-roam-node-find :which-key "find node")
-   "org" '(org-roam-graph :which-key "show graph")
-   "ori" '(org-roam-node-insert :which-key "insert node")
-   "orc" '(org-roam-capture :which-key "capture node")
-   "orj" '(org-roam-dailies-capture-today :which-key "journal today"))
+  :after (org general)
   :custom
-  ;; Set the directory for roam notes, can be the same as org-directory
-  (org-roam-directory (file-truename org-directory))
+  (org-roam-directory (file-truename "~/workspace/second-brain/org-roam/"))
   (org-roam-completion-everywhere t)
-
-  ;; Configure the display of the backlinks buffer
   (org-roam-mode-sections
    (list #'org-roam-backlinks-section
          #'org-roam-reflinks-section
          #'org-roam-unlinked-references-section))
-
-  ;; Configure org-roam-capture-template
   (org-roam-capture-templates '(("d" "default" plain
                                  "%?"
                                  :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org" "#+title: ${title}\n#+author: Jens Lordén\n#+date: %U\n\n* ${title}")
@@ -207,17 +143,25 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 #+hugo_base_dir: ../hugo/
 \n
 ")
-                                 :unnarrowed t)
-                                ))
+                                 :unnarrowed t)))
 
   :config
-  ;; Configure org-roam-dailies
-  (setq org-roam-dailies-directory "~/workspace/second-brain/org-roam/daily")
+  (rata-leader
+   :states '(normal visual insert emacs)
+   "or"  '(:ignore t :which-key "Org roam")
+   "orl" '(org-roam-buffer-toggle :which-key "toggle buffer")
+   "orf" '(org-roam-node-find :which-key "find node")
+   "org" '(org-roam-graph :which-key "show graph")
+   "ori" '(org-roam-node-insert :which-key "insert node")
+   "orc" '(org-roam-capture :which-key "capture node")
+   "ord"  '(:ignore t :which-key "Org roam dailies")
+   "ordc" '(org-roam-dailies-capture-today :which-key "journal today"))
 
+  ;; Dailies
+  (setq org-roam-dailies-directory "~/workspace/second-brain/org-roam/daily")
   (setq org-roam-dailies-capture-templates
         `(("d" "default" entry
            "** %<%H:%M> %?"
-           ;; :target (file+head ,(expand-file-name "%<%Y-%m-%d>.org" org-roam-dailies-directory)
            :target (file+head+olp "%<%Y-%m-%d>.org"
                                   "#+title: %<%A %B %d, %Y>
 #+filetags: :daily:
@@ -226,24 +170,24 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 * Daily notes for %<%A %B %d, %Y>
 
 * Morning Protocol
-- [ ] 📅 Review Agenda (Work & Projects)
-- [ ] 📧 Check email
-- [ ] 🎯 Top 3 Priorities for Today
+- [ ] Review Agenda (Work & Projects)
+- [ ] Check email
+- [ ] Top 3 Priorities for Today
   1. [ ]
   2. [ ]
   3. [ ]
-- 💤 Hours slept:
+- Hours slept:
 
 * Habits
-- [ ] 💾 Commit Dotfiles/Emacs Tweaks
-- [ ] 📥 Clear Inbox
-- [ ] 🏋️ Workout
-- [ ] 🇨🇳 Chinese Study
-- [ ] 📚 Reading
-- [ ] 💊 Supplements
-  - [ ] ⚡ Creatine
-  - [ ] 🥤 Protein
-  - [ ] 🍊 Vitamins
+- [ ] Commit Dotfiles/Emacs Tweaks
+- [ ] Clear Inbox
+- [ ] Workout
+- [ ] Chinese Study
+- [ ] Reading
+- [ ] Supplements
+  - [ ] Creatine
+  - [ ] Protein
+  - [ ] Vitamins
 
 * Nutrition
 | Food  | Amount (g) | Kcal/100g | P/100g | Kcal (Tot) | P (Tot) | Meal         |
@@ -261,149 +205,129 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 
 * Log
 "
-                                  ;; -------------------------------------------------
-                                  ;; Target: Place entries under "* Log"
-                                  ;; -------------------------------------------------
                                   ("Log"))
            :empty-lines-before 1
            :empty-lines-after 1)))
 
-  )
+  (org-roam-db-autosync-mode))
 
-;; (spacemacs/set-leader-keys "aordc" 'org-roam-dailies-capture-today)
-
-
-
+;; --- Org Roam QL ---
 (use-package org-roam-ql
   :after org-roam)
 
-
-;; ============================================================================
-;; Advanced Org Agenda
-;; ============================================================================
+;; --- Org Super Agenda ---
 (use-package org-super-agenda
   :after org
   :config
-  ;; org-agenda-dashboards
   (setq org-agenda-custom-commands
-        '(("d" "🎯 Dashboard"
+        '(("d" "Dashboard"
            ((agenda ""
-                    ((org-agenda-overriding-header "✅ Agenda")
+                    ((org-agenda-overriding-header "Agenda")
                      (org-super-agenda-groups
-                      ;; This uses the main "Action Dashboard" configuration defined earlier
-                      '((:name "🔥 Overdue" :deadline past :face 'error :order 1)
-                        (:name "🎯 Today" :scheduled today :time-grid t :deadline today :order 2)
-                        (:name "❗ Important" :priority "A" :order 3)
+                      '((:name "Overdue" :deadline past :face 'error :order 1)
+                        (:name "Today" :scheduled today :time-grid t :deadline today :order 2)
+                        (:name "Important" :priority "A" :order 3)
                         (:habit t)
-                        (:name "🔧 Emacs" :tag "emacs"  :order 6)
-                        (:name "🔧 Dotfiles" :tag "dotfiles" :order 7)
-                        (:name "🔬 Home Lab" :tag "homelab" :order 8)
-                        (:name "🔬 Curriculum" :tag "curriculum" :order 9)
-                        (:name "✍️ Blog Posts" :tag "blog" :order 9)
-                        (:name "🚀 Projects" :auto-property "PROJECT" :order 10)
-                        (:name "🏢 Work" :tag "work" :order 11)
-                        ))))
+                        (:name "Emacs" :tag "emacs"  :order 6)
+                        (:name "Dotfiles" :tag "dotfiles" :order 7)
+                        (:name "Home Lab" :tag "homelab" :order 8)
+                        (:name "Curriculum" :tag "curriculum" :order 9)
+                        (:name "Blog Posts" :tag "blog" :order 9)
+                        (:name "Projects" :auto-property "PROJECT" :order 10)
+                        (:name "Work" :tag "work" :order 11)))))
             (todo ""
-                  ((org-agenda-overriding-header "✅ Dashboard")
+                  ((org-agenda-overriding-header "Dashboard")
                    (org-super-agenda-groups
-                    '(
-                      (:name "🔧 Emacs" :tag "emacs"  :order 1)
-                      (:name "🔧️ Dotfiles" :tag "dotfiles" :order 2)
-                      (:name "🔬 Home Lab" :tag "homelab" :order 3)
-                      (:name "🔬 Curriculum" :tag "curriculum" :order 4)
-                      (:name "🔬 Blog Posts" :tag "blog" :order 5)
-                      (:name "📥 Reading list" :tag "reading" :order 8)
-                      (:name "🚀 Project ideas" :tag "project" :order 9)
-                      (:name "🚀 Projects" :auto-property "PROJECT" :order 10)
-                      ))))))
+                    '((:name "Emacs" :tag "emacs"  :order 1)
+                      (:name "Dotfiles" :tag "dotfiles" :order 2)
+                      (:name "Home Lab" :tag "homelab" :order 3)
+                      (:name "Curriculum" :tag "curriculum" :order 4)
+                      (:name "Blog Posts" :tag "blog" :order 5)
+                      (:name "Reading list" :tag "reading" :order 8)
+                      (:name "Project ideas" :tag "project" :order 9)
+                      (:name "Projects" :auto-property "PROJECT" :order 10)))))))
 
-          ("w" "🏢 Work Focus"
+          ("w" "Work Focus"
            ((tags-todo "work"
-                       ((org-agenda-overriding-header "✅ Work Tasks")
+                       ((org-agenda-overriding-header "Work Tasks")
                         (org-super-agenda-groups
-                         '(
-                           (:name " ⚠️ Overdue" :deadline past :face error :order 1)
-                           (:name "🎯 Today" :time-grid t :scheduled today :deadline today :order 2)
+                         '((:name "Overdue" :deadline past :face error :order 1)
+                           (:name "Today" :time-grid t :scheduled today :deadline today :order 2)
                            (:name "Due Today" :deadline today :order 3)
                            (:name "Due Soon" :deadline future :order 4)
-                           (:name " ⚡ Important" :priority "A" :order 5)
-                           ;; Catch-all for any other work tasks
-                           (:name "🚀 Other Projects & Tasks" :order 99)
-                           ))))))
+                           (:name "Important" :priority "A" :order 5)
+                           (:name "Other Projects & Tasks" :order 99)))))))
 
-          ("p" "🚀 Project Dashboard"
+          ("p" "Project Dashboard"
            ((tags "project+level=1"
-                  ((org-agenda-overriding-header "🚀 Projects Overview")
+                  ((org-agenda-overriding-header "Projects Overview")
                    (org-super-agenda-groups
-                    '(
-                      (:name "🚀 In Progress"
-                             :todo "STRT"
-                             :order 1)
+                    '((:name "In Progress" :todo "STRT" :order 1)
+                      (:name "Planning" :todo "TODO" :order 2)
+                      (:name "On Hold" :todo "WAIT" :order 3)
+                      (:name "Finished" :todo "DONE" :order 4)
+                      (:name "Inbox / Uncategorized" :order 99)))))))
 
-                      (:name "✨ Planning"
-                             :todo "TODO"
-                             :order 2)
-
-                      (:name "⏸ On Hold"
-                             :todo "WAIT"
-                             :order 3)
-
-                      (:name "✅ Finished"
-                             :todo "DONE"
-                             :order 4)
-
-                      (:name "📂 Inbox / Uncategorized"
-                             :order 99)
-                      ))))))
-
-          ("h" "⚡ High Speed Habits"
+          ("h" "High Speed Habits"
            ((agenda ""
-                    ((org-agenda-span 'day)      ;; Show only today
-                     (org-agenda-start-day nil)  ;; Start from today
-
-                     ;; Force this view to ONLY look at your habits file
+                    ((org-agenda-span 'day)
+                     (org-agenda-start-day nil)
                      (org-agenda-files '("~/workspace/second-brain/org-roam/habits.org"))
-
                      (org-agenda-start-with-log-mode t)
                      (org-agenda-log-mode-items '(closed state))
-
-                     ;; Visual Tweaks
-                     (org-habit-graph-column 50) ;; Move graph to the right to align nicely
-                     (org-agenda-overriding-header " ") ;; Remove default date header for cleanliness
-
-                     ;; Grouping
+                     (org-habit-graph-column 50)
+                     (org-agenda-overriding-header " ")
                      (org-super-agenda-groups
-                      '((:name "🚨 Critical / Overdue"
-                               :scheduled past
-                               :order 1)
-                        (:name "📅 Morning Routine"
-                               :time-grid t   ;; Keep time-specific habits here
-                               :order 2)
-                        (:name "✨ Daily Goals"
-                               :scheduled today
-                               :order 3)
-                        (:name "✅ Completed Today"
-                               :log t
-                               :order 4)
-                        ))))))
-          ))
-  )
+                      '((:name "Critical / Overdue" :scheduled past :order 1)
+                        (:name "Morning Routine" :time-grid t :order 2)
+                        (:name "Daily Goals" :scheduled today :order 3)
+                        (:name "Completed Today" :log t :order 4))))))))))
 
-
-;; --- Org-transclusion ---
-;; (use-package org-transclusion
-;;   :ensure t
-;;   :after org
-;;   ;; :bind (("C-c n t" . org-transclusion-add)
-;;   ;;        ("C-c n T" . org-transclusion-mode))
-;;   :config
-;;   ;; Visual tweaks to make transcluded blocks look distinct in Gruvbox
-;;   (set-face-attribute 'org-transclusion-fringe nil :foreground "#b8bb26" :background nil)
-;;   (set-face-attribute 'org-transclusion-source-inline nil :foreground "#fabd2f" :height 0.8))
-
-;; --- Org kanban ---
+;; --- Org Kanban ---
 (use-package org-kanban
-  :ensure t
   :after org)
+
+;; --- Org Modern (visual enhancements) ---
+(use-package org-modern
+  :after org
+  :config
+  (global-org-modern-mode)
+  (setq org-modern-agenda t))
+
+;; --- Org Appear (reveal markup at point) ---
+(use-package org-appear
+  :after org
+  :hook (org-mode . org-appear-mode)
+  :custom
+  (org-appear-autolinks t)
+  (org-appear-autosubmarkers t))
+
+;; --- Consult Org Roam ---
+(use-package consult-org-roam
+  :after (org-roam consult general)
+  :config
+  (consult-org-roam-mode 1)
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "ors" '(consult-org-roam-search      :which-key "search roam")
+    "orb" '(consult-org-roam-backlinks   :which-key "backlinks consult")
+    "orF" '(consult-org-roam-file-find   :which-key "find file consult")))
+
+;; --- Org Roam UI (graph visualization) ---
+(use-package org-roam-ui
+  :after (org-roam general)
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "oru" '(org-roam-ui-mode :which-key "roam graph UI")))
+
+;; --- Writegood Mode ---
+(use-package writegood-mode
+  :hook ((org-mode      . writegood-mode)
+         (markdown-mode . writegood-mode))
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "tw"  '(writegood-mode :which-key "writegood")))
 
 (provide 'init-org)

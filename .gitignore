@@ -31,6 +31,7 @@ org-roam.db
 /eln-cache/
 /straight/
 /quelpa/
+/elpaca/
 
 # State and history (unless you use no-littering)
 /auto-save-list/
