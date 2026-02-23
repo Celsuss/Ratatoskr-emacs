@@ -85,3 +85,4 @@ the remaining modules still load."
 ;; (rata-load-module 'init-mcp)      ; experimental — uncomment when stable
 (rata-load-module 'init-persp)
 (rata-load-module 'init-org)
+(rata-load-module 'init-dashboard)

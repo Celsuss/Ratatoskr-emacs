@@ -1,6 +1,6 @@
 # Ratatoskr Emacs — Configuration Spec
 
-> Status: Draft v5 — 2026-02-23
+> Status: Draft v6 — 2026-02-23
 > Scope: Full build-out from current skeleton to production-ready config.
 > Implementation progress tracked per-section with status markers:
 > - DONE = fully implemented in code
@@ -40,7 +40,8 @@ init.el                — elpaca bootstrap, module loader
   ├── init-llm         (gptel, ellama, aidermacs)                           ✓ DONE
   ├── init-mcp         (mcp — experimental, commented out in init.el)       ✓ DONE
   ├── init-persp       (persp-mode workspaces, SPC L bindings)              ✓ DONE
-  └── init-org         (org, org-roam, org-super-agenda, org-kanban, org-modern, org-appear, consult-org-roam, org-roam-ui, writegood-mode, org-download)  ✓ DONE
+  ├── init-org         (org, org-roam, org-super-agenda, org-kanban, org-modern, org-appear, consult-org-roam, org-roam-ui, writegood-mode, org-download)  ✓ DONE
+  └── init-dashboard   (dashboard.el — start page with logo, agenda, roam stats, git status)  TODO
 ```
 
 **Error recovery in init.el — DONE:** Each module load is wrapped via `rata-load-module`,
@@ -1215,6 +1216,121 @@ Go template mode inside. Accurate highlighting and indentation for both.
 - Go template syntax highlighting and completion works inside `{{ }}`.
 - **Note:** May need tuning per-project. Consider `.dir-locals.el` for non-standard paths.
 
+### 4.14 `init-dashboard.el` — TODO (v6)
+
+**Package:** `dashboard.el` + custom widgets
+
+**Strategy:** Spacemacs-inspired start page with second-brain integration. Uses dashboard.el
+as the base with custom widgets for org-agenda, org-roam stats, and git repo status.
+Single-column centered layout (dashboard.el native). Refreshes on buffer revisit.
+
+**Logo:** `logo.png` in repo root (Ratatoskr squirrel on Yggdrasil with circuit-board branches).
+Centered with "Ratatoskr Emacs" subtitle below.
+
+#### Sections (top to bottom)
+
+1. **Logo + subtitle** — Centered logo image + "Ratatoskr Emacs" text
+2. **Fortune/quote** — Random quote from hardcoded list mixing programming wisdom (Dijkstra,
+   Knuth, ESR) and Norse mythology (Eddas, Hávamál proverbs). No system `fortune` dependency.
+3. **Quick action buttons** — Shortcut buttons for common actions (find file, recent projects, etc.)
+4. **Recent projects** — From projectile, with number shortcuts for quick access
+5. **Bookmarks** — Emacs bookmarks section
+6. **Week agenda** — Custom widget: 7-day org-agenda overview (today + 6 days) pulling from
+   `~/workspace/second-brain/org-roam/` agenda files. Uses org-super-agenda grouping.
+7. **Org-roam stats** — Custom widget: total note count + notes created/modified this week.
+   Reads from org-roam database.
+8. **Git status** — Custom widget: dirty/clean status of hardcoded repos. Initial list:
+   `~/workspace/Ratatoskr-emacs`, `~/workspace/second-brain`. User can extend list.
+9. **Footer** — Startup time (from `emacs-init-time`) + loaded package count
+
+#### Navigation
+
+- Full Evil keybindings: `j`/`k` to move between items, `RET` to open
+- Number shortcuts for quick access to items within sections
+- `SPC` leader still works in dashboard buffer
+
+#### Refresh behavior
+
+- Re-renders when switching back to the `*dashboard*` buffer (not timer-based)
+- Agenda, roam stats, and git status all refresh on revisit
+
+#### Quotes list
+
+Hardcoded `rata-dashboard-quotes` variable. Mix of:
+- **Programming:** Dijkstra, Knuth, Alan Kay, Rich Hickey, ESR, etc.
+- **Norse mythology:** Hávamál verses, Poetic Edda wisdom, Ratatoskr lore
+
+```elisp
+(use-package dashboard
+  :ensure t
+  :demand t
+  :config
+  (setq dashboard-startup-banner (expand-file-name "logo.png" user-emacs-directory)
+        dashboard-banner-logo-title "Ratatoskr Emacs"
+        dashboard-image-banner-max-height 200
+        dashboard-center-content t
+        dashboard-vertically-center-content nil
+        dashboard-projects-backend 'projectile
+        dashboard-display-icons-p t
+        dashboard-icon-type 'nerd-icons
+        dashboard-set-heading-icons t
+        dashboard-set-file-icons t
+        dashboard-items '((projects    . 5)
+                          (bookmarks   . 5)
+                          (rata-agenda . 1)
+                          (rata-roam-stats . 1)
+                          (rata-git-status . 1))
+        dashboard-set-navigator t
+        dashboard-force-refresh t)
+
+  ;; Quote as init-info (below banner)
+  (setq dashboard-init-info
+        (nth (random (length rata-dashboard-quotes)) rata-dashboard-quotes))
+
+  ;; Footer: startup time + package count
+  (setq dashboard-set-footer t
+        dashboard-footer-messages
+        (list (format "Emacs loaded in %s with %d packages"
+                      (emacs-init-time "%.2fs")
+                      (length package-activated-list))))
+
+  ;; Evil navigation in dashboard
+  (evil-set-initial-state 'dashboard-mode 'normal)
+
+  ;; SPC b h to open dashboard
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "bh" '(dashboard-open :which-key "home (dashboard)"))
+
+  (dashboard-setup-startup-hook))
+
+;; Ensure dashboard is fully installed before init completes
+(elpaca-wait)
+```
+
+#### Custom widgets
+
+**Agenda widget:** Queries org-agenda for 7 days, formats as compact day-by-day list.
+Uses `org-agenda-get-day-entries` or similar to pull scheduled/deadline items.
+
+**Org-roam stats widget:** Queries `org-roam-db` for total node count. Counts files
+modified in the last 7 days via filesystem check on `~/workspace/second-brain/org-roam/`.
+
+**Git status widget:** Runs `git status --porcelain` on each hardcoded repo path.
+Displays repo name + clean/dirty indicator. Non-blocking (uses `process-file` or
+`call-process` to avoid blocking startup).
+
+#### Hardcoded repos for git status
+
+```elisp
+(defcustom rata-dashboard-git-repos
+  '("~/workspace/Ratatoskr-emacs"
+    "~/workspace/second-brain")
+  "List of git repositories to show status for on the dashboard."
+  :type '(repeat directory)
+  :group 'rata-dashboard)
+```
+
 ---
 
 ## 5. Keybinding Map (Complete)
@@ -1495,9 +1611,7 @@ Work these in any order — all can be done independently:
 - [x] **init-k8s.el:** Create new module — `kubel` + `kubel-evil` with SPC a k bindings.
 - [x] **init.el:** Add `(require 'init-k8s)` to module load order (after init-lang).
 
-### Remaining Work (v5)
-
-Work these in any order — all can be done independently:
+### Remaining Work (v5) — ALL DONE
 
 - [x] **init-lang.el:** Add `cargo.el` (SPC m c bindings for cargo build/test/clippy/run in rustic-mode).
 - [x] **init-lang.el:** Add `makepkg helpers` (custom rata- functions for makepkg/namcap/updpkgsums, SPC m p bindings in pkgbuild-mode).
@@ -1512,6 +1626,19 @@ Work these in any order — all can be done independently:
 - [x] **init-dev.el:** Add `explain-pause-mode` (runtime performance profiler, SPC h E).
 - [x] **init-lang.el:** Add `polymode` (YAML + Go template multi-mode for Helm .tpl files).
 
+### Remaining Work (v6) — ALL DONE
+
+- [x] **init-dashboard.el:** Create new module — `dashboard.el` with logo (max-height 200px), quote, projects, bookmarks, custom widgets.
+- [x] **init-dashboard.el:** Implement `rata-dashboard-insert-agenda` (7-day org-agenda overview).
+- [x] **init-dashboard.el:** Implement `rata-dashboard-insert-roam-stats` (total notes + weekly activity from org-roam-db).
+- [x] **init-dashboard.el:** Implement `rata-dashboard-insert-git-status` (dirty/clean for hardcoded repos).
+- [x] **init-dashboard.el:** Add hardcoded `rata-dashboard-quotes` list (25 quotes: programming + Norse mythology mix).
+- [x] **init-dashboard.el:** Wire Evil navigation (normal state in dashboard buffer) + `SPC b h` to open.
+- [x] **init-dashboard.el:** Add refresh-on-revisit behavior (`dashboard-force-refresh t`).
+- [x] **init.el:** Add `(rata-load-module 'init-dashboard)` to module load order (after init-org).
+
+**Gotcha:** `(elpaca-wait)` must come *after* `use-package dashboard` (not before) so elpaca queues the install first. Delete stale `.elc` files after editing the module.
+
 ---
 
 ## 7. Critical Gotchas & Decisions
@@ -1519,6 +1646,8 @@ Work these in any order — all can be done independently:
 ### elpaca + daemon + load order
 - `(elpaca-wait)` is mandatory after general.el and evil declarations. Without it,
   `rata-leader` may not be defined when later modules call it on first-install.
+- When a module needs `:demand t`, place `(elpaca-wait)` **after** the `use-package`
+  form, not before — elpaca must queue the install before it can wait on it.
 - All keybindings must use `:after general` (or `:after (evil general)`) and live in
   `:config`, never `:init`.
 
@@ -1808,3 +1937,4 @@ Work these in any order — all can be done independently:
 | explain-pause-mode   | Add to init-dev (v5)             | Yes                                     |
 | polymode             | Add to init-lang (v5)            | Yes                                     |
 | flyspell             | **Replaced by jinx**             | No (replaced)                           |
+| dashboard            | Add to init-dashboard (v6)       | Yes                                     |
