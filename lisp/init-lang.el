@@ -83,4 +83,29 @@
     "dr"  '(dap-ui-repl :which-key "REPL")
     "dq"  '(dap-disconnect :which-key "disconnect")))
 
+;; --- Yaml-pro (structural YAML editing) ---
+(use-package yaml-pro
+  :after yaml-ts-mode
+  :hook (yaml-ts-mode . yaml-pro-ts-mode))
+
+;; --- Python-pytest ---
+(use-package python-pytest
+  :after (python general)
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    :keymaps 'python-ts-mode-map
+    "mt"  '(:ignore t :which-key "test")
+    "mtt" '(python-pytest-file :which-key "test file")
+    "mtf" '(python-pytest-function :which-key "test function")
+    "mtr" '(python-pytest-repeat :which-key "repeat last test")
+    "mtl" '(python-pytest-last-failed :which-key "last failed")
+    "mtp" '(python-pytest :which-key "test project")))
+
+;; --- Pkgbuild-mode (Arch Linux) ---
+(use-package pkgbuild-mode
+  :mode "/PKGBUILD$"
+  :config
+  (setq pkgbuild-update-sums-on-save nil))
+
 (provide 'init-lang)

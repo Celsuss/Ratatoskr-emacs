@@ -93,10 +93,11 @@
     "tt"  '(vterm-toggle :which-key "terminal")
     "tT"  '(vterm-toggle-cd :which-key "terminal (cd)")))
 
-;; --- Direnv ---
-(use-package direnv
+;; --- Envrc (buffer-local direnv, replaces global direnv-mode) ---
+(use-package envrc
+  :demand t
   :config
-  (direnv-mode))
+  (envrc-global-mode))
 
 ;; --- Projectile ---
 (use-package projectile
@@ -148,5 +149,38 @@
   :hook
   (prog-mode . flyspell-prog-mode)
   (text-mode . flyspell-mode))
+
+;; --- Diff-hl (git gutter indicators) ---
+(use-package diff-hl
+  :demand t
+  :config
+  (global-diff-hl-mode)
+  (diff-hl-flydiff-mode)
+  (add-hook 'magit-pre-refresh-hook #'diff-hl-magit-pre-refresh)
+  (add-hook 'magit-post-refresh-hook #'diff-hl-magit-post-refresh)
+  (unless (display-graphic-p)
+    (diff-hl-margin-mode)))
+
+;; --- Consult-flycheck ---
+(use-package consult-flycheck
+  :after (consult flycheck general)
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "el" '(consult-flycheck :which-key "list errors")))
+
+;; --- Editorconfig ---
+(use-package editorconfig
+  :demand t
+  :config
+  (editorconfig-mode 1))
+
+;; --- Browse-at-remote ---
+(use-package browse-at-remote
+  :after general
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "go" '(browse-at-remote :which-key "open on remote")))
 
 (provide 'init-dev)

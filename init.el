@@ -79,6 +79,7 @@ the remaining modules still load."
 (rata-load-module 'init-completion)
 (rata-load-module 'init-dev)
 (rata-load-module 'init-lang)
+(rata-load-module 'init-k8s)
 (rata-load-module 'init-snippets)
 (rata-load-module 'init-llm)
 ;; (rata-load-module 'init-mcp)      ; experimental — uncomment when stable

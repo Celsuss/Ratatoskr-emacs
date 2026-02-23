@@ -33,9 +33,9 @@ init.el                — elpaca bootstrap, module loader
   ├── init-ui          (gruvbox, doom-modeline, nerd-icons, which-key, rainbow-delimiters, helpful, golden-ratio)  ✓ DONE
   ├── init-evil        (evil, general, winum, undo-fu, surround, commenter, avy, matchit, args, textobj-ts, evil-mc, smartparens)  ✓ DONE
   ├── init-completion  (vertico, orderless, marginalia, consult, embark, corfu, cape, nerd-icons-corfu, wgrep)  ✓ DONE
-  ├── init-dev         (lsp, lsp-ui, flycheck, apheleia, magit, forge, vterm, vterm-toggle, envrc, projectile, dirvish, esup, flyspell, diff-hl, editorconfig, browse-at-remote, consult-flycheck)  PARTIAL
-  ├── init-lang        (rustic, go, python, dockerfile, terraform, just, docker, markdown, dap-mode, tree-sitter, yaml-pro, python-pytest, pkgbuild-mode)  PARTIAL
-  ├── init-k8s         (kubel, kubernetes-evil — kubectl interface)               TODO
+  ├── init-dev         (lsp, lsp-ui, flycheck, apheleia, magit, forge, vterm, vterm-toggle, envrc, projectile, dirvish, esup, flyspell, diff-hl, editorconfig, browse-at-remote, consult-flycheck)  ✓ DONE
+  ├── init-lang        (rustic, go, python, dockerfile, terraform, just, docker, markdown, dap-mode, tree-sitter, yaml-pro, python-pytest, pkgbuild-mode)  ✓ DONE
+  ├── init-k8s         (kubel, kubel-evil — kubectl interface)                    ✓ DONE
   ├── init-snippets    (yasnippet, yasnippet-snippets, yatemplate)          ✓ DONE
   ├── init-llm         (gptel, ellama, aidermacs)                           ✓ DONE
   ├── init-mcp         (mcp — experimental, commented out in init.el)       ✓ DONE
@@ -301,18 +301,16 @@ history-mode), `cape` (file + dabbrev), `nerd-icons-corfu`, `wgrep`
 Workflow: `consult-ripgrep` → `embark-export` (C-;) → `wgrep-change-to-wgrep-mode` (C-c C-p) →
 edit matches → `wgrep-finish-edit` (C-c C-c).
 
-### 4.5 `init-dev.el` — PARTIAL
+### 4.5 `init-dev.el` — DONE
 
 **Implemented:** `transient` (+ elpaca-wait), `lsp-mode` (full config + SPC l bindings),
 `lsp-ui` (doc + sideline), `flycheck` (global + SPC e n/p), `apheleia` (global-mode +
 TRAMP cancel), `magit` (SPC g bindings), `forge` (SPC g F/I), `vterm` + `vterm-toggle`
-(SPC t t/T), `direnv` (global mode), `projectile` (SPC p bindings + replace SPC p r/R),
+(SPC t t/T), `envrc` (buffer-local direnv, replaces `direnv`), `projectile` (SPC p bindings + replace SPC p r/R),
 `consult-projectile` (SPC p f/s), `dirvish` (SPC f d), `esup` (SPC h P), `flyspell`
-(prog-mode + text-mode hooks)
+(prog-mode + text-mode hooks), `diff-hl` (git gutter + magit integration), `consult-flycheck`
+(SPC e l), `editorconfig` (global), `browse-at-remote` (SPC g o)
 **Note:** `dap-mode` was placed in `init-lang.el` instead of here. Either location works.
-
-**Additions (v4):** `envrc` (replaces `direnv`), `diff-hl`, `consult-flycheck`,
-`editorconfig`, `browse-at-remote`
 
 **Packages:** `lsp-mode`, `lsp-ui`, `flycheck`, `dap-mode`, `apheleia`, `magit`, `forge`,
 `vterm`, `vterm-toggle`, `envrc`, `projectile`, `consult-projectile`, `dirvish`, `esup`,
@@ -405,7 +403,7 @@ SPC g I -> forge-list-issues
 - `SPC t t` toggles a vterm popup at the bottom (shackle controls placement).
 - `SPC t T` opens vterm cd'd to current directory.
 
-#### envrc (replaces direnv) — TODO
+#### envrc (replaces direnv) — DONE
 **Replaces `direnv-mode`.** `envrc.el` is buffer-local direnv integration (vs global
 `direnv-mode`). Better for multi-project workflows where different buffers need different
 environments simultaneously (e.g., Python project in one window, Rust in another).
@@ -469,7 +467,7 @@ environments simultaneously (e.g., Python project in one window, Rust in another
 - `use-package-compute-statistics t` in init-pkg.el for per-package timing via
   `M-x use-package-report`.
 
-#### diff-hl (git gutter indicators) — TODO
+#### diff-hl (git gutter indicators) — DONE
 Git change indicators in the fringe (added/changed/deleted lines). Visible at a glance
 while editing — complements magit's diff views.
 
@@ -489,7 +487,7 @@ while editing — complements magit's diff views.
 - `diff-hl-flydiff-mode` shows uncommitted changes in real-time.
 - Works over TRAMP (respects remote git).
 
-#### consult-flycheck — TODO
+#### consult-flycheck — DONE
 Consult-style interface for flycheck errors. Replaces the `consult-flymake` binding
 for LSP buffers.
 
@@ -502,7 +500,7 @@ for LSP buffers.
     "el" '(consult-flycheck :which-key "list errors")))
 ```
 
-#### editorconfig — TODO
+#### editorconfig — DONE
 Respects `.editorconfig` files common in open-source projects. Auto-sets indent style,
 tab width, line endings, trailing whitespace, etc.
 
@@ -515,7 +513,7 @@ tab width, line endings, trailing whitespace, etc.
 - Important for Arch Linux contributions and multi-project workflows.
 - Does not conflict with apheleia (editorconfig sets buffer vars, apheleia formats on save).
 
-#### browse-at-remote — TODO
+#### browse-at-remote — DONE
 Open the current file/line on GitHub/GitLab/etc. from Emacs. Useful for sharing links
 in PRs and code reviews.
 
@@ -528,14 +526,14 @@ in PRs and code reviews.
     "go" '(browse-at-remote :which-key "open on remote")))
 ```
 
-### 4.6 `init-lang.el` — PARTIAL
+### 4.6 `init-lang.el` — DONE
 
 **Implemented:** `rustic` (+ lsp-deferred hook), `go-mode` (+ lsp-deferred), `pyvenv` (+
 python-ts-mode lsp hook), `dockerfile-mode`, `terraform-mode`, `just-mode`, `docker` (SPC a D),
 `markdown-mode`, `dap-mode` (full SPC d bindings + auto-configure), tree-sitter grammar sources
-+ `major-mode-remap-alist` (python/go/json/yaml/toml/dockerfile → ts-mode; rust stays rustic)
-
-**Additions (v4):** `yaml-pro`, `python-pytest`, `pkgbuild-mode`
++ `major-mode-remap-alist` (python/go/json/yaml/toml/dockerfile → ts-mode; rust stays rustic),
+`yaml-pro` (structural YAML via yaml-ts-mode hook), `python-pytest` (SPC m t bindings),
+`pkgbuild-mode` (auto-activates on PKGBUILD files)
 
 **Packages:** `rustic`, `go-mode`, `pyvenv`, `dockerfile-mode`, `terraform-mode`,
 `just-mode`, `docker`, `markdown-mode`, `yaml-pro`, `python-pytest`, `pkgbuild-mode`
@@ -608,7 +606,7 @@ SPC d q -> dap-disconnect
 - `dap-auto-configure-mode t` for automatic adapter setup.
 - Per-language adapters: codelldb (Rust), delve (Go), debugpy (Python).
 
-#### yaml-pro (structural YAML editing) — TODO
+#### yaml-pro (structural YAML editing) — DONE
 Tree-sitter powered structural editing for YAML. Essential for large Helm values files
 and Kubernetes manifests. Fold/unfold nodes, move sections, tree-aware navigation.
 
@@ -624,7 +622,7 @@ and Kubernetes manifests. Fold/unfold nodes, move sections, tree-aware navigatio
 - Hooks into `yaml-ts-mode` (our default for YAML via remap).
 - Massive QoL for Helm charts, k8s manifests, Terraform YAML.
 
-#### python-pytest — TODO
+#### python-pytest — DONE
 Run pytest from Emacs with local-leader bindings. Integrates with projectile for
 project-root detection.
 
@@ -647,7 +645,7 @@ project-root detection.
 - `SPC m t l` re-run only last-failed tests.
 - Uses projectile root to find `pytest.ini` / `pyproject.toml`.
 
-#### pkgbuild-mode (Arch Linux) — TODO
+#### pkgbuild-mode (Arch Linux) — DONE
 Syntax highlighting, validation, and helpers for PKGBUILD files. Essential for
 Arch Linux package contributions.
 
@@ -662,7 +660,7 @@ Arch Linux package contributions.
 - Flycheck uses `shellcheck` for linting (via `sh-mode` base).
 - `M-x pkgbuild-update-sums` to recalculate checksums.
 
-### 4.7 `init-k8s.el` — TODO
+### 4.7 `init-k8s.el` — DONE
 
 **Packages:** `kubel`, `kubernetes-evil`
 
@@ -1130,16 +1128,16 @@ Work these in any order — all can be done independently:
 
 Work these in any order — all can be done independently:
 
-- [ ] **init-dev.el:** Replace `direnv` with `envrc` (buffer-local direnv). Drop `direnv` package.
-- [ ] **init-dev.el:** Add `diff-hl` (git gutter fringe indicators + magit integration).
-- [ ] **init-dev.el:** Add `consult-flycheck` (replaces `consult-flymake` for LSP buffers).
-- [ ] **init-dev.el:** Add `editorconfig` (respect `.editorconfig` in open-source projects).
-- [ ] **init-dev.el:** Add `browse-at-remote` (SPC g o — open file on GitHub/GitLab).
-- [ ] **init-lang.el:** Add `yaml-pro` (structural YAML editing for Helm charts / k8s manifests).
-- [ ] **init-lang.el:** Add `python-pytest` (SPC m t bindings for pytest).
-- [ ] **init-lang.el:** Add `pkgbuild-mode` (Arch Linux PKGBUILD syntax + validation).
-- [ ] **init-k8s.el:** Create new module — `kubel` + `kubel-evil` with SPC a k bindings.
-- [ ] **init.el:** Add `(require 'init-k8s)` to module load order (after init-lang).
+- [x] **init-dev.el:** Replace `direnv` with `envrc` (buffer-local direnv). Drop `direnv` package.
+- [x] **init-dev.el:** Add `diff-hl` (git gutter fringe indicators + magit integration).
+- [x] **init-dev.el:** Add `consult-flycheck` (replaces `consult-flymake` for LSP buffers).
+- [x] **init-dev.el:** Add `editorconfig` (respect `.editorconfig` in open-source projects).
+- [x] **init-dev.el:** Add `browse-at-remote` (SPC g o — open file on GitHub/GitLab).
+- [x] **init-lang.el:** Add `yaml-pro` (structural YAML editing for Helm charts / k8s manifests).
+- [x] **init-lang.el:** Add `python-pytest` (SPC m t bindings for pytest).
+- [x] **init-lang.el:** Add `pkgbuild-mode` (Arch Linux PKGBUILD syntax + validation).
+- [x] **init-k8s.el:** Create new module — `kubel` + `kubel-evil` with SPC a k bindings.
+- [x] **init.el:** Add `(require 'init-k8s)` to module load order (after init-lang).
 
 ---
 
