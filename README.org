@@ -1,13 +1,135 @@
-* Ratatoskr-emacs
-My emacs config
+* Ratatoskr Emacs
 
-** Run project
+A modular, Evil-based Emacs configuration built for speed and productivity.
+
+** Features
+
+- *Evil mode* with full Spacemacs-style =SPC= leader keybindings via =general.el=
+- *Elpaca* package manager with lockfile support for reproducible builds
+- *Modular architecture* — each concern lives in its own =lisp/init-*.el= file
+- *Completion stack* — orderless + vertico + marginalia + consult + embark
+- *LSP support* with =lsp-mode=, =lsp-ui=, and =corfu= completion
+- *Language support* — Python, Rust, Go, YAML, Ansible, Helm templates, PKGBUILDs, Jupyter notebooks
+- *Org-mode* — org-roam, org-super-agenda, org-kanban, org-download
+- *Kubernetes* — kubel integration for cluster management
+- *LLM tools* — gptel, ellama (Ollama), aidermacs (Anthropic API)
+- *Workspaces* via =persp-mode=
+- *Dashboard* start page with agenda, org-roam stats, and git status
+- *Resilient startup* — modules load inside =condition-case=; one broken module won't take down the rest
+
+** Requirements
+
+- Emacs 29+ (tree-sitter support)
+- [[https://just.systems][just]] (command runner)
+- =enchant= (system package, for =jinx= spell checking)
+
+** Getting Started
+
+*** Clone
+
 #+begin_src sh
-  \emacs --init-directory ~/workspace/Ratatoskr-emacs
+  git clone https://github.com/<user>/Ratatoskr-emacs.git ~/workspace/Ratatoskr-emacs
 #+end_src
 
-or create an alias
+*** Run
 
 #+begin_src sh
-  alias \emacs-dev="emacs --init-directory ~/workspace/Ratatoskr-emacs"
+  just run
 #+end_src
+
+Or manually:
+
+#+begin_src sh
+  /usr/bin/emacs --init-directory ~/workspace/Ratatoskr-emacs
+#+end_src
+
+*** First Run
+
+On the first launch Elpaca will clone and build all packages — this takes a few minutes. Subsequent startups are fast.
+
+To install icon fonts and tree-sitter grammars:
+
+#+begin_src sh
+  just install-fonts
+  just install-grammars
+#+end_src
+
+** Commands
+
+| Command               | Description                                  |
+|-----------------------+----------------------------------------------|
+| =just run=              | Launch Emacs with this config                |
+| =just debug=            | Launch with =--debug-init= for backtraces      |
+| =just cli=              | Launch in terminal mode (no GUI)             |
+| =just clean=            | Delete compiled artifacts, packages, history |
+| =just reset=            | Clean then run                               |
+| =just check <file>=     | Byte-compile a file for syntax checking      |
+| =just load <file>=      | Batch-load a module to verify it parses      |
+| =just batch=            | Full batch init (loads all modules)          |
+| =just todos=            | Find TODOs in =.el= files                      |
+| =just lock=             | Generate elpaca lockfile                     |
+| =just update=           | Update all packages and regenerate lockfile  |
+| =just install-fonts=    | Install nerd-icons fonts (one-time)          |
+| =just install-grammars= | Install tree-sitter grammars (one-time)      |
+
+** Architecture
+
+#+begin_example
+  early-init.el          Disable UI chrome, max GC threshold
+       |
+    init.el              Bootstrap elpaca, load modules
+       |
+  lisp/init-*.el         Feature modules (loaded in order)
+#+end_example
+
+*** Module Load Order
+
+| Module          | Responsibility                                          |
+|-----------------+---------------------------------------------------------|
+| =init-pkg=        | Package archives and =use-package= defaults               |
+| =init-system=     | no-littering, exec-path-from-shell, savehist, recentf   |
+| =init-ui=         | Theme (gruvbox), line numbers, which-key, modeline      |
+| =init-evil=       | Evil + evil-collection, general.el, winum               |
+| =init-completion= | Orderless, vertico, marginalia, consult, embark         |
+| =init-dev=        | LSP, corfu, flycheck, magit, projectile, vterm, dirvish |
+| =init-lang=       | Tree-sitter, language-specific modes and formatters     |
+| =init-k8s=        | Kubel for Kubernetes cluster management                 |
+| =init-snippets=   | Yasnippet + community snippets                          |
+| =init-llm=        | gptel, ellama, aidermacs                                |
+| =init-persp=      | Workspace management via persp-mode                     |
+| =init-org=        | Org-roam, org-super-agenda, org-kanban                  |
+| =init-dashboard=  | Start page with agenda, roam stats, git status          |
+
+** Keybindings
+
+All keybindings use =general.el= with =SPC= as the global leader in Evil normal/visual states.
+
+| Prefix  | Group      |
+|---------+------------|
+| =SPC b=   | Buffers    |
+| =SPC d=   | Debug      |
+| =SPC e=   | Errors     |
+| =SPC f=   | Files      |
+| =SPC g=   | Git        |
+| =SPC h=   | Help       |
+| =SPC j=   | Jump       |
+| =SPC l=   | LSP        |
+| =SPC L=   | Layouts    |
+| =SPC o=   | Org        |
+| =SPC p=   | Project    |
+| =SPC s=   | Search     |
+| =SPC t=   | Toggle     |
+| =SPC w=   | Window     |
+| =SPC a i= | AI tools   |
+| =SPC a k= | Kubernetes |
+
+** Adding a New Module
+
+1. Create =lisp/init-{name}.el= with =;;; -*- lexical-binding: t; -*-= header
+2. Use =use-package= for all packages (=:ensure t= is the default)
+3. End the file with =(provide 'init-{name})=
+4. Add =(rata-load-module 'init-{name})= to =init.el=
+
+** License
+
+See [[file:LICENSE][LICENSE]].
