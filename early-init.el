@@ -12,6 +12,9 @@
 ;; Speed up startup by deferring GC during init
 (setq gc-cons-threshold most-positive-fixnum)
 
+;; Silence native-comp warnings during async compilation
+(setq native-comp-async-report-warnings-errors 'silent)
+
 ;; Local Variables:
 ;; no-byte-compile: t
 ;; no-native-compile: t

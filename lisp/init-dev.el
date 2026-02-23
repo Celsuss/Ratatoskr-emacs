@@ -210,13 +210,4 @@
   :after lsp-mode
   :hook (lsp-mode . breadcrumb-local-mode))
 
-;; --- Explain-pause-mode (runtime performance profiler) ---
-(use-package explain-pause-mode
-  :after general
-  :commands explain-pause-mode
-  :config
-  (rata-leader
-    :states '(normal visual insert emacs)
-    "hE" '(explain-pause-mode :which-key "explain pauses")))
-
 (provide 'init-dev)
