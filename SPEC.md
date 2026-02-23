@@ -1,6 +1,6 @@
 # Ratatoskr Emacs — Configuration Spec
 
-> Status: Draft v4 — 2026-02-23
+> Status: Draft v5 — 2026-02-23
 > Scope: Full build-out from current skeleton to production-ready config.
 > Implementation progress tracked per-section with status markers:
 > - DONE = fully implemented in code
@@ -33,14 +33,14 @@ init.el                — elpaca bootstrap, module loader
   ├── init-ui          (gruvbox, doom-modeline, nerd-icons, which-key, rainbow-delimiters, helpful, golden-ratio)  ✓ DONE
   ├── init-evil        (evil, general, winum, undo-fu, surround, commenter, avy, matchit, args, textobj-ts, evil-mc, smartparens)  ✓ DONE
   ├── init-completion  (vertico, orderless, marginalia, consult, embark, corfu, cape, nerd-icons-corfu, wgrep)  ✓ DONE
-  ├── init-dev         (lsp, lsp-ui, flycheck, apheleia, magit, forge, vterm, vterm-toggle, envrc, projectile, dirvish, esup, flyspell, diff-hl, editorconfig, browse-at-remote, consult-flycheck)  ✓ DONE
-  ├── init-lang        (rustic, go, python, dockerfile, terraform, just, docker, markdown, dap-mode, tree-sitter, yaml-pro, python-pytest, pkgbuild-mode)  ✓ DONE
+  ├── init-dev         (lsp, lsp-ui, flycheck, apheleia, magit, forge, vterm, vterm-toggle, envrc, projectile, dirvish, esup, jinx, diff-hl, editorconfig, browse-at-remote, consult-flycheck, restclient, restclient-jq, breadcrumb, explain-pause-mode)  ✓ DONE
+  ├── init-lang        (rustic, cargo, go, python, dockerfile, terraform, just, docker, markdown, dap-mode, tree-sitter, yaml-pro, python-pytest, pkgbuild-mode, ansible-mode, ein, polymode)  ✓ DONE
   ├── init-k8s         (kubel, kubel-evil — kubectl interface)                    ✓ DONE
   ├── init-snippets    (yasnippet, yasnippet-snippets, yatemplate)          ✓ DONE
   ├── init-llm         (gptel, ellama, aidermacs)                           ✓ DONE
   ├── init-mcp         (mcp — experimental, commented out in init.el)       ✓ DONE
   ├── init-persp       (persp-mode workspaces, SPC L bindings)              ✓ DONE
-  └── init-org         (org, org-roam, org-super-agenda, org-kanban, org-modern, org-appear, consult-org-roam, org-roam-ui, writegood-mode)  ✓ DONE
+  └── init-org         (org, org-roam, org-super-agenda, org-kanban, org-modern, org-appear, consult-org-roam, org-roam-ui, writegood-mode, org-download)  ✓ DONE
 ```
 
 **Error recovery in init.el — DONE:** Each module load is wrapped via `rata-load-module`,
@@ -889,6 +889,332 @@ full-text search via consult-org-roam.
          (markdown-mode . writegood-mode)))
 ```
 
+#### org-download (paste/drag images) — DONE
+Drag-and-drop or paste images (screenshots, diagrams) into org files. Auto-saves to
+an attachments directory relative to the org file.
+
+```elisp
+(use-package org-download
+  :after org
+  :hook (org-mode . org-download-enable)
+  :config
+  ;; Store images relative to org file in ./images/
+  (setq org-download-image-dir "./images"
+        org-download-heading-lvl nil
+        org-download-method 'directory))
+```
+- `org-download-clipboard` to paste from clipboard (screenshot workflow).
+- `org-download-yank` to download image from URL in kill ring.
+- Works with org-roam notes for visual knowledge management.
+
+---
+
+### 4.13 v5 Additions — Developer QoL & Workflow Enhancements
+
+#### cargo.el (Rust build commands) — DONE (EXTEND init-lang)
+Run cargo commands directly from Emacs via compilation buffers. Errors are clickable
+and jump to source location. Uses `compile` infrastructure for familiar workflow.
+
+```elisp
+(use-package cargo
+  :after (rustic general)
+  :hook (rustic-mode . cargo-minor-mode)
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    :keymaps 'rustic-mode-map
+    "mc"  '(:ignore t :which-key "cargo")
+    "mcb" '(cargo-process-build       :which-key "cargo build")
+    "mct" '(cargo-process-test        :which-key "cargo test")
+    "mcr" '(cargo-process-run         :which-key "cargo run")
+    "mcc" '(cargo-process-clippy      :which-key "cargo clippy")
+    "mcd" '(cargo-process-doc         :which-key "cargo doc")
+    "mcf" '(cargo-process-fmt         :which-key "cargo fmt")
+    "mca" '(cargo-process-add         :which-key "cargo add")
+    "mcB" '(cargo-process-bench       :which-key "cargo bench")))
+```
+- `SPC m c t` run tests for current crate.
+- `SPC m c c` run clippy for linting.
+- Results appear in compilation buffer — `next-error` / `previous-error` to navigate.
+- Complements rustic's built-in cargo integration with leader-key access.
+
+#### makepkg helpers (Arch Linux PKGBUILD) — DONE (EXTEND init-lang)
+Custom helper functions for PKGBUILD workflows. Not a package — defined inline
+in `init-lang.el` within the `pkgbuild-mode` use-package block.
+
+```elisp
+;; Inside pkgbuild-mode use-package :config
+(defun rata-makepkg-build ()
+  "Run makepkg in the current PKGBUILD directory."
+  (interactive)
+  (let ((default-directory (file-name-directory (buffer-file-name))))
+    (compile "makepkg -sf")))
+
+(defun rata-makepkg-srcinfo ()
+  "Generate .SRCINFO from current PKGBUILD."
+  (interactive)
+  (let ((default-directory (file-name-directory (buffer-file-name))))
+    (compile "makepkg --printsrcinfo > .SRCINFO")))
+
+(defun rata-namcap-check ()
+  "Run namcap on the current PKGBUILD."
+  (interactive)
+  (let ((default-directory (file-name-directory (buffer-file-name))))
+    (compile (format "namcap %s" (buffer-file-name)))))
+
+(defun rata-updpkgsums ()
+  "Run updpkgsums on the current PKGBUILD."
+  (interactive)
+  (let ((default-directory (file-name-directory (buffer-file-name))))
+    (compile "updpkgsums")))
+
+(rata-leader
+  :states '(normal visual insert emacs)
+  :keymaps 'pkgbuild-mode-map
+  "mp"  '(:ignore t :which-key "pkgbuild")
+  "mpb" '(rata-makepkg-build    :which-key "makepkg build")
+  "mps" '(rata-makepkg-srcinfo  :which-key "gen .SRCINFO")
+  "mpn" '(rata-namcap-check     :which-key "namcap lint")
+  "mpu" '(rata-updpkgsums       :which-key "update sums"))
+```
+- `SPC m p b` build the package.
+- `SPC m p n` lint with namcap.
+- `SPC m p u` recalculate checksums.
+- Prerequisites: `makepkg`, `namcap`, `updpkgsums` on `$PATH` (standard Arch dev tools).
+
+#### ansible-mode — DONE (EXTEND init-lang)
+Syntax highlighting, documentation lookup, and linting for Ansible playbooks, roles,
+and inventory files.
+
+```elisp
+(use-package ansible
+  :hook ((yaml-ts-mode . ansible)
+         (yaml-mode    . ansible))
+  :config
+  ;; Auto-detect ansible files by path patterns
+  (setq ansible-vault-password-file "~/.ansible-vault-pass"))
+
+(use-package ansible-doc
+  :after ansible
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    :keymaps 'ansible-key-map
+    "ma"  '(:ignore t :which-key "ansible")
+    "mad" '(ansible-doc :which-key "ansible doc")))
+```
+- Auto-activates on YAML files in roles/playbooks directories.
+- `ansible-doc` for inline module documentation lookup.
+- Works with yaml-pro for structural editing of playbooks.
+- Ansible-vault integration for encrypted vars (needs vault password file).
+
+#### restclient.el (HTTP client) — DONE (EXTEND init-dev)
+Write and execute HTTP requests from `.http` files. Responses displayed inline.
+Great for API testing without leaving Emacs.
+
+```elisp
+(use-package restclient
+  :mode ("\\.http\\'" . restclient-mode)
+  :after general
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    :keymaps 'restclient-mode-map
+    "mr"  '(:ignore t :which-key "restclient")
+    "mrr" '(restclient-http-send-current      :which-key "send request")
+    "mrR" '(restclient-http-send-current-raw  :which-key "send raw")
+    "mrn" '(restclient-jump-next              :which-key "next request")
+    "mrp" '(restclient-jump-prev              :which-key "prev request")
+    "mrc" '(restclient-copy-curl-command      :which-key "copy as curl")))
+
+(use-package restclient-jq
+  :after restclient
+  :config
+  ;; Enables jq filtering in restclient responses
+  ;; Use :jq .field in your .http files to filter JSON responses
+  )
+```
+- `C-c C-c` or `SPC m r r` to execute request at point.
+- Supports variables, headers, body, and chained requests.
+- `restclient-jq` adds jq filtering for JSON responses (`:jq .data[]`).
+- `.http` files can be checked into repos as API documentation.
+
+#### ein (Emacs IPython Notebook) — DONE (EXTEND init-lang)
+Full Jupyter notebook support inside Emacs. Run cells, see output inline,
+connect to local or remote kernels.
+
+```elisp
+(use-package ein
+  :after general
+  :commands (ein:run ein:login ein:notebooklist-open)
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "aj"  '(:ignore t :which-key "jupyter")
+    "ajr" '(ein:run                  :which-key "start jupyter")
+    "ajl" '(ein:login                :which-key "login to jupyter")
+    "ajn" '(ein:notebooklist-open    :which-key "notebook list")))
+```
+- `SPC a j r` starts a local Jupyter server and opens notebook list.
+- `SPC a j l` connects to an existing Jupyter server (local or remote).
+- Cell execution, output display, image rendering all work in Emacs.
+- Integrates with pyvenv/envrc for correct Python environment.
+- Prerequisites: `jupyter` must be installed in the active Python venv.
+
+#### popper.el (popup management) — DONE (EXTEND init-system)
+Smart popup management — dismiss, cycle, and toggle popup buffers (compilation,
+help, vterm, flycheck) with unified keybindings.
+
+```elisp
+(use-package popper
+  :after general
+  :demand t
+  :config
+  (setq popper-reference-buffers
+        '("\\*Messages\\*"
+          "\\*Warnings\\*"
+          "Output\\*$"
+          "\\*Async Shell Command\\*"
+          "\\*compilation\\*"
+          "\\*Backtrace\\*"
+          "\\*Help\\*"
+          "\\*helpful"
+          "\\*Flycheck errors\\*"
+          "\\*lsp-help\\*"
+          "\\*grep\\*"
+          "\\*cargo-.*\\*"
+          "\\*pytest.*\\*"
+          "\\*restclient.*\\*"
+          vterm-mode))
+  (popper-mode 1)
+  ;; Use M-` to toggle popups (doesn't conflict with SPC leader)
+  (global-set-key (kbd "M-`") #'popper-toggle)
+  (global-set-key (kbd "C-M-`") #'popper-cycle)
+  (global-set-key (kbd "M-~") #'popper-toggle-type))
+```
+- `M-\`` toggles the last popup on/off.
+- `C-M-\`` cycles through popup buffers.
+- `M-~` promotes a popup to a regular buffer (or demotes).
+- Complements shackle: shackle controls initial placement, popper controls dismissal.
+- **Note:** Consider whether popper replaces some shackle rules or complements them.
+
+#### breadcrumb (LSP header-line context) — DONE (EXTEND init-dev)
+Shows the current file > class > method path in the header line using LSP symbols.
+Always know where you are in large files.
+
+```elisp
+(use-package breadcrumb
+  :after lsp-mode
+  :hook (lsp-mode . breadcrumb-local-mode)
+  :config
+  ;; breadcrumb uses lsp-mode's document symbols for context
+  ;; No extra config needed — auto-displays in header line
+  )
+```
+- Automatically appears in header line for all LSP-enabled buffers.
+- Shows hierarchical context: `file.py > MyClass > process_data`.
+- Zero-config — hooks into lsp-mode's existing symbol information.
+- Useful in Rust (deeply nested modules), Python (class methods), YAML (nested keys).
+
+#### jinx (modern spellcheck, replaces flyspell) — DONE (EXTEND init-dev)
+Enchant-based spell checker that replaces flyspell. Faster, supports multiple
+dictionaries, integrates with vertico for corrections.
+
+```elisp
+(use-package jinx
+  :demand t
+  :config
+  (global-jinx-mode)
+  ;; Replaces flyspell — remove flyspell hooks when adding jinx
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "ts" '(jinx-correct :which-key "spell correct")))
+```
+- **Replaces flyspell entirely** — remove `flyspell-prog-mode` and `flyspell-mode` hooks.
+- Uses enchant backend (supports aspell, hunspell, nuspell).
+- `M-$` or `SPC t s` to correct word at point (uses vertico for selection).
+- Faster than flyspell — no per-word subprocess calls.
+- Prerequisites: `enchant` package installed (`pacman -S enchant`).
+
+#### hl-todo (highlight TODO/FIXME keywords) — DONE (EXTEND init-ui)
+Highlight TODO, FIXME, HACK, NOTE, DEPRECATED, and other keywords in code
+comments with distinct colors.
+
+```elisp
+(use-package hl-todo
+  :hook (prog-mode . hl-todo-mode)
+  :config
+  (setq hl-todo-keyword-faces
+        '(("TODO"       . "#FF8C00")
+          ("FIXME"      . "#FF0000")
+          ("HACK"       . "#FF00FF")
+          ("NOTE"       . "#00BFFF")
+          ("DEPRECATED" . "#808080")
+          ("BUG"        . "#FF0000")
+          ("XXX"        . "#FF00FF")))
+  ;; Navigate between TODO keywords
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "et" '(hl-todo-next     :which-key "next TODO")
+    "eT" '(hl-todo-previous :which-key "prev TODO")))
+```
+- Hooks into `prog-mode` — active in all programming buffers.
+- `SPC e t` / `SPC e T` to jump between TODO/FIXME comments.
+- Colors are gruvbox-friendly (can be adjusted to match theme).
+
+#### explain-pause-mode (performance profiling) — DONE (EXTEND init-dev)
+Profile Emacs to find what's making it slow. Identifies laggy hooks,
+expensive functions, and slow packages in real-time.
+
+```elisp
+(use-package explain-pause-mode
+  :commands explain-pause-mode
+  :config
+  ;; Only enable when debugging — not in normal use
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "hE" '(explain-pause-mode :which-key "explain pauses")))
+```
+- `SPC h E` toggles profiling mode on/off.
+- When enabled, logs every function that causes Emacs to pause >X ms.
+- `M-x explain-pause-top` shows a `top`-like view of slow functions.
+- Complements esup (startup profiling) — this profiles runtime performance.
+
+#### polymode (YAML + Go templates for Helm) — DONE (EXTEND init-lang)
+True multi-mode editing for Helm chart templates. YAML mode outside `{{ }}` blocks,
+Go template mode inside. Accurate highlighting and indentation for both.
+
+```elisp
+(use-package polymode
+  :after yaml-ts-mode
+  :config
+  ;; Define Go-template inner mode
+  (define-hostmode poly-yaml-hostmode
+    :mode 'yaml-ts-mode)
+
+  (define-innermode poly-go-template-innermode
+    :mode 'go-ts-mode
+    :head-matcher "{{[-]?"
+    :tail-matcher "[-]?}}"
+    :head-mode 'host
+    :tail-mode 'host)
+
+  (define-polymode poly-yaml-go-template-mode
+    :hostmode 'poly-yaml-hostmode
+    :innermodes '(poly-go-template-innermode)))
+
+;; Auto-activate on Helm template files
+(add-to-list 'auto-mode-alist
+             '("/templates/.*\\.ya?ml\\'" . poly-yaml-go-template-mode))
+(add-to-list 'auto-mode-alist
+             '("\\.tpl\\'" . poly-yaml-go-template-mode))
+```
+- Auto-activates on files in `templates/` directories (Helm convention).
+- Also activates on `.tpl` files.
+- YAML navigation and structure (yaml-pro) works in YAML regions.
+- Go template syntax highlighting and completion works inside `{{ }}`.
+- **Note:** May need tuning per-project. Consider `.dir-locals.el` for non-standard paths.
+
 ---
 
 ## 5. Keybinding Map (Complete)
@@ -915,6 +1241,10 @@ SPC a    AI
     SPC a k c  kubel-set-context
     SPC a k p  kubel-port-forward-pod
     SPC a k l  kubel-get-pod-logs
+  SPC a j    jupyter (ein)
+    SPC a j r  ein:run (start jupyter)
+    SPC a j l  ein:login (connect to server)
+    SPC a j n  ein:notebooklist-open
   SPC a m    MCP
     SPC a m s  mcp-server-start
     SPC a m S  mcp-server-stop
@@ -941,6 +1271,8 @@ SPC e    errors
   SPC e l  consult-flycheck
   SPC e n  flycheck-next-error
   SPC e p  flycheck-previous-error
+  SPC e t  hl-todo-next (next TODO/FIXME)
+  SPC e T  hl-todo-previous (prev TODO/FIXME)
 
 SPC f    files
   SPC f f  consult-find
@@ -968,6 +1300,7 @@ SPC h    help
   SPC h m  consult-man
   SPC h I  consult-info
   SPC h P  esup (profile startup)
+  SPC h E  explain-pause-mode (runtime profiler)
 
 SPC i    insert
   SPC i s  yas-insert-snippet
@@ -1005,12 +1338,34 @@ SPC L    layouts (persp-mode)
 
 SPC m    mode-specific (local leader alias)
   SPC m m  consult-mode-command
+  SPC m c  cargo (rustic-mode)
+    SPC m c b  cargo-process-build
+    SPC m c t  cargo-process-test
+    SPC m c r  cargo-process-run
+    SPC m c c  cargo-process-clippy
+    SPC m c d  cargo-process-doc
+    SPC m c f  cargo-process-fmt
+    SPC m c a  cargo-process-add
+    SPC m c B  cargo-process-bench
   SPC m t  test (python-ts-mode)
     SPC m t t  python-pytest-file
     SPC m t f  python-pytest-function
     SPC m t r  python-pytest-repeat
     SPC m t l  python-pytest-last-failed
     SPC m t p  python-pytest (project)
+  SPC m p  pkgbuild (pkgbuild-mode)
+    SPC m p b  rata-makepkg-build
+    SPC m p s  rata-makepkg-srcinfo
+    SPC m p n  rata-namcap-check
+    SPC m p u  rata-updpkgsums
+  SPC m a  ansible (ansible yaml)
+    SPC m a d  ansible-doc
+  SPC m r  restclient (restclient-mode)
+    SPC m r r  restclient-http-send-current
+    SPC m r R  restclient-http-send-current-raw
+    SPC m r n  restclient-jump-next
+    SPC m r p  restclient-jump-prev
+    SPC m r c  restclient-copy-curl-command
 
 SPC n    narrow
   SPC n n  narrow-to-region
@@ -1064,6 +1419,7 @@ SPC t    toggle
   SPC t t  vterm-toggle
   SPC t T  vterm-toggle-cd
   SPC t g  golden-ratio-mode (off by default)
+  SPC t s  jinx-correct (spell correct at point)
   SPC t w  writegood-mode (manual toggle when not in org/markdown)
 
 SPC w    windows
@@ -1138,6 +1494,23 @@ Work these in any order — all can be done independently:
 - [x] **init-lang.el:** Add `pkgbuild-mode` (Arch Linux PKGBUILD syntax + validation).
 - [x] **init-k8s.el:** Create new module — `kubel` + `kubel-evil` with SPC a k bindings.
 - [x] **init.el:** Add `(require 'init-k8s)` to module load order (after init-lang).
+
+### Remaining Work (v5)
+
+Work these in any order — all can be done independently:
+
+- [x] **init-lang.el:** Add `cargo.el` (SPC m c bindings for cargo build/test/clippy/run in rustic-mode).
+- [x] **init-lang.el:** Add `makepkg helpers` (custom rata- functions for makepkg/namcap/updpkgsums, SPC m p bindings in pkgbuild-mode).
+- [x] **init-lang.el:** Add `ansible-mode` + `ansible-doc` (Ansible playbook syntax + doc lookup).
+- [x] **init-dev.el:** Add `restclient.el` + `restclient-jq` (HTTP client in .http files, SPC m r bindings).
+- [x] **init-lang.el:** Add `ein` (Jupyter notebook support, SPC a j bindings).
+- [x] **init-org.el:** Add `org-download` (paste/drag images into org files).
+- [x] **init-system.el:** Add `popper.el` (popup management — M-` toggle/cycle/promote).
+- [x] **init-dev.el:** Add `breadcrumb` (LSP header-line context: file > class > method).
+- [x] **init-dev.el:** Replace `flyspell` with `jinx` (enchant-based spellcheck, SPC t s). Remove flyspell hooks.
+- [x] **init-ui.el:** Add `hl-todo` (highlight TODO/FIXME/HACK in comments, SPC e t/T navigation).
+- [x] **init-dev.el:** Add `explain-pause-mode` (runtime performance profiler, SPC h E).
+- [x] **init-lang.el:** Add `polymode` (YAML + Go template multi-mode for Helm .tpl files).
 
 ---
 
@@ -1264,6 +1637,35 @@ Work these in any order — all can be done independently:
 - Looks for `pytest.ini`, `pyproject.toml`, `setup.cfg` for pytest config.
 - Results appear in a compilation buffer (shackle can control placement).
 
+### jinx replaces flyspell (v5)
+- Remove all `flyspell-prog-mode` and `flyspell-mode` hooks when adding jinx.
+- jinx requires `enchant` system package: `pacman -S enchant`.
+- Uses vertico for correction suggestions (integrates with completion stack).
+- Significantly faster than flyspell (no per-word subprocess calls).
+
+### popper + shackle coexistence (v5)
+- **shackle** controls initial buffer placement (where a popup appears).
+- **popper** controls popup lifecycle (dismiss, cycle, promote to regular buffer).
+- They complement each other — no conflict. Keep both.
+- Consider removing some shackle `:popup t` rules if popper handles them better.
+
+### polymode for Helm templates (v5)
+- Polymode requires both `yaml-ts-mode` and `go-ts-mode` to be available.
+- Add `go` grammar to `treesit-language-source-alist` if not already present.
+- Auto-mode-alist pattern `/templates/.*\.ya?ml` catches Helm template files.
+- May need `.dir-locals.el` for non-standard Helm chart directory structures.
+
+### ein prerequisites (v5)
+- `jupyter` must be installed in the Python venv (`pip install jupyter`).
+- ein connects to Jupyter kernel — respects envrc for correct Python env.
+- Results buffer placement can be controlled via shackle/popper.
+
+### restclient workflow (v5)
+- `.http` files can be checked into repos alongside code (API documentation).
+- Variables defined at top of file: `:base-url = http://localhost:8080`.
+- Chained requests: use `->` to pass response values to next request.
+- `restclient-jq` enables jq filtering: add `:jq .data[]` after request.
+
 ---
 
 ## 8. Out of Scope (Explicitly Excluded)
@@ -1280,6 +1682,13 @@ Work these in any order — all can be done independently:
 | Theme switching / `circadian.el` | Single theme (gruvbox-dark-medium). |
 | `ws-butler` / whitespace cleanup | Formatters handle whitespace. |
 | `persp-mode-projectile-bridge` | Manual perspective creation only. |
+| `flyspell` | Replaced by jinx (faster, enchant-based, vertico-integrated). |
+| `verb.el` | Chose restclient.el for HTTP client workflow. |
+| `code-cells.el` | Chose ein for full Jupyter notebook support. |
+| `topsy.el` / `symbols-outline` | Chose breadcrumb (LSP-based header-line context). |
+| `indent-bars` | Not selected — rely on tree-sitter highlighting for scope. |
+| `pulsar` | Not selected — avy + evil jumps sufficient. |
+| `ligature.el` | Not selected — plain text preferred. |
 
 ---
 
@@ -1385,3 +1794,17 @@ Work these in any order — all can be done independently:
 | consult-flycheck     | Add to init-dev                  | Yes                                     |
 | editorconfig         | Add to init-dev                  | Yes                                     |
 | browse-at-remote     | Add to init-dev                  | Yes                                     |
+| cargo                | Add to init-lang (v5)            | Yes                                     |
+| ansible              | Add to init-lang (v5)            | Yes                                     |
+| ansible-doc          | Add to init-lang (v5)            | Yes                                     |
+| restclient           | Add to init-dev (v5)             | Yes                                     |
+| restclient-jq        | Add to init-dev (v5)             | Yes                                     |
+| ein                  | Add to init-lang (v5)            | Yes                                     |
+| org-download         | Add to init-org (v5)             | Yes                                     |
+| popper               | Add to init-system (v5)          | Yes                                     |
+| breadcrumb           | Add to init-dev (v5)             | Yes                                     |
+| jinx                 | Add to init-dev (v5, replaces flyspell) | Yes                               |
+| hl-todo              | Add to init-ui (v5)              | Yes                                     |
+| explain-pause-mode   | Add to init-dev (v5)             | Yes                                     |
+| polymode             | Add to init-lang (v5)            | Yes                                     |
+| flyspell             | **Replaced by jinx**             | No (replaced)                           |

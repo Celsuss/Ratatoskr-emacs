@@ -27,6 +27,24 @@
   :custom
   (rustic-lsp-client 'lsp-mode))
 
+;; --- Cargo (Rust build commands) ---
+(use-package cargo
+  :after (rustic general)
+  :hook (rustic-mode . cargo-minor-mode)
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    :keymaps 'rustic-mode-map
+    "mc"  '(:ignore t :which-key "cargo")
+    "mcb" '(cargo-process-build       :which-key "cargo build")
+    "mct" '(cargo-process-test        :which-key "cargo test")
+    "mcr" '(cargo-process-run         :which-key "cargo run")
+    "mcc" '(cargo-process-clippy      :which-key "cargo clippy")
+    "mcd" '(cargo-process-doc         :which-key "cargo doc")
+    "mcf" '(cargo-process-fmt         :which-key "cargo fmt")
+    "mca" '(cargo-process-add         :which-key "cargo add")
+    "mcB" '(cargo-process-bench       :which-key "cargo bench")))
+
 ;; --- Go ---
 (use-package go-mode
   :hook (go-mode . lsp-deferred)
@@ -105,7 +123,94 @@
 ;; --- Pkgbuild-mode (Arch Linux) ---
 (use-package pkgbuild-mode
   :mode "/PKGBUILD$"
+  :after general
   :config
-  (setq pkgbuild-update-sums-on-save nil))
+  (setq pkgbuild-update-sums-on-save nil)
+
+  ;; Custom makepkg helper functions
+  (defun rata-makepkg-build ()
+    "Run makepkg in the current PKGBUILD directory."
+    (interactive)
+    (let ((default-directory (file-name-directory (buffer-file-name))))
+      (compile "makepkg -sf")))
+
+  (defun rata-makepkg-srcinfo ()
+    "Generate .SRCINFO from current PKGBUILD."
+    (interactive)
+    (let ((default-directory (file-name-directory (buffer-file-name))))
+      (compile "makepkg --printsrcinfo > .SRCINFO")))
+
+  (defun rata-namcap-check ()
+    "Run namcap on the current PKGBUILD."
+    (interactive)
+    (let ((default-directory (file-name-directory (buffer-file-name))))
+      (compile (format "namcap %s" (buffer-file-name)))))
+
+  (defun rata-updpkgsums ()
+    "Run updpkgsums on the current PKGBUILD."
+    (interactive)
+    (let ((default-directory (file-name-directory (buffer-file-name))))
+      (compile "updpkgsums")))
+
+  (rata-leader
+    :states '(normal visual insert emacs)
+    :keymaps 'pkgbuild-mode-map
+    "mp"  '(:ignore t :which-key "pkgbuild")
+    "mpb" '(rata-makepkg-build    :which-key "makepkg build")
+    "mps" '(rata-makepkg-srcinfo  :which-key "gen .SRCINFO")
+    "mpn" '(rata-namcap-check     :which-key "namcap lint")
+    "mpu" '(rata-updpkgsums       :which-key "update sums")))
+
+;; --- Ansible ---
+(use-package ansible
+  :hook ((yaml-ts-mode . ansible)
+         (yaml-mode    . ansible))
+  :config
+  (setq ansible-vault-password-file "~/.ansible-vault-pass"))
+
+(use-package ansible-doc
+  :after (ansible general)
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    :keymaps 'ansible-key-map
+    "ma"  '(:ignore t :which-key "ansible")
+    "mad" '(ansible-doc :which-key "ansible doc")))
+
+;; --- EIN (Jupyter notebooks) ---
+(use-package ein
+  :after general
+  :commands (ein:run ein:login ein:notebooklist-open)
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "aj"  '(:ignore t :which-key "jupyter")
+    "ajr" '(ein:run                  :which-key "start jupyter")
+    "ajl" '(ein:login                :which-key "login to jupyter")
+    "ajn" '(ein:notebooklist-open    :which-key "notebook list")))
+
+;; --- Polymode (YAML + Go templates for Helm) ---
+(use-package polymode
+  :after yaml-ts-mode
+  :config
+  (define-hostmode poly-yaml-hostmode
+    :mode 'yaml-ts-mode)
+
+  (define-innermode poly-go-template-innermode
+    :mode 'go-ts-mode
+    :head-matcher "{{[-]?"
+    :tail-matcher "[-]?}}"
+    :head-mode 'host
+    :tail-mode 'host)
+
+  (define-polymode poly-yaml-go-template-mode
+    :hostmode 'poly-yaml-hostmode
+    :innermodes '(poly-go-template-innermode)))
+
+;; Auto-activate on Helm template files
+(add-to-list 'auto-mode-alist
+             '("/templates/.*\\.ya?ml\\'" . poly-yaml-go-template-mode))
+(add-to-list 'auto-mode-alist
+             '("\\.tpl\\'" . poly-yaml-go-template-mode))
 
 (provide 'init-lang)

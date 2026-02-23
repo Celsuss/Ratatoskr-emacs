@@ -321,6 +321,15 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
     :states '(normal visual insert emacs)
     "oru" '(org-roam-ui-mode :which-key "roam graph UI")))
 
+;; --- Org Download (paste/drag images) ---
+(use-package org-download
+  :after org
+  :hook (org-mode . org-download-enable)
+  :config
+  (setq org-download-image-dir "./images"
+        org-download-heading-lvl nil
+        org-download-method 'directory))
+
 ;; --- Writegood Mode ---
 (use-package writegood-mode
   :hook ((org-mode      . writegood-mode)

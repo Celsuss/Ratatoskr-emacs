@@ -63,4 +63,23 @@
     :states '(normal visual insert emacs)
     "tg" '(golden-ratio-mode :which-key "golden ratio")))
 
+;; --- hl-todo (highlight TODO/FIXME keywords) ---
+(use-package hl-todo
+  :hook (prog-mode . hl-todo-mode)
+  :config
+  (setq hl-todo-keyword-faces
+        '(("TODO"       . "#FF8C00")
+          ("FIXME"      . "#FF0000")
+          ("HACK"       . "#FF00FF")
+          ("NOTE"       . "#00BFFF")
+          ("DEPRECATED" . "#808080")
+          ("BUG"        . "#FF0000")
+          ("XXX"        . "#FF00FF"))))
+
+(with-eval-after-load 'init-evil
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "et" '(hl-todo-next     :which-key "next TODO")
+    "eT" '(hl-todo-previous :which-key "prev TODO")))
+
 (provide 'init-ui)

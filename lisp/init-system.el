@@ -48,4 +48,30 @@
           ("*lsp-help*"        :align right :size 0.4 :popup t :select t)
           ("*Messages*"        :align below :size 0.25 :popup t))))
 
+;; --- Popper (popup management) ---
+(use-package popper
+  :after general
+  :demand t
+  :config
+  (setq popper-reference-buffers
+        '("\\*Messages\\*"
+          "\\*Warnings\\*"
+          "Output\\*$"
+          "\\*Async Shell Command\\*"
+          "\\*compilation\\*"
+          "\\*Backtrace\\*"
+          "\\*Help\\*"
+          "\\*helpful"
+          "\\*Flycheck errors\\*"
+          "\\*lsp-help\\*"
+          "\\*grep\\*"
+          "\\*cargo-.*\\*"
+          "\\*pytest.*\\*"
+          "\\*restclient.*\\*"
+          vterm-mode))
+  (popper-mode 1)
+  (global-set-key (kbd "M-`") #'popper-toggle)
+  (global-set-key (kbd "C-M-`") #'popper-cycle)
+  (global-set-key (kbd "M-~") #'popper-toggle-type))
+
 (provide 'init-system)

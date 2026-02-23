@@ -143,12 +143,16 @@
     :states '(normal visual insert emacs)
     "hP"  '(esup :which-key "profile startup")))
 
-;; --- Flyspell ---
-(use-package flyspell
-  :ensure nil
-  :hook
-  (prog-mode . flyspell-prog-mode)
-  (text-mode . flyspell-mode))
+;; --- Jinx (modern spellcheck, replaces flyspell) ---
+;; Requires enchant system package: pacman -S enchant
+(use-package jinx
+  :after general
+  :demand t
+  :config
+  (global-jinx-mode)
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "ts" '(jinx-correct :which-key "spell correct")))
 
 ;; --- Diff-hl (git gutter indicators) ---
 (use-package diff-hl
@@ -182,5 +186,37 @@
   (rata-leader
     :states '(normal visual insert emacs)
     "go" '(browse-at-remote :which-key "open on remote")))
+
+;; --- Restclient (HTTP client) ---
+(use-package restclient
+  :mode ("\\.http\\'" . restclient-mode)
+  :after general
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    :keymaps 'restclient-mode-map
+    "mr"  '(:ignore t :which-key "restclient")
+    "mrr" '(restclient-http-send-current      :which-key "send request")
+    "mrR" '(restclient-http-send-current-raw  :which-key "send raw")
+    "mrn" '(restclient-jump-next              :which-key "next request")
+    "mrp" '(restclient-jump-prev              :which-key "prev request")
+    "mrc" '(restclient-copy-curl-command      :which-key "copy as curl")))
+
+(use-package restclient-jq
+  :after restclient)
+
+;; --- Breadcrumb (LSP header-line context) ---
+(use-package breadcrumb
+  :after lsp-mode
+  :hook (lsp-mode . breadcrumb-local-mode))
+
+;; --- Explain-pause-mode (runtime performance profiler) ---
+(use-package explain-pause-mode
+  :after general
+  :commands explain-pause-mode
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "hE" '(explain-pause-mode :which-key "explain pauses")))
 
 (provide 'init-dev)
