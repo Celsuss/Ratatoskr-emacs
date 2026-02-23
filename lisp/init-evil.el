@@ -142,4 +142,45 @@
     "jw" '(avy-goto-word-0 :which-key "jump to word")
     "jn" '(avy-goto-line   :which-key "jump to line")))
 
+;; --- Evil-matchit (% to jump matching tags/parens) ---
+(use-package evil-matchit
+  :after evil
+  :config
+  (global-evil-matchit-mode 1))
+
+;; --- Evil-args (inner/outer argument text objects) ---
+(use-package evil-args
+  :after evil
+  :config
+  (define-key evil-inner-text-objects-map "a" 'evil-inner-arg)
+  (define-key evil-outer-text-objects-map "a" 'evil-outer-arg))
+
+;; --- Evil-textobj-tree-sitter (language-aware text objects) ---
+(use-package evil-textobj-tree-sitter
+  :after evil
+  :config
+  (define-key evil-outer-text-objects-map "f"
+    (cons "outer function" (evil-textobj-tree-sitter-get-textobj "function.outer")))
+  (define-key evil-inner-text-objects-map "f"
+    (cons "inner function" (evil-textobj-tree-sitter-get-textobj "function.inner")))
+  (define-key evil-outer-text-objects-map "c"
+    (cons "outer class" (evil-textobj-tree-sitter-get-textobj "class.outer")))
+  (define-key evil-inner-text-objects-map "c"
+    (cons "inner class" (evil-textobj-tree-sitter-get-textobj "class.inner"))))
+
+;; --- Evil-mc (multiple cursors) ---
+(use-package evil-mc
+  :after evil
+  :config
+  (global-evil-mc-mode 1))
+
+;; --- Smartparens ---
+(use-package smartparens
+  :after evil
+  :config
+  (require 'smartparens-config)
+  (smartparens-global-mode 1)
+  (show-smartparens-global-mode 1)
+  (electric-pair-mode -1))
+
 (provide 'init-evil)

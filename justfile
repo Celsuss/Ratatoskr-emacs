@@ -55,3 +55,19 @@ todos:
 
 # Full reset: clean then run
 reset: clean run
+
+# Install nerd-icons fonts (one-time setup)
+install-fonts:
+    {{emacs_bin}} --init-directory {{init_dir}} --batch --eval "(progn (require 'nerd-icons) (nerd-icons-install-fonts t))"
+
+# Install tree-sitter grammars from treesit-language-source-alist
+install-grammars:
+    {{emacs_bin}} --init-directory {{init_dir}} --batch -l early-init.el -l init.el --eval "(mapc (lambda (src) (treesit-install-language-grammar (car src))) treesit-language-source-alist)"
+
+# Generate elpaca lockfile
+lock:
+    {{emacs_bin}} --init-directory {{init_dir}} --batch -l early-init.el -l init.el --eval "(elpaca-lock)"
+
+# Update all packages and regenerate lockfile
+update:
+    {{emacs_bin}} --init-directory {{init_dir}} --batch -l early-init.el -l init.el --eval "(progn (elpaca-update-all) (elpaca-lock))"

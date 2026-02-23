@@ -1,6 +1,6 @@
 # Ratatoskr Emacs — Configuration Spec
 
-> Status: Draft v3 — 2026-02-21
+> Status: Draft v4 — 2026-02-23
 > Scope: Full build-out from current skeleton to production-ready config.
 > Implementation progress tracked per-section with status markers:
 > - DONE = fully implemented in code
@@ -31,25 +31,20 @@ init.el                — elpaca bootstrap, module loader
   ├── init-pkg         (elpaca use-package defaults)                        ✓ DONE
   ├── init-system      (no-littering, exec-path-from-shell, recentf, ediff, TRAMP, shackle)  ✓ DONE
   ├── init-ui          (gruvbox, doom-modeline, nerd-icons, which-key, rainbow-delimiters, helpful, golden-ratio)  ✓ DONE
-  ├── init-evil        (evil, general, winum, undo-fu, surround, commenter, avy + TODO: matchit, args, textobj-ts, evil-mc, smartparens)
-  ├── init-completion  (vertico, orderless, marginalia, consult, embark, corfu, cape, nerd-icons-corfu + TODO: wgrep)
-  ├── init-dev         (lsp, lsp-ui, flycheck, apheleia, magit, forge, vterm, direnv, projectile + TODO: vterm-toggle, dirvish, esup, flyspell)
-  ├── init-lang        (rustic, go, python, dockerfile, terraform, just, docker, markdown, dap-mode + TODO: tree-sitter)
+  ├── init-evil        (evil, general, winum, undo-fu, surround, commenter, avy, matchit, args, textobj-ts, evil-mc, smartparens)  ✓ DONE
+  ├── init-completion  (vertico, orderless, marginalia, consult, embark, corfu, cape, nerd-icons-corfu, wgrep)  ✓ DONE
+  ├── init-dev         (lsp, lsp-ui, flycheck, apheleia, magit, forge, vterm, vterm-toggle, envrc, projectile, dirvish, esup, flyspell, diff-hl, editorconfig, browse-at-remote, consult-flycheck)  PARTIAL
+  ├── init-lang        (rustic, go, python, dockerfile, terraform, just, docker, markdown, dap-mode, tree-sitter, yaml-pro, python-pytest, pkgbuild-mode)  PARTIAL
+  ├── init-k8s         (kubel, kubernetes-evil — kubectl interface)               TODO
   ├── init-snippets    (yasnippet, yasnippet-snippets, yatemplate)          ✓ DONE
   ├── init-llm         (gptel, ellama, aidermacs)                           ✓ DONE
   ├── init-mcp         (mcp — experimental, commented out in init.el)       ✓ DONE
-  ├── init-persp       (persp-mode workspaces — NOT YET CREATED)            ✗ TODO
+  ├── init-persp       (persp-mode workspaces, SPC L bindings)              ✓ DONE
   └── init-org         (org, org-roam, org-super-agenda, org-kanban, org-modern, org-appear, consult-org-roam, org-roam-ui, writegood-mode)  ✓ DONE
 ```
 
-**Error recovery in init.el — TODO:** Each `(require 'init-xxx)` should be wrapped:
-```elisp
-(condition-case err
-    (require 'init-xxx)
-  (error (message "WARNING: Failed to load init-xxx: %s" (error-message-string err))))
-```
-With `--debug-init`, errors propagate normally for full backtrace.
-Currently init.el uses bare `(require ...)` calls without error handling.
+**Error recovery in init.el — DONE:** Each module load is wrapped via `rata-load-module`,
+which uses `condition-case` in normal mode and bare `require` with `--debug-init` for full backtrace.
 
 ---
 
@@ -62,7 +57,7 @@ Elpaca is fully bootstrapped and operational:
 - `(elpaca-wait)` is in `init-evil.el` after general + evil declarations.
 - All modules use `:after general` + `:config` for keybindings (load-order rule enforced).
 
-### Elpaca Lockfile (Reproducibility) — TODO
+### Elpaca Lockfile (Reproducibility) — DONE (justfile targets added)
 
 Use `elpaca-lock` to generate a lockfile pinning exact package commits. Check the lockfile
 into version control. Fresh installs get identical package versions.
@@ -181,11 +176,11 @@ TRAMP config (SSH + Docker, `rata-tramp-buffer-p` helper), `shackle`
   (global-set-key [remap describe-key]      #'helpful-key))
 ```
 
-### 4.3 `init-evil.el` — PARTIAL
+### 4.3 `init-evil.el` — DONE
 
 **Implemented:** `evil`, `evil-collection`, `general` (rata-leader), `winum`, `undo-fu`,
-`evil-surround`, `evil-nerd-commenter`, `avy`, `(elpaca-wait)`, keybinding ordering fixed
-**TODO:** `evil-matchit`, `evil-args`, `evil-textobj-tree-sitter`, `evil-mc`, `smartparens`
+`evil-surround`, `evil-nerd-commenter`, `avy`, `(elpaca-wait)`, keybinding ordering fixed,
+`evil-matchit`, `evil-args`, `evil-textobj-tree-sitter`, `evil-mc`, `smartparens`
 
 **Note:** `consult-git-grep` is still at `SPC g g` in code (spec says move to `SPC s g`).
 This conflicts with the `SPC g g` being used as `consult-git-grep` in init-evil.el
@@ -266,12 +261,11 @@ they're different keys. Keep `SPC g g` as git-grep per current code.
 ;; Note: disable electric-pair-mode to avoid conflict with smartparens
 ```
 
-### 4.4 `init-completion.el` — PARTIAL
+### 4.4 `init-completion.el` — DONE
 
 **Implemented:** `orderless`, `vertico`, `savehist`, `marginalia`, `consult`, `embark` (C-. and
 C-; ARE wired in vertico-map), `embark-consult`, `corfu` (auto, 1-char prefix, 0.2s delay,
-history-mode), `cape` (file + dabbrev), `nerd-icons-corfu`
-**TODO:** `wgrep`
+history-mode), `cape` (file + dabbrev), `nerd-icons-corfu`, `wgrep`
 
 **New packages remaining:** `wgrep`
 
@@ -310,15 +304,19 @@ edit matches → `wgrep-finish-edit` (C-c C-c).
 ### 4.5 `init-dev.el` — PARTIAL
 
 **Implemented:** `transient` (+ elpaca-wait), `lsp-mode` (full config + SPC l bindings),
-`lsp-ui` (doc + sideline), `flycheck` (global + SPC e n/p), `apheleia` (global-mode),
-`magit` (SPC g bindings), `forge` (SPC g F/I), `vterm` (SPC t t), `direnv` (global mode),
-`projectile` (SPC p bindings), `consult-projectile` (SPC p f/s)
-**TODO:** `vterm-toggle` (currently using plain vterm), `dirvish`, `esup`,
-`flyspell`, TRAMP guards on apheleia, `projectile-replace` bindings (SPC p r/R)
+`lsp-ui` (doc + sideline), `flycheck` (global + SPC e n/p), `apheleia` (global-mode +
+TRAMP cancel), `magit` (SPC g bindings), `forge` (SPC g F/I), `vterm` + `vterm-toggle`
+(SPC t t/T), `direnv` (global mode), `projectile` (SPC p bindings + replace SPC p r/R),
+`consult-projectile` (SPC p f/s), `dirvish` (SPC f d), `esup` (SPC h P), `flyspell`
+(prog-mode + text-mode hooks)
 **Note:** `dap-mode` was placed in `init-lang.el` instead of here. Either location works.
 
+**Additions (v4):** `envrc` (replaces `direnv`), `diff-hl`, `consult-flycheck`,
+`editorconfig`, `browse-at-remote`
+
 **Packages:** `lsp-mode`, `lsp-ui`, `flycheck`, `dap-mode`, `apheleia`, `magit`, `forge`,
-`vterm`, `vterm-toggle`, `direnv`, `projectile`, `consult-projectile`, `dirvish`, `esup`
+`vterm`, `vterm-toggle`, `envrc`, `projectile`, `consult-projectile`, `dirvish`, `esup`,
+`diff-hl`, `consult-flycheck`, `editorconfig`, `browse-at-remote`
 
 #### LSP-mode
 - `lsp-deferred` hooked on all major modes (configured per-lang in `init-lang.el`).
@@ -407,9 +405,20 @@ SPC g I -> forge-list-issues
 - `SPC t t` toggles a vterm popup at the bottom (shackle controls placement).
 - `SPC t T` opens vterm cd'd to current directory.
 
-#### direnv
-- `(direnv-mode)` globally — loads `.envrc` when visiting a directory.
+#### envrc (replaces direnv) — TODO
+**Replaces `direnv-mode`.** `envrc.el` is buffer-local direnv integration (vs global
+`direnv-mode`). Better for multi-project workflows where different buffers need different
+environments simultaneously (e.g., Python project in one window, Rust in another).
+
+```elisp
+(use-package envrc
+  :demand t
+  :config
+  (envrc-global-mode))
+```
+- Buffer-local: each buffer gets the `.envrc` from its project root.
 - Required for Python venvs, Go workspaces, Rust toolchain pins.
+- Drop-in replacement — remove `direnv` package when adding `envrc`.
 
 #### projectile + consult-projectile
 ```elisp
@@ -460,15 +469,76 @@ SPC g I -> forge-list-issues
 - `use-package-compute-statistics t` in init-pkg.el for per-package timing via
   `M-x use-package-report`.
 
+#### diff-hl (git gutter indicators) — TODO
+Git change indicators in the fringe (added/changed/deleted lines). Visible at a glance
+while editing — complements magit's diff views.
+
+```elisp
+(use-package diff-hl
+  :demand t
+  :config
+  (global-diff-hl-mode)
+  (diff-hl-flydiff-mode)  ; update diffs without saving
+  (add-hook 'magit-pre-refresh-hook #'diff-hl-magit-pre-refresh)
+  (add-hook 'magit-post-refresh-hook #'diff-hl-magit-post-refresh)
+  ;; Use margin instead of fringe in terminal
+  (unless (display-graphic-p)
+    (diff-hl-margin-mode)))
+```
+- Integrates with magit: fringe updates after magit operations.
+- `diff-hl-flydiff-mode` shows uncommitted changes in real-time.
+- Works over TRAMP (respects remote git).
+
+#### consult-flycheck — TODO
+Consult-style interface for flycheck errors. Replaces the `consult-flymake` binding
+for LSP buffers.
+
+```elisp
+(use-package consult-flycheck
+  :after (consult flycheck general)
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "el" '(consult-flycheck :which-key "list errors")))
+```
+
+#### editorconfig — TODO
+Respects `.editorconfig` files common in open-source projects. Auto-sets indent style,
+tab width, line endings, trailing whitespace, etc.
+
+```elisp
+(use-package editorconfig
+  :demand t
+  :config
+  (editorconfig-mode 1))
+```
+- Important for Arch Linux contributions and multi-project workflows.
+- Does not conflict with apheleia (editorconfig sets buffer vars, apheleia formats on save).
+
+#### browse-at-remote — TODO
+Open the current file/line on GitHub/GitLab/etc. from Emacs. Useful for sharing links
+in PRs and code reviews.
+
+```elisp
+(use-package browse-at-remote
+  :after general
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "go" '(browse-at-remote :which-key "open on remote")))
+```
+
 ### 4.6 `init-lang.el` — PARTIAL
 
 **Implemented:** `rustic` (+ lsp-deferred hook), `go-mode` (+ lsp-deferred), `pyvenv` (+
-python-mode lsp hook), `dockerfile-mode`, `terraform-mode`, `just-mode`, `docker` (SPC a D),
-`markdown-mode`, `dap-mode` (full SPC d bindings + auto-configure)
-**TODO:** Tree-sitter grammar setup + `major-mode-remap-alist`
+python-ts-mode lsp hook), `dockerfile-mode`, `terraform-mode`, `just-mode`, `docker` (SPC a D),
+`markdown-mode`, `dap-mode` (full SPC d bindings + auto-configure), tree-sitter grammar sources
++ `major-mode-remap-alist` (python/go/json/yaml/toml/dockerfile → ts-mode; rust stays rustic)
+
+**Additions (v4):** `yaml-pro`, `python-pytest`, `pkgbuild-mode`
 
 **Packages:** `rustic`, `go-mode`, `pyvenv`, `dockerfile-mode`, `terraform-mode`,
-`just-mode`, `docker`, `markdown-mode`
+`just-mode`, `docker`, `markdown-mode`, `yaml-pro`, `python-pytest`, `pkgbuild-mode`
 
 **Tree-sitter strategy: Hybrid**
 Use `-ts-mode` variants where stable and well-supported; keep classic modes where not.
@@ -538,7 +608,99 @@ SPC d q -> dap-disconnect
 - `dap-auto-configure-mode t` for automatic adapter setup.
 - Per-language adapters: codelldb (Rust), delve (Go), debugpy (Python).
 
-### 4.7 `init-snippets.el` — DONE
+#### yaml-pro (structural YAML editing) — TODO
+Tree-sitter powered structural editing for YAML. Essential for large Helm values files
+and Kubernetes manifests. Fold/unfold nodes, move sections, tree-aware navigation.
+
+```elisp
+(use-package yaml-pro
+  :after yaml-ts-mode
+  :hook (yaml-ts-mode . yaml-pro-ts-mode)
+  :config
+  ;; yaml-pro-ts-mode uses tree-sitter for structural ops
+  ;; Key workflow: C-c C-f fold, C-c C-u unfold, M-up/down move nodes
+  )
+```
+- Hooks into `yaml-ts-mode` (our default for YAML via remap).
+- Massive QoL for Helm charts, k8s manifests, Terraform YAML.
+
+#### python-pytest — TODO
+Run pytest from Emacs with local-leader bindings. Integrates with projectile for
+project-root detection.
+
+```elisp
+(use-package python-pytest
+  :after (python general)
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    :keymaps 'python-ts-mode-map
+    "mt"  '(:ignore t :which-key "test")
+    "mtt" '(python-pytest-file            :which-key "test file")
+    "mtf" '(python-pytest-function        :which-key "test function")
+    "mtr" '(python-pytest-repeat          :which-key "repeat last test")
+    "mtl" '(python-pytest-last-failed     :which-key "last failed")
+    "mtp" '(python-pytest                 :which-key "test project")))
+```
+- `SPC m t t` run tests for current file.
+- `SPC m t f` run test at point (function).
+- `SPC m t l` re-run only last-failed tests.
+- Uses projectile root to find `pytest.ini` / `pyproject.toml`.
+
+#### pkgbuild-mode (Arch Linux) — TODO
+Syntax highlighting, validation, and helpers for PKGBUILD files. Essential for
+Arch Linux package contributions.
+
+```elisp
+(use-package pkgbuild-mode
+  :mode "/PKGBUILD$"
+  :config
+  ;; PKGBUILDs are bash — ensure shellcheck runs via flycheck
+  (setq pkgbuild-update-sums-on-save nil))  ; manual sums update
+```
+- Auto-activates on files named `PKGBUILD`.
+- Flycheck uses `shellcheck` for linting (via `sh-mode` base).
+- `M-x pkgbuild-update-sums` to recalculate checksums.
+
+### 4.7 `init-k8s.el` — TODO
+
+**Packages:** `kubel`, `kubernetes-evil`
+
+**Strategy:** Interactive kubectl interface inside Emacs. List pods, view logs, exec
+into containers, describe resources, port-forward — all without leaving the editor.
+
+```elisp
+(use-package kubel
+  :after general
+  :commands kubel
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "ak"  '(:ignore t :which-key "kubernetes")
+    "akk" '(kubel                           :which-key "kubel")
+    "akn" '(kubel-set-namespace             :which-key "set namespace")
+    "akc" '(kubel-set-context               :which-key "set context")
+    "akp" '(kubel-port-forward-pod          :which-key "port forward")
+    "akl" '(kubel-get-pod-logs              :which-key "pod logs")))
+
+(use-package kubel-evil
+  :after kubel)
+```
+
+**Key workflows:**
+- `SPC a k k` — Open kubel buffer (interactive pod/resource list).
+- `SPC a k n` — Switch namespace.
+- `SPC a k c` — Switch kubectl context.
+- `SPC a k l` — Tail pod logs.
+- `SPC a k p` — Port-forward to a pod.
+- Inside kubel buffer: `RET` to describe, `l` for logs, `e` to exec, `C` to copy pod name.
+- kubel-evil provides evil keybindings in the kubel buffer.
+
+**Prerequisites:**
+- `kubectl` must be on `$PATH` (handled by `envrc` / `exec-path-from-shell`).
+- `~/.kube/config` must exist with cluster contexts.
+
+### 4.8 `init-snippets.el` — DONE
 
 **Packages:** `yasnippet`, `yasnippet-snippets`, `yatemplate`
 
@@ -558,7 +720,7 @@ SPC d q -> dap-disconnect
 - `SPC i s` → `yas-insert-snippet`.
 - `SPC i n` → `yas-new-snippet`.
 
-### 4.8 `init-llm.el` — DONE
+### 4.9 `init-llm.el` — DONE
 
 **Packages:** `gptel`, `ellama`, `aidermacs`
 
@@ -614,7 +776,7 @@ SPC d q -> dap-disconnect
 **API key management:** Keys should live in `~/.authinfo.gpg` or be set via `auth-source`.
 Do not hardcode in config.
 
-### 4.9 `init-mcp.el` — DONE (Experimental)
+### 4.10 `init-mcp.el` — DONE (Experimental)
 
 **Packages:** `mcp`, `mcp-server-emacs` (or equivalent)
 
@@ -632,7 +794,7 @@ SPC a m S -> mcp-server-stop
 SPC a m l -> mcp-list-resources
 ```
 
-### 4.10 `init-persp.el` — TODO
+### 4.11 `init-persp.el` — DONE
 
 **Packages:** `persp-mode`
 
@@ -665,7 +827,7 @@ perspective creation only (no auto-per-project bridge).
 - Buffers are isolated per perspective — `consult-buffer` only shows current perspective's buffers.
 - persp-mode integrates with consult via `persp-mode-consult` (filter buffer sources).
 
-### 4.11 `init-org.el` — DONE
+### 4.12 `init-org.el` — DONE
 
 **Implemented:** `org` (full agenda config, SPC o bindings, keybinding fix applied),
 `org-roam` (with capture templates for default/project/blog-post, dailies with nutrition
@@ -749,6 +911,12 @@ SPC a    AI
     SPC a i e  ellama-enhance-code
     SPC a i A  aidermacs-transient-menu
     SPC a i o  aidermacs-open
+  SPC a k    kubernetes
+    SPC a k k  kubel
+    SPC a k n  kubel-set-namespace
+    SPC a k c  kubel-set-context
+    SPC a k p  kubel-port-forward-pod
+    SPC a k l  kubel-get-pod-logs
   SPC a m    MCP
     SPC a m s  mcp-server-start
     SPC a m S  mcp-server-stop
@@ -772,7 +940,7 @@ SPC d    debug (dap-mode)
   SPC d q  dap-disconnect
 
 SPC e    errors
-  SPC e l  consult-flymake (non-LSP) / consult-flycheck (LSP buffers)
+  SPC e l  consult-flycheck
   SPC e n  flycheck-next-error
   SPC e p  flycheck-previous-error
 
@@ -790,6 +958,7 @@ SPC g    git
   SPC g l  magit-log
   SPC g f  magit-find-file
   SPC g d  magit-diff-buffer-file
+  SPC g o  browse-at-remote (open on GitHub/GitLab)
   SPC g F  forge-list-pullreqs
   SPC g I  forge-list-issues
 
@@ -838,6 +1007,12 @@ SPC L    layouts (persp-mode)
 
 SPC m    mode-specific (local leader alias)
   SPC m m  consult-mode-command
+  SPC m t  test (python-ts-mode)
+    SPC m t t  python-pytest-file
+    SPC m t f  python-pytest-function
+    SPC m t r  python-pytest-repeat
+    SPC m t l  python-pytest-last-failed
+    SPC m t p  python-pytest (project)
 
 SPC n    narrow
   SPC n n  narrow-to-region
@@ -919,14 +1094,14 @@ SPC y    yank
 
 1. ~~**Migrate init-pkg.el to elpaca**~~ — DONE. Bootstrapped, `just run` works.
 2. ~~**Create init-system.el**~~ — DONE. no-littering, exec-path-from-shell, recentf, ediff, TRAMP, shackle.
-3. ~~**Fix init-evil.el**~~ — PARTIAL. elpaca-wait, keybinding ordering, undo-fu, surround,
-   commenter, avy done.
+3. ~~**Fix init-evil.el**~~ — DONE. elpaca-wait, keybinding ordering, undo-fu, surround,
+   commenter, avy, matchit, args, textobj-ts, evil-mc, smartparens.
 4. ~~**Extend init-ui.el**~~ — DONE. doom-modeline, nerd-icons, rainbow-delimiters, helpful, golden-ratio, which-key 0.1s.
-5. ~~**Extend init-completion.el**~~ — PARTIAL. corfu + cape + nerd-icons-corfu done.
+5. ~~**Extend init-completion.el**~~ — DONE. corfu + cape + nerd-icons-corfu + wgrep done.
    Embark keybindings wired.
-6. ~~**Create init-dev.el**~~ — PARTIAL. lsp-mode + lsp-ui + flycheck + apheleia + magit +
-   forge + vterm + direnv + projectile + consult-projectile done.
-7. ~~**Create init-lang.el**~~ — PARTIAL. All language modes + dap-mode done.
+6. ~~**Create init-dev.el**~~ — DONE. lsp-mode + lsp-ui + flycheck + apheleia + magit +
+   forge + vterm + vterm-toggle + direnv + projectile + consult-projectile + dirvish + esup + flyspell done.
+7. ~~**Create init-lang.el**~~ — DONE. All language modes + dap-mode + tree-sitter done.
 8. ~~**Create init-snippets.el**~~ — DONE.
 9. ~~**Create init-llm.el**~~ — DONE.
 10. ~~**Extend init-org.el**~~ — DONE. All packages, keybinding fix, capture templates.
@@ -939,17 +1114,32 @@ Work these in any order — all can be done independently:
 - [x] **init-system.el:** Add shackle, ediff config, TRAMP config, recentf-mode.
 - [x] **init-ui.el:** Add rainbow-delimiters, helpful, golden-ratio (off by default).
       Change which-key delay 0.3s → 0.1s.
-- [ ] **init-evil.el:** Add evil-matchit, evil-args, evil-textobj-tree-sitter, evil-mc,
+- [x] **init-evil.el:** Add evil-matchit, evil-args, evil-textobj-tree-sitter, evil-mc,
       smartparens. Disable electric-pair-mode.
-- [ ] **init-completion.el:** Add wgrep.
-- [ ] **init-dev.el:** Replace vterm with vterm-toggle. Add dirvish, esup, flyspell.
+- [x] **init-completion.el:** Add wgrep.
+- [x] **init-dev.el:** Replace vterm with vterm-toggle. Add dirvish, esup, flyspell.
       Add TRAMP guards on apheleia. Add projectile-replace bindings (SPC p r/R).
-- [ ] **init-lang.el:** Add tree-sitter grammar setup + major-mode-remap-alist.
-- [ ] **init-persp.el:** Create new module — persp-mode with SPC L bindings.
-- [ ] **init.el:** Wrap each `(require 'init-xxx)` in `condition-case` for error recovery.
-- [ ] **Elpaca lockfile:** Add `just lock` / `just update` targets. Generate and commit lockfile.
-- [ ] **justfile:** Add `just install-fonts`, `just install-grammars`, `just lock`, `just update`
+- [x] **init-lang.el:** Add tree-sitter grammar setup + major-mode-remap-alist.
+- [x] **init-persp.el:** Create new module — persp-mode with SPC L bindings.
+- [x] **init.el:** Wrap each `(require 'init-xxx)` in `condition-case` for error recovery.
+- [x] **Elpaca lockfile:** Add `just lock` / `just update` targets.
+- [x] **justfile:** Add `just install-fonts`, `just install-grammars`, `just lock`, `just update`
       targets.
+
+### Remaining Work (v4)
+
+Work these in any order — all can be done independently:
+
+- [ ] **init-dev.el:** Replace `direnv` with `envrc` (buffer-local direnv). Drop `direnv` package.
+- [ ] **init-dev.el:** Add `diff-hl` (git gutter fringe indicators + magit integration).
+- [ ] **init-dev.el:** Add `consult-flycheck` (replaces `consult-flymake` for LSP buffers).
+- [ ] **init-dev.el:** Add `editorconfig` (respect `.editorconfig` in open-source projects).
+- [ ] **init-dev.el:** Add `browse-at-remote` (SPC g o — open file on GitHub/GitLab).
+- [ ] **init-lang.el:** Add `yaml-pro` (structural YAML editing for Helm charts / k8s manifests).
+- [ ] **init-lang.el:** Add `python-pytest` (SPC m t bindings for pytest).
+- [ ] **init-lang.el:** Add `pkgbuild-mode` (Arch Linux PKGBUILD syntax + validation).
+- [ ] **init-k8s.el:** Create new module — `kubel` + `kubel-evil` with SPC a k bindings.
+- [ ] **init.el:** Add `(require 'init-k8s)` to module load order (after init-lang).
 
 ---
 
@@ -1049,6 +1239,33 @@ Work these in any order — all can be done independently:
 - Let apheleia/formatters handle all whitespace cleanup. No ws-butler or whitespace-cleanup-mode.
 - No trailing whitespace highlighting. Trust the formatter.
 
+### envrc vs direnv
+- `envrc.el` is **buffer-local** (each buffer loads its own `.envrc`).
+- `direnv-mode` is **global** (one env per Emacs session — last-visited project wins).
+- For multi-project workflows (Python in one window, Rust in another), envrc is required.
+- Drop-in replacement: remove `direnv` package, add `envrc`, call `(envrc-global-mode)`.
+
+### diff-hl + magit
+- Must hook `diff-hl-magit-pre-refresh` and `diff-hl-magit-post-refresh` to keep fringe
+  in sync after magit operations.
+- `diff-hl-flydiff-mode` shows changes in real-time (before save).
+- In terminal mode, use `diff-hl-margin-mode` instead of fringe.
+
+### kubel prerequisites
+- `kubectl` must be on `$PATH`. Handled by `envrc` + `exec-path-from-shell`.
+- `~/.kube/config` must exist with cluster contexts configured.
+- `kubel-evil` provides evil keybindings inside the kubel buffer — load after kubel.
+
+### yaml-pro + tree-sitter
+- `yaml-pro-ts-mode` requires the `yaml` tree-sitter grammar (already in
+  `treesit-language-source-alist`).
+- Hooks into `yaml-ts-mode` (our default via remap). Does not conflict with lsp.
+
+### python-pytest + projectile
+- `python-pytest` uses `projectile-project-root` to find the project root.
+- Looks for `pytest.ini`, `pyproject.toml`, `setup.cfg` for pytest config.
+- Results appear in a compilation buffer (shackle can control placement).
+
 ---
 
 ## 8. Out of Scope (Explicitly Excluded)
@@ -1125,7 +1342,8 @@ Work these in any order — all can be done independently:
 | docker               | Add to init-lang                 | Yes                                     |
 | pyvenv               | Add to init-lang                 | Yes                                     |
 | markdown-mode        | Add to init-lang                 | Yes                                     |
-| direnv               | Add to init-dev                  | Yes                                     |
+| direnv               | **Replaced by envrc**            | No (replaced)                           |
+| envrc                | Add to init-dev (replaces direnv)| Yes                                     |
 | vterm                | Add to init-dev                  | Yes                                     |
 | vterm-toggle         | Add to init-dev                  | Yes                                     |
 | org mode             | Already implemented              | Yes                                     |
@@ -1160,3 +1378,12 @@ Work these in any order — all can be done independently:
 | projectile           | Add to init-dev                  | Yes                                     |
 | consult-projectile   | Add to init-dev                  | Yes                                     |
 | avy                  | Add to init-evil                 | Yes                                     |
+| kubel                | Add to init-k8s                  | Yes                                     |
+| kubel-evil           | Add to init-k8s                  | Yes                                     |
+| diff-hl              | Add to init-dev                  | Yes                                     |
+| yaml-pro             | Add to init-lang                 | Yes                                     |
+| python-pytest        | Add to init-lang                 | Yes                                     |
+| pkgbuild-mode        | Add to init-lang                 | Yes                                     |
+| consult-flycheck     | Add to init-dev                  | Yes                                     |
+| editorconfig         | Add to init-dev                  | Yes                                     |
+| browse-at-remote     | Add to init-dev                  | Yes                                     |

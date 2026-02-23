@@ -51,7 +51,8 @@
 ;; --- Apheleia (format on save) ---
 (use-package apheleia
   :config
-  (apheleia-global-mode t))
+  (apheleia-global-mode t)
+  (setq apheleia-remote-algorithm 'cancel))
 
 ;; --- Magit ---
 (use-package magit
@@ -78,13 +79,19 @@
 
 ;; --- Vterm ---
 (use-package vterm
-  :after general
   :commands vterm
+  :defer t)
+
+;; --- Vterm-toggle ---
+(use-package vterm-toggle
+  :after general
+  :commands (vterm-toggle vterm-toggle-cd)
   :config
   (rata-leader
     :states '(normal visual insert emacs)
     "t"   '(:ignore t :which-key "toggle")
-    "tt"  '(vterm :which-key "terminal")))
+    "tt"  '(vterm-toggle :which-key "terminal")
+    "tT"  '(vterm-toggle-cd :which-key "terminal (cd)")))
 
 ;; --- Direnv ---
 (use-package direnv
@@ -101,7 +108,9 @@
     "pp"  '(projectile-switch-project :which-key "switch project")
     "pb"  '(consult-project-buffer :which-key "project buffer")
     "pt"  '(projectile-run-project-tests :which-key "run tests")
-    "pk"  '(projectile-kill-buffers :which-key "kill project buffers")))
+    "pk"  '(projectile-kill-buffers :which-key "kill project buffers")
+    "pr"  '(projectile-replace :which-key "replace")
+    "pR"  '(projectile-replace-regexp :which-key "replace regexp")))
 
 ;; --- Consult Projectile ---
 (use-package consult-projectile
@@ -111,5 +120,33 @@
     :states '(normal visual insert emacs)
     "pf"  '(consult-projectile-find-file :which-key "find file")
     "ps"  '(consult-projectile-ripgrep :which-key "ripgrep project")))
+
+;; --- Dirvish (enhanced dired) ---
+(use-package dirvish
+  :after general
+  :config
+  (dirvish-override-dired-mode)
+  (setq dirvish-attributes '(nerd-icons file-size vc-state git-msg))
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "fd"  '(dirvish :which-key "dirvish")))
+
+;; --- Esup (startup profiler) ---
+(use-package esup
+  :defer t
+  :custom
+  (esup-depth 0))
+
+(with-eval-after-load 'general
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "hP"  '(esup :which-key "profile startup")))
+
+;; --- Flyspell ---
+(use-package flyspell
+  :ensure nil
+  :hook
+  (prog-mode . flyspell-prog-mode)
+  (text-mode . flyspell-mode))
 
 (provide 'init-dev)

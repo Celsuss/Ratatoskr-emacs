@@ -79,4 +79,10 @@
   :config
   (add-to-list 'corfu-margin-formatters #'nerd-icons-corfu-formatter))
 
+;; --- Wgrep (editable grep buffers) ---
+(use-package wgrep
+  :after embark
+  :custom
+  (wgrep-auto-save-buffer t))
+
 (provide 'init-completion)

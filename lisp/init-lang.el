@@ -1,6 +1,26 @@
 ;;; -*- lexical-binding: t; -*-
 ;;; init-lang.el --- Language modes and DAP
 
+;; --- Tree-sitter grammar sources ---
+(setq treesit-language-source-alist
+      '((go         "https://github.com/tree-sitter/tree-sitter-go")
+        (python     "https://github.com/tree-sitter/tree-sitter-python")
+        (rust       "https://github.com/tree-sitter/tree-sitter-rust")
+        (typescript "https://github.com/tree-sitter/tree-sitter-typescript" "master" "typescript/src")
+        (json       "https://github.com/tree-sitter/tree-sitter-json")
+        (yaml       "https://github.com/ikatyang/tree-sitter-yaml")
+        (toml       "https://github.com/tree-sitter/tree-sitter-toml")
+        (dockerfile "https://github.com/camdencheek/tree-sitter-dockerfile")))
+
+;; --- Remap major modes to tree-sitter variants ---
+(setq major-mode-remap-alist
+      '((python-mode     . python-ts-mode)
+        (go-mode         . go-ts-mode)
+        (json-mode       . json-ts-mode)
+        (yaml-mode       . yaml-ts-mode)
+        (toml-mode       . toml-ts-mode)
+        (dockerfile-mode . dockerfile-ts-mode)))
+
 ;; --- Rust (rustic) ---
 (use-package rustic
   :hook (rustic-mode . lsp-deferred)
@@ -18,7 +38,7 @@
   :config
   (pyvenv-mode t))
 
-(add-hook 'python-mode-hook #'lsp-deferred)
+(add-hook 'python-ts-mode-hook #'lsp-deferred)
 
 ;; --- Dockerfile ---
 (use-package dockerfile-mode

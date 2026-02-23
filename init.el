@@ -60,14 +60,27 @@
   (load custom-file))
 
 ;; --- 6. Load Core Modules ---
-(require 'init-pkg)
-(require 'init-system)
-(require 'init-ui)
-(require 'init-evil)        ; includes (elpaca-wait) — general + evil synchronize here
-(require 'init-completion)
-(require 'init-dev)
-(require 'init-lang)
-(require 'init-snippets)
-(require 'init-llm)
-;; (require 'init-mcp)      ; experimental — uncomment when stable
-(require 'init-org)
+(defun rata-load-module (module)
+  "Require MODULE with error handling.
+When `init-file-debug' is set (--debug-init), errors propagate
+normally for a full backtrace.  Otherwise, catch and log them so
+the remaining modules still load."
+  (if init-file-debug
+      (require module)
+    (condition-case err
+        (require module)
+      (error (message "WARNING: Failed to load %s: %s"
+                      module (error-message-string err))))))
+
+(rata-load-module 'init-pkg)
+(rata-load-module 'init-system)
+(rata-load-module 'init-ui)
+(rata-load-module 'init-evil)        ; includes (elpaca-wait) — general + evil synchronize here
+(rata-load-module 'init-completion)
+(rata-load-module 'init-dev)
+(rata-load-module 'init-lang)
+(rata-load-module 'init-snippets)
+(rata-load-module 'init-llm)
+;; (rata-load-module 'init-mcp)      ; experimental — uncomment when stable
+(rata-load-module 'init-persp)
+(rata-load-module 'init-org)
