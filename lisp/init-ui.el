@@ -18,9 +18,11 @@
 
 ;; --- Which-key ---
 (use-package which-key
-  :init (which-key-mode)
-  :config
-  (setq which-key-idle-delay 0.1))
+  :init
+  (setq which-key-idle-delay 0.1
+        which-key-idle-secondary-delay 0.05
+        which-key-allow-imprecise-window-fit t)
+  (which-key-mode))
 
 ;; --- Nerd Icons ---
 ;; Run M-x nerd-icons-install-fonts once after first install
