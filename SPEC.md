@@ -1,6 +1,6 @@
 # Ratatoskr Emacs — Configuration Spec
 
-> Status: Draft v7 — 2026-02-24
+> Status: Draft v8 — 2026-02-24
 > Scope: Full build-out from current skeleton to production-ready config.
 > Implementation progress tracked per-section with status markers:
 > - DONE = fully implemented in code
@@ -34,7 +34,7 @@ init.el                — elpaca bootstrap, module loader
   ├── init-evil        (evil, general, winum, undo-fu, surround, commenter, avy, matchit, args, textobj-ts, evil-mc, smartparens)  ✓ DONE
   ├── init-completion  (vertico, orderless, marginalia, consult, embark, corfu, cape, nerd-icons-corfu, wgrep)  ✓ DONE
   ├── init-dev         (lsp, lsp-ui, flycheck, apheleia, magit, forge, vterm, vterm-toggle, envrc, projectile, dirvish, esup, jinx, diff-hl, editorconfig, browse-at-remote, consult-flycheck, restclient, restclient-jq, breadcrumb, explain-pause-mode)  ✓ DONE
-  ├── init-lang        (rustic, cargo, go, python, dockerfile, terraform, just, docker, markdown, dap-mode, tree-sitter, yaml-pro, python-pytest, pkgbuild-mode, ansible-mode, ein, polymode)  ✓ DONE
+  ├── init-lang        (rustic, cargo, go, python, dockerfile, terraform, just, docker, markdown, markdown-preview-mode, dap-mode, tree-sitter, yaml-pro, python-pytest, pkgbuild-mode, ansible-mode, ein, polymode)  PARTIAL
   ├── init-k8s         (kubel, kubel-evil — kubectl interface)                    ✓ DONE
   ├── init-snippets    (yasnippet, yasnippet-snippets, yatemplate)          ✓ DONE
   ├── init-llm         (gptel, ellama, aidermacs)                           ✓ DONE
@@ -183,10 +183,8 @@ TRAMP config (SSH + Docker, `rata-tramp-buffer-p` helper), `shackle`
 `evil-surround`, `evil-nerd-commenter`, `avy`, `(elpaca-wait)`, keybinding ordering fixed,
 `evil-matchit`, `evil-args`, `evil-textobj-tree-sitter`, `evil-mc`, `smartparens`
 
-**Note:** `consult-git-grep` is still at `SPC g g` in code (spec says move to `SPC s g`).
-This conflicts with the `SPC g g` being used as `consult-git-grep` in init-evil.el
-while magit-status is at `SPC g s` in init-dev.el — no actual conflict currently since
-they're different keys. Keep `SPC g g` as git-grep per current code.
+**Note:** `SPC g g` is now `magit-status` (Spacemacs convention). `consult-git-grep` moved to `SPC g G`.
+LSP bindings moved from `SPC l` to `SPC L`. Layouts (persp-mode) moved from `SPC L` to `SPC l`.
 
 **New package configs:**
 
@@ -326,16 +324,16 @@ TRAMP cancel), `magit` (SPC g bindings), `forge` (SPC g F/I), `vterm` + `vterm-t
 - **TRAMP:** Disable file watchers over TRAMP connections automatically.
 
 ```
-SPC l   -> :which-key "lsp"
-SPC l d -> lsp-find-definition
-SPC l r -> lsp-find-references
-SPC l n -> lsp-rename
-SPC l a -> lsp-execute-code-action
-SPC l f -> lsp-format-buffer  (manual, apheleia handles save)
-SPC l i -> lsp-find-implementation
-SPC l t -> lsp-find-type-definition
-SPC l s -> lsp-workspace-restart
-SPC l l -> lsp  (manually start LSP)
+SPC L   -> :which-key "lsp"
+SPC L d -> lsp-find-definition
+SPC L r -> lsp-find-references
+SPC L n -> lsp-rename
+SPC L a -> lsp-execute-code-action
+SPC L f -> lsp-format-buffer  (manual, apheleia handles save)
+SPC L i -> lsp-find-implementation
+SPC L t -> lsp-find-type-definition
+SPC L s -> lsp-workspace-restart
+SPC L L -> lsp  (manually start LSP)
 ```
 
 #### lsp-ui
@@ -377,8 +375,8 @@ Per-language overrides go in `init-lang.el`.
 #### magit + forge
 ```
 SPC g   -> :which-key "git"
-SPC g s -> magit-status
-SPC g g -> consult-git-grep  (moved from SPC g g conflict)
+SPC g g -> magit-status
+SPC g G -> consult-git-grep
 SPC g b -> magit-blame
 SPC g l -> magit-log
 SPC g f -> magit-find-file
@@ -1640,6 +1638,8 @@ Add random note discovery to the dashboard start page:
 
 ```
 SPC SPC  execute-extended-command (consult, with savehist for recent-first)
+SPC TAB  evil-switch-to-windows-last-buffer (toggle last buffer)
+SPC /    consult-ripgrep (project search shortcut)
 
 SPC 0-9  winum window selection
 
@@ -1672,8 +1672,14 @@ SPC b    buffers
   SPC b b  consult-buffer (filtered by persp-mode)
   SPC b B  consult-buffer-other-window
   SPC b k  kill-current-buffer
+  SPC b s  switch-to-buffer "*scratch*"
   SPC b m  bookmark-set
   SPC b M  consult-bookmark
+
+SPC c    compile
+  SPC c c  compile (prompts for command)
+  SPC c r  recompile (repeats last)
+  SPC c k  kill-compilation
 
 SPC d    debug (dap-mode)
   SPC d d  dap-debug
@@ -1701,8 +1707,8 @@ SPC f    files
   SPC f L  consult-locate
 
 SPC g    git
-  SPC g s  magit-status
-  SPC g g  consult-git-grep
+  SPC g g  magit-status
+  SPC g G  consult-git-grep
   SPC g b  magit-blame
   SPC g l  magit-log
   SPC g f  magit-find-file
@@ -1716,6 +1722,7 @@ SPC h    help
   SPC h v  helpful-variable
   SPC h k  helpful-key
   SPC h b  describe-bindings
+  SPC h w  where-is (find key for command)
   SPC h m  consult-man
   SPC h I  consult-info
   SPC h P  esup (profile startup)
@@ -1734,26 +1741,26 @@ SPC j    jump
   SPC j J  consult-imenu-multi
   SPC j o  consult-outline
 
-SPC l    lsp
-  SPC l d  lsp-find-definition
-  SPC l r  lsp-find-references
-  SPC l n  lsp-rename
-  SPC l a  lsp-execute-code-action
-  SPC l f  lsp-format-buffer (manual)
-  SPC l i  lsp-find-implementation
-  SPC l t  lsp-find-type-definition
-  SPC l s  lsp-workspace-restart
-  SPC l l  lsp (manual start)
+SPC l    layouts (persp-mode)
+  SPC l l  persp-switch
+  SPC l n  persp-add-new
+  SPC l k  persp-kill
+  SPC l r  persp-rename
+  SPC l a  persp-add-buffer
+  SPC l b  persp-switch-to-buffer
+  SPC l s  persp-save-state-to-file
+  SPC l L  persp-load-state-from-file
 
-SPC L    layouts (persp-mode)
-  SPC L l  persp-switch
-  SPC L n  persp-add-new
-  SPC L k  persp-kill
-  SPC L r  persp-rename
-  SPC L a  persp-add-buffer
-  SPC L b  persp-switch-to-buffer
-  SPC L s  persp-save-state-to-file
-  SPC L L  persp-load-state-from-file
+SPC L    lsp
+  SPC L d  lsp-find-definition
+  SPC L r  lsp-find-references
+  SPC L n  lsp-rename
+  SPC L a  lsp-execute-code-action
+  SPC L f  lsp-format-buffer (manual)
+  SPC L i  lsp-find-implementation
+  SPC L t  lsp-find-type-definition
+  SPC L s  lsp-workspace-restart
+  SPC L L  lsp (manual start)
 
 SPC m    mode-specific (local leader alias)
   SPC m m  consult-mode-command
@@ -1785,6 +1792,12 @@ SPC m    mode-specific (local leader alias)
     SPC m r n  restclient-jump-next
     SPC m r p  restclient-jump-prev
     SPC m r c  restclient-copy-curl-command
+  SPC m T  terraform (terraform-mode)
+    SPC m T p  rata-terraform-plan
+    SPC m T a  rata-terraform-apply
+    SPC m T i  rata-terraform-init
+  SPC m p  markdown preview (markdown-mode — note: pkgbuild-mode also uses SPC m p, keymaps are separate)
+    SPC m p p  markdown-preview-mode (live preview in browser)
 
 SPC n    narrow
   SPC n n  narrow-to-region
@@ -1795,6 +1808,7 @@ SPC o    org
   SPC o c  org-capture
   SPC o a  org-agenda
   SPC o t  org-todo-list
+  SPC o d  org-deadline (add DEADLINE to heading at point)
   SPC o f  fleeting note (quick capture to inbox.org)
   SPC o b    blog/hugo
     SPC o b e  org-hugo-export-wim-to-md (export to hugo)
@@ -1838,6 +1852,8 @@ SPC p    project (projectile)
 
 SPC q    quit
   SPC q r  reload init.el
+  SPC q q  save-buffers-kill-terminal (quit with save prompts)
+  SPC q Q  kill-emacs (force quit, no prompts)
 
 SPC r    registers
   SPC r r  consult-register
@@ -1851,11 +1867,16 @@ SPC s    search
   SPC s S  consult-line-multi
   SPC s k  consult-keep-lines
   SPC s i  consult-info
+  SPC s p  consult-projectile-ripgrep (project search alias)
+  SPC s w  wgrep-change-to-wgrep-mode (edit grep results)
 
 SPC t    toggle
   SPC t t  vterm-toggle
   SPC t T  vterm-toggle-cd
   SPC t g  golden-ratio-mode (off by default)
+  SPC t n  display-line-numbers-mode (toggle line numbers on/off)
+  SPC t r  toggle relative/absolute line numbers
+  SPC t l  toggle-truncate-lines (word wrap)
   SPC t s  jinx-correct (spell correct at point)
   SPC t w  writegood-mode (manual toggle when not in org/markdown)
 
@@ -1864,12 +1885,20 @@ SPC w    windows
   SPC w l  evil-window-right
   SPC w k  evil-window-up
   SPC w j  evil-window-down
+  SPC w w  evil-window-next (cycle windows)
+  SPC w r  evil-window-rotate-downwards (rotate layout)
   SPC w /  evil-window-vsplit
   SPC w -  evil-window-split
-  SPC w d  evil-window-delete
+  SPC w d  evil-window-delete (kill window only)
+  SPC w x  rata-kill-buffer-and-window (kill buffer + window)
   SPC w m  delete-other-windows (maximize/toggle)
   SPC w =  balance-windows
   SPC w u  winner-undo
+
+SPC x    text manipulation
+  SPC x a  align-regexp
+  SPC x s  sort-lines
+  SPC x c  count-words-region
 
 SPC y    yank
   SPC y y  consult-yank-from-kill-ring
@@ -1974,6 +2003,25 @@ Work these in any order — all can be done independently:
 - [x] **init-dashboard.el:** Add random roam note to dashboard (`rata-dashboard-random-note`).
 - [ ] **second-brain:** Create `inbox.org` file in org-roam directory.
 - [ ] **second-brain:** Convert habit checkboxes in `habits.org` to proper org-habit entries with SCHEDULED repeaters.
+
+### Remaining Work (v8) — Keybinding Overhaul
+
+- [ ] **init-evil.el:** Swap `SPC l` / `SPC L` — `l` = layouts (persp-mode), `L` = LSP.
+- [ ] **init-evil.el:** Move `SPC g g` from `consult-git-grep` to `magit-status`. Add `SPC g G` for `consult-git-grep`.
+- [ ] **init-evil.el:** Add `SPC w x` (`rata-kill-buffer-and-window` — custom function), `SPC w w` (`evil-window-next`), `SPC w r` (`evil-window-rotate-downwards`).
+- [ ] **init-evil.el:** Add `SPC TAB` (`evil-switch-to-windows-last-buffer`), `SPC /` (`consult-ripgrep` in project root).
+- [ ] **init-evil.el:** Add `SPC b s` (switch to *scratch* buffer).
+- [ ] **init-evil.el:** Add `SPC q q` (`save-buffers-kill-terminal`), `SPC q Q` (`kill-emacs`).
+- [ ] **init-evil.el:** Add `SPC c` compile group: `SPC c c` (`compile`), `SPC c r` (`recompile`), `SPC c k` (`kill-compilation`).
+- [ ] **init-evil.el:** Add `SPC x` text manipulation group: `SPC x a` (`align-regexp`), `SPC x s` (`sort-lines`), `SPC x c` (`count-words-region`).
+- [ ] **init-evil.el:** Add `SPC t n` (`display-line-numbers-mode`), `SPC t r` (toggle relative/absolute line numbers), `SPC t l` (`toggle-truncate-lines`).
+- [ ] **init-evil.el:** Add `SPC h b` (`describe-bindings`), `SPC h w` (`where-is`).
+- [ ] **init-evil.el:** Add `SPC s p` (`consult-projectile-ripgrep` alias), `SPC s w` (`wgrep-change-to-wgrep-mode`).
+- [ ] **init-org.el:** Add `SPC o d` (`org-deadline`).
+- [ ] **init-persp.el:** Update keybindings from `SPC L` prefix to `SPC l` prefix.
+- [ ] **init-dev.el:** Update LSP keybindings from `SPC l` prefix to `SPC L` prefix.
+- [ ] **init-lang.el:** Add terraform compile wrappers (`rata-terraform-plan`, `rata-terraform-apply`, `rata-terraform-init`) with `SPC m T` bindings in `terraform-mode-map`.
+- [ ] **init-lang.el:** Add `markdown-preview-mode` package with `SPC m p p` binding in `markdown-mode-map`.
 
 ---
 
@@ -2309,3 +2357,4 @@ Work these in any order — all can be done independently:
 | dashboard            | Add to init-dashboard (v6)       | Yes                                     |
 | org-transclusion     | Add to init-org (v7)             | Yes                                     |
 | ox-hugo              | Add to init-org (v7)             | Yes                                     |
+| markdown-preview-mode | Add to init-lang (v8)           | Yes                                     |

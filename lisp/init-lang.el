@@ -64,7 +64,34 @@
 
 ;; --- Terraform ---
 (use-package terraform-mode
-  :defer t)
+  :defer t
+  :after general
+  :config
+  (defun rata-terraform-plan ()
+    "Run terraform plan in the current directory."
+    (interactive)
+    (let ((default-directory (file-name-directory (buffer-file-name))))
+      (compile "terraform plan")))
+
+  (defun rata-terraform-apply ()
+    "Run terraform apply in the current directory."
+    (interactive)
+    (let ((default-directory (file-name-directory (buffer-file-name))))
+      (compile "terraform apply")))
+
+  (defun rata-terraform-init ()
+    "Run terraform init in the current directory."
+    (interactive)
+    (let ((default-directory (file-name-directory (buffer-file-name))))
+      (compile "terraform init")))
+
+  (rata-leader
+    :states '(normal visual insert emacs)
+    :keymaps 'terraform-mode-map
+    "mT"  '(:ignore t :which-key "terraform")
+    "mTp" '(rata-terraform-plan  :which-key "terraform plan")
+    "mTa" '(rata-terraform-apply :which-key "terraform apply")
+    "mTi" '(rata-terraform-init  :which-key "terraform init")))
 
 ;; --- Just ---
 (use-package just-mode
@@ -82,6 +109,17 @@
 ;; --- Markdown ---
 (use-package markdown-mode
   :defer t)
+
+;; --- Markdown Preview ---
+(use-package markdown-preview-mode
+  :after (markdown-mode general)
+  :commands markdown-preview-mode
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    :keymaps 'markdown-mode-map
+    "mp"  '(:ignore t :which-key "preview")
+    "mpp" '(markdown-preview-mode :which-key "preview in browser")))
 
 ;; --- DAP Mode (debugging) ---
 (use-package dap-mode

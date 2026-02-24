@@ -11,6 +11,7 @@
    "oc" '(org-capture :which-key "org capture")
    "oa" '(org-agenda :which-key "org agenda")
    "ot" '(org-todo-list :which-key "list all TODOs")
+   "od" '(org-deadline :which-key "deadline")
    "of" '((lambda () (interactive) (org-capture nil "f"))
           :which-key "fleeting note"))
 

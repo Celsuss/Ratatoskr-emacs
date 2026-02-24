@@ -28,9 +28,19 @@
   (general-create-definer rata-leader
     :prefix "SPC")
 
+  ;; Custom functions for new keybindings
+  (defun rata-kill-buffer-and-window ()
+    "Kill the current buffer and delete its window."
+    (interactive)
+    (kill-current-buffer)
+    (when (> (count-windows) 1)
+      (delete-window)))
+
   (rata-leader
    :states '(normal visual insert emacs)
    "SPC" '(execute-extended-command :which-key "execute command")
+   "TAB" '(evil-switch-to-windows-last-buffer :which-key "last buffer")
+   "/"   '(consult-ripgrep :which-key "project search")
 
    "f"   '(:ignore t :which-key "files")
    "ff"  '(consult-find :which-key "find file")
@@ -42,12 +52,22 @@
    "bb"  '(consult-buffer :which-key "switch buffer")
    "bB"  '(consult-buffer-other-window :which-key "buffer other window")
    "bk"  '(kill-current-buffer :which-key "kill buffer")
+   "bs"  '(scratch-buffer :which-key "scratch buffer")
 
    "w"   '(:ignore t :which-key "window")
    "wl"  '(evil-window-right :which-key "window right")
    "wh"  '(evil-window-left :which-key "window left")
    "wk"  '(evil-window-up :which-key "window up")
    "wj"  '(evil-window-down :which-key "window down")
+   "w/"  '(evil-window-vsplit :which-key "split vertical")
+   "w-"  '(evil-window-split :which-key "split horizontal")
+   "wd"  '(delete-window :which-key "delete window")
+   "wx"  '(rata-kill-buffer-and-window :which-key "kill buffer & window")
+   "wm"  '(delete-other-windows :which-key "maximize window")
+   "w="  '(balance-windows :which-key "balance windows")
+   "ww"  '(other-window :which-key "cycle window")
+   "wr"  '(evil-window-rotate-downwards :which-key "rotate windows")
+   "wu"  '(winner-undo :which-key "winner undo")
 
    "s"   '(:ignore t :which-key "search")
    "sg"  '(consult-grep :which-key "grep")
@@ -56,9 +76,10 @@
    "sS"  '(consult-line-multi :which-key "search line multi")
    "sk"  '(consult-keep-lines :which-key "keep lines")
    "si"  '(consult-info :which-key "info")
+   "sp"  '(consult-ripgrep :which-key "project search")
+   "sw"  '(wgrep-change-to-wgrep-mode :which-key "wgrep")
 
    "g"   '(:ignore t :which-key "git")
-   "gg"  '(consult-git-grep :which-key "git grep")
 
    "p"   '(:ignore t :which-key "project")
    "pp"  '(consult-project-buffer :which-key "project buffer")
@@ -66,6 +87,8 @@
    "h"   '(:ignore t :which-key "help")
    "hm"  '(consult-man :which-key "man page")
    "hI"  '(consult-info :which-key "info")
+   "hb"  '(describe-bindings :which-key "describe bindings")
+   "hw"  '(where-is :which-key "where is")
 
    "j"   '(:ignore t :which-key "jump")
    "jl"  '(consult-line :which-key "jump to line")
@@ -87,7 +110,30 @@
    "m"   '(:ignore t :which-key "mode")
    "mm"  '(consult-mode-command :which-key "mode command")
 
+   "c"   '(:ignore t :which-key "compile")
+   "cc"  '(compile :which-key "compile")
+   "cr"  '(recompile :which-key "recompile")
+   "ck"  '(kill-compilation :which-key "kill compilation")
+
+   "x"   '(:ignore t :which-key "text")
+   "xa"  '(align-regexp :which-key "align regexp")
+   "xs"  '(sort-lines :which-key "sort lines")
+   "xc"  '(count-words-region :which-key "count words")
+
+   "t"   '(:ignore t :which-key "toggle")
+   "tn"  '(display-line-numbers-mode :which-key "line numbers")
+   "tr"  '((lambda () (interactive)
+              (if (eq display-line-numbers 'relative)
+                  (setq display-line-numbers t)
+                (setq display-line-numbers 'relative)))
+            :which-key "relative numbers")
+   "tl"  '(toggle-truncate-lines :which-key "truncate lines")
+
+   "n"   '(:ignore t :which-key "narrow")
+
    "q"   '(:ignore t :which-key "quit")
+   "qq"  '(save-buffers-kill-terminal :which-key "quit emacs")
+   "qQ"  '(kill-emacs :which-key "quit without saving")
    "qr"  '((lambda () (interactive) (load-file user-init-file)) :which-key "reload init.el")))
 
 ;; Synchronize elpaca queue — general + evil must be ready before

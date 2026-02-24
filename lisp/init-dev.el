@@ -18,16 +18,16 @@
   :config
   (rata-leader
     :states '(normal visual insert emacs)
-    "l"   '(:ignore t :which-key "lsp")
-    "ld"  '(lsp-find-definition :which-key "definition")
-    "lr"  '(lsp-find-references :which-key "references")
-    "ln"  '(lsp-rename :which-key "rename")
-    "la"  '(lsp-execute-code-action :which-key "code action")
-    "lf"  '(lsp-format-buffer :which-key "format buffer")
-    "li"  '(lsp-find-implementation :which-key "implementation")
-    "lt"  '(lsp-find-type-definition :which-key "type definition")
-    "ls"  '(lsp-workspace-restart :which-key "restart LSP")
-    "ll"  '(lsp :which-key "start LSP")))
+    "L"   '(:ignore t :which-key "lsp")
+    "Ld"  '(lsp-find-definition :which-key "definition")
+    "Lr"  '(lsp-find-references :which-key "references")
+    "Ln"  '(lsp-rename :which-key "rename")
+    "La"  '(lsp-execute-code-action :which-key "code action")
+    "Lf"  '(lsp-format-buffer :which-key "format buffer")
+    "Li"  '(lsp-find-implementation :which-key "implementation")
+    "Lt"  '(lsp-find-type-definition :which-key "type definition")
+    "Ls"  '(lsp-workspace-restart :which-key "restart LSP")
+    "LL"  '(lsp :which-key "start LSP")))
 
 ;; --- LSP UI ---
 (use-package lsp-ui
@@ -61,7 +61,9 @@
   :config
   (rata-leader
     :states '(normal visual insert emacs)
-    "gs"  '(magit-status :which-key "status")
+    "gg"  '(magit-status :which-key "status")
+    "gG"  '(consult-git-grep :which-key "git grep")
+    "gs"  '(magit-status :which-key "status (alt)")
     "gb"  '(magit-blame :which-key "blame")
     "gl"  '(magit-log :which-key "log")
     "gf"  '(magit-find-file :which-key "find file")
