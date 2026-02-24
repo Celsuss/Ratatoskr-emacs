@@ -173,6 +173,42 @@
               "\n")))
   (insert "\n"))
 
+;; --- Custom Widget: Random Roam Note ---
+
+(defun rata-dashboard-insert-random-note (_list-size)
+  "Insert a random org-roam note widget for serendipitous rediscovery."
+  (dashboard-insert-heading "Rediscover:"
+                            nil
+                            (when (display-graphic-p)
+                              (nerd-icons-octicon "nf-oct-light_bulb"
+                                                  :height 1.2
+                                                  :v-adjust 0.0
+                                                  :face 'dashboard-heading)))
+  (insert "\n")
+  (let ((node (condition-case nil
+                  (progn
+                    (require 'org-roam)
+                    (require 'org-roam-db)
+                    (car (org-roam-db-query
+                          [:select [id title file]
+                           :from nodes
+                           :where (= level 0)
+                           :order-by (random)
+                           :limit 1])))
+                (error nil))))
+    (if node
+        (let* ((title (nth 1 node))
+               (file (nth 2 node)))
+          (insert "    ")
+          (insert-text-button title
+                              'action (lambda (_btn)
+                                        (find-file file))
+                              'follow-link t
+                              'face 'font-lock-string-face)
+          (insert "\n"))
+      (insert "    (org-roam not available)\n")))
+  (insert "\n"))
+
 ;; --- Dashboard Package ---
 
 (use-package dashboard
@@ -186,6 +222,8 @@
                '(rata-roam-stats . rata-dashboard-insert-roam-stats))
   (add-to-list 'dashboard-item-generators
                '(rata-git-status . rata-dashboard-insert-git-status))
+  (add-to-list 'dashboard-item-generators
+               '(rata-random-note . rata-dashboard-insert-random-note))
 
   ;; Banner / logo
   (setq dashboard-startup-banner (expand-file-name "logo.png" user-emacs-directory)
@@ -208,6 +246,7 @@
                           (bookmarks   . 5)
                           (rata-agenda . 1)
                           (rata-roam-stats . 1)
+                          (rata-random-note . 1)
                           (rata-git-status . 1)))
 
   ;; Navigator buttons (quick actions)

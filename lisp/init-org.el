@@ -10,7 +10,9 @@
    "o"  '(:ignore t :which-key "org")
    "oc" '(org-capture :which-key "org capture")
    "oa" '(org-agenda :which-key "org agenda")
-   "ot" '(org-todo-list :which-key "list all TODOs"))
+   "ot" '(org-todo-list :which-key "list all TODOs")
+   "of" '((lambda () (interactive) (org-capture nil "f"))
+          :which-key "fleeting note"))
 
   ;;;; Org Agenda
   (setq org-agenda-inhibit-startup t)
@@ -40,7 +42,33 @@
                            "~/workspace/second-brain/org-roam/dotfiles_tweak_tasks.org"
                            "~/workspace/second-brain/org-roam/curriculum_tasks.org"
                            "~/workspace/second-brain/org-roam/projects/"
-                           "~/workspace/second-brain/org-roam/habits.org"))
+                           "~/workspace/second-brain/org-roam/habits.org"
+                           "~/workspace/second-brain/org-roam/inbox.org"))
+
+  ;; Tag-based agenda inclusion: dynamically add roam files with :hastodo: tag
+  (defun rata-org-roam-agenda-files ()
+    "Return list of org-roam files tagged with :hastodo:."
+    (when (fboundp 'org-roam-db-query)
+      (mapcar #'car
+              (org-roam-db-query
+               [:select [nodes:file]
+                :from tags
+                :left-join nodes
+                :on (= tags:node-id nodes:id)
+                :where (= tags:tag "hastodo")
+                :group-by nodes:file]))))
+
+  (defun rata-org-agenda-files-with-roam ()
+    "Return combined agenda files: static list + roam :hastodo: files."
+    (append org-agenda-files (rata-org-roam-agenda-files)))
+
+  ;; Advise org-agenda to include roam :hastodo: files
+  (defun rata-org-agenda-files-advice (orig-fun &rest args)
+    "Advice to dynamically include roam :hastodo: files in agenda."
+    (let ((org-agenda-files (rata-org-agenda-files-with-roam)))
+      (apply orig-fun args)))
+  (advice-add 'org-agenda :around #'rata-org-agenda-files-advice)
+
   (org-super-agenda-mode)
 
   ;; Org habits
@@ -81,7 +109,12 @@
            (file+headline "~/workspace/second-brain/org-roam/reading-list.org" "Reading List")
            "* TODO %a :reading:\nCaptured on: %U\n"
            :empty-lines 1
-           :immediate-finish t))))
+           :immediate-finish t)
+
+          ("f" "Fleeting Note (Inbox)" entry
+           (file "~/workspace/second-brain/org-roam/inbox.org")
+           "** %U %?\n%i\n%a"
+           :empty-lines 1))))
 
 ;; --- Org Roam ---
 (use-package org-roam
@@ -143,6 +176,24 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 #+hugo_base_dir: ../hugo/
 \n
 ")
+                                 :unnarrowed t)
+
+                                ("m" "meeting" plain
+                                 "\n* Meeting Notes\n%?\n\n* Action Items\n** TODO \n"
+                                 :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
+                                                    "#+title: ${title}\n#+author: Jens Lordén\n#+date: %U\n#+filetags: :work:hastodo:\n")
+                                 :unnarrowed t)
+
+                                ("e" "tool evaluation" plain
+                                 "\n* ${title}\n\n** What it does\n%?\n\n** Pros\n- \n\n** Cons\n- \n\n** Alternatives & Comparison\n| Tool | Pros | Cons | Verdict |\n|------+------+------+---------|\n| ${title} | | | |\n| | | | |\n\n** Verdict\n/adopt · trial · reject · revisit/\n"
+                                 :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
+                                                    "#+title: ${title}\n#+author: Jens Lordén\n#+date: %U\n#+filetags: :tool-eval:\n")
+                                 :unnarrowed t)
+
+                                ("T" "troubleshooting" plain
+                                 "\n* Problem\n%?\n\n* Environment\n- OS: \n- Tool version: \n\n* Steps Tried\n1. \n\n* Root Cause\n\n* Solution\n"
+                                 :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
+                                                    "#+title: ${title}\n#+author: Jens Lordén\n#+date: %U\n#+filetags: :troubleshooting:\n")
                                  :unnarrowed t)))
 
   :config
@@ -213,7 +264,43 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 
 ;; --- Org Roam QL ---
 (use-package org-roam-ql
-  :after org-roam)
+  :after (org-roam general)
+  :config
+  (defun rata-roam-orphan-notes ()
+    "Show org-roam notes with zero backlinks."
+    (interactive)
+    (org-roam-ql-search
+     '(not (backlink-count > 0))
+     "Orphan notes (no backlinks)"))
+
+  (defun rata-roam-recent-notes ()
+    "Show org-roam notes modified in the last 7 days."
+    (interactive)
+    (org-roam-ql-search
+     `(file-mtime > ,(- (float-time) (* 7 24 60 60)))
+     "Notes modified this week"))
+
+  (defun rata-roam-work-notes ()
+    "Show all org-roam notes tagged :work:."
+    (interactive)
+    (org-roam-ql-search
+     '(tags "work")
+     "Work notes"))
+
+  (defun rata-roam-stale-todos ()
+    "Show org-roam notes with TODOs older than 2 weeks."
+    (interactive)
+    (org-roam-ql-search
+     `(and (todo) (file-mtime < ,(- (float-time) (* 14 24 60 60))))
+     "Stale TODOs (>2 weeks)"))
+
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "orq"  '(:ignore t :which-key "roam queries")
+    "orqo" '(rata-roam-orphan-notes  :which-key "orphan notes")
+    "orqr" '(rata-roam-recent-notes  :which-key "recent notes")
+    "orqw" '(rata-roam-work-notes    :which-key "work notes")
+    "orqt" '(rata-roam-stale-todos   :which-key "stale TODOs")))
 
 ;; --- Org Super Agenda ---
 (use-package org-super-agenda
@@ -281,7 +368,17 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
                       '((:name "Critical / Overdue" :scheduled past :order 1)
                         (:name "Morning Routine" :time-grid t :order 2)
                         (:name "Daily Goals" :scheduled today :order 3)
-                        (:name "Completed Today" :log t :order 4))))))))))
+                        (:name "Completed Today" :log t :order 4)))))))
+
+          ("r" "Weekly Review"
+           ((tags-todo "+TIMESTAMP_IA<\"<-2w>\""
+                       ((org-agenda-overriding-header "Stale TODOs (>2 weeks old)")
+                        (org-super-agenda-groups
+                         '((:auto-tags t)))))
+            (tags "+TIMESTAMP_IA>=\"<-7d>\""
+                  ((org-agenda-overriding-header "Notes Modified This Week")
+                   (org-super-agenda-groups
+                    '((:auto-tags t))))))))))
 
 ;; --- Org Kanban ---
 (use-package org-kanban
@@ -307,11 +404,24 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
   :after (org-roam consult general)
   :config
   (consult-org-roam-mode 1)
+
+  (defun rata-roam-search-work ()
+    "Search org-roam notes filtered to :work: tag."
+    (interactive)
+    (consult-org-roam-search nil "work"))
+
+  (defun rata-roam-search-personal ()
+    "Search org-roam notes excluding :work: tag."
+    (interactive)
+    (consult-org-roam-search))
+
   (rata-leader
     :states '(normal visual insert emacs)
     "ors" '(consult-org-roam-search      :which-key "search roam")
     "orb" '(consult-org-roam-backlinks   :which-key "backlinks consult")
-    "orF" '(consult-org-roam-file-find   :which-key "find file consult")))
+    "orF" '(consult-org-roam-file-find   :which-key "find file consult")
+    "orw" '(rata-roam-search-work        :which-key "search work notes")
+    "orP" '(rata-roam-search-personal    :which-key "search personal notes")))
 
 ;; --- Org Roam UI (graph visualization) ---
 (use-package org-roam-ui
@@ -329,6 +439,39 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
   (setq org-download-image-dir "./images"
         org-download-heading-lvl nil
         org-download-method 'directory))
+
+;; --- Org Transclusion (live embedding of content) ---
+(use-package org-transclusion
+  :after (org general)
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "ort"  '(:ignore t :which-key "transclusion")
+    "orta" '(org-transclusion-add            :which-key "add transclusion")
+    "ortA" '(org-transclusion-add-all        :which-key "add all transclusions")
+    "ortr" '(org-transclusion-remove         :which-key "remove transclusion")
+    "ortR" '(org-transclusion-remove-all     :which-key "remove all")
+    "orte" '(org-transclusion-live-sync-start :which-key "edit source")
+    "ortm" '(org-transclusion-mode           :which-key "toggle mode")))
+
+;; --- ox-hugo (org to Hugo markdown export) ---
+(use-package ox-hugo
+  :after (ox general)
+  :config
+  (defun rata-hugo-preview ()
+    "Start Hugo server for previewing blog posts."
+    (interactive)
+    (let ((default-directory (expand-file-name "~/workspace/second-brain/hugo/")))
+      (if (get-buffer "*hugo-server*")
+          (browse-url "http://localhost:1313")
+        (start-process "hugo-server" "*hugo-server*" "hugo" "server" "-D")
+        (run-at-time 2 nil (lambda () (browse-url "http://localhost:1313"))))))
+
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "ob"  '(:ignore t :which-key "blog/hugo")
+    "obe" '(org-hugo-export-wim-to-md :which-key "export to hugo")
+    "obp" '(rata-hugo-preview         :which-key "preview post")))
 
 ;; --- Writegood Mode ---
 (use-package writegood-mode

@@ -1,6 +1,6 @@
 # Ratatoskr Emacs — Configuration Spec
 
-> Status: Draft v6 — 2026-02-23
+> Status: Draft v7 — 2026-02-24
 > Scope: Full build-out from current skeleton to production-ready config.
 > Implementation progress tracked per-section with status markers:
 > - DONE = fully implemented in code
@@ -40,7 +40,7 @@ init.el                — elpaca bootstrap, module loader
   ├── init-llm         (gptel, ellama, aidermacs)                           ✓ DONE
   ├── init-mcp         (mcp — experimental, commented out in init.el)       ✓ DONE
   ├── init-persp       (persp-mode workspaces, SPC L bindings)              ✓ DONE
-  ├── init-org         (org, org-roam, org-super-agenda, org-kanban, org-modern, org-appear, consult-org-roam, org-roam-ui, writegood-mode, org-download)  ✓ DONE
+  ├── init-org         (org, org-roam, org-super-agenda, org-kanban, org-modern, org-appear, consult-org-roam, org-roam-ui, org-roam-ql, writegood-mode, org-download, org-transclusion, ox-hugo)  DONE
   └── init-dashboard   (dashboard.el — start page with logo, agenda, roam stats, git status)  TODO
 ```
 
@@ -835,8 +835,10 @@ custom commands), `org-kanban`, `org-modern` (global + agenda), `org-appear` (au
 autosubmarkers), `consult-org-roam` (search/backlinks/file-find), `org-roam-ui` (SPC o r u),
 `writegood-mode` (org + markdown hooks + SPC t w toggle)
 
-**Capture templates:** Fully implemented (TODO, Work Task, Home Lab, Emacs Tweak, Dotfiles
-Tweak, Curriculum, Link/Read Later). Not deferred.
+**Capture templates (existing):** TODO, Work Task, Home Lab, Emacs Tweak, Dotfiles
+Tweak, Curriculum, Link/Read Later.
+
+**v7 enhancements implemented:** See §4.15 for full details.
 
 #### org-modern
 ```elisp
@@ -1331,6 +1333,307 @@ Displays repo name + clean/dirty indicator. Non-blocking (uses `process-file` or
   :group 'rata-dashboard)
 ```
 
+### 4.15 v7 Additions — Org & Org-Roam Supercharge (EXTEND init-org)
+
+> **Goal:** Transform the second-brain from a note dump into an interconnected
+> Zettelkasten with frictionless capture, robust agenda integration, and periodic
+> review workflows. All changes live in `init-org.el` unless otherwise noted.
+
+#### Design Decisions
+
+- **Zettelkasten-style atomic notes** — preferred structure. File count growing
+  large (~1,400+) is acceptable; discoverability via search/tags/links compensates.
+- **Tag-based agenda inclusion** — roam notes with TODOs get a `:hastodo:` filetag
+  automatically via capture template. Only those files are scanned by org-agenda
+  (avoids scanning all 1,400+ roam files on every refresh).
+- **Work/personal separation** — single roam database, tag-based filtering
+  (`:work:` / `:personal:`). Agenda custom command + consult-org-roam filter.
+- **Fleeting notes** — dedicated `inbox.org` for quick dumps; weekly review
+  processes inbox into proper roam notes.
+- **Habits** — dedicated `habits.org` with proper org-habit SCHEDULED repeaters
+  (`.+1d`). Daily template references habits but doesn't duplicate tracking.
+- **Timestamp filenames kept** — collision-safe, user doesn't look at filenames.
+
+#### New Packages
+
+**org-transclusion** — live embedding of content from one note inside another.
+Enables hub/MOC (Map of Content) notes that pull in sections from atomic notes.
+
+```elisp
+(use-package org-transclusion
+  :after (org general)
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "ort"  '(:ignore t :which-key "transclusion")
+    "orta" '(org-transclusion-add          :which-key "add transclusion")
+    "ortA" '(org-transclusion-add-all      :which-key "add all transclusions")
+    "ortr" '(org-transclusion-remove       :which-key "remove transclusion")
+    "ortR" '(org-transclusion-remove-all   :which-key "remove all")
+    "orte" '(org-transclusion-live-sync-start :which-key "edit source")
+    "ortm" '(org-transclusion-mode         :which-key "toggle mode")))
+```
+- Use `#+transclude: [[id:...]]` or `#+transclude: [[file:...]] :lines 5-15` in org files.
+- `org-transclusion-mode` renders transclusions inline (read-only by default).
+- `org-transclusion-live-sync-start` allows editing the source from the transclusion.
+- Perfect for MOC/hub notes that aggregate content from atomic Zettelkasten notes.
+
+**ox-hugo** — export org-roam blog posts to Hugo with leader keybindings.
+
+```elisp
+(use-package ox-hugo
+  :after (ox general)
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "ob"  '(:ignore t :which-key "blog/hugo")
+    "obe" '(org-hugo-export-wim-to-md :which-key "export to hugo")
+    "obp" '(rata-hugo-preview         :which-key "preview post")))
+
+(defun rata-hugo-preview ()
+  "Start Hugo server for previewing blog posts."
+  (interactive)
+  (let ((default-directory (expand-file-name "~/workspace/second-brain/hugo/")))
+    (if (get-buffer "*hugo-server*")
+        (browse-url "http://localhost:1313")
+      (start-process "hugo-server" "*hugo-server*" "hugo" "server" "-D")
+      (run-at-time 2 nil (lambda () (browse-url "http://localhost:1313"))))))
+```
+- `SPC o b e` exports current org buffer to Hugo markdown.
+- `SPC o b p` starts Hugo dev server and opens browser (or just opens browser if already running).
+- Blog template already has `#+hugo_base_dir` — ox-hugo reads this for export path.
+
+#### org-roam-ql Keybindings & Workflow — DONE
+
+Design keybindings for org-roam-ql queries. Useful for weekly review and note discovery.
+
+```elisp
+(use-package org-roam-ql
+  :after (org-roam general)
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "orq"  '(:ignore t :which-key "roam queries")
+    "orqo" '(rata-roam-orphan-notes      :which-key "orphan notes")
+    "orqr" '(rata-roam-recent-notes      :which-key "recent notes")
+    "orqw" '(rata-roam-work-notes        :which-key "work notes")
+    "orqt" '(rata-roam-stale-todos       :which-key "stale TODOs")))
+
+(defun rata-roam-orphan-notes ()
+  "Show org-roam notes with zero backlinks."
+  (interactive)
+  (org-roam-ql-search
+   '(not (backlink-count > 0))
+   "Orphan notes (no backlinks)"))
+
+(defun rata-roam-recent-notes ()
+  "Show org-roam notes modified in the last 7 days."
+  (interactive)
+  (org-roam-ql-search
+   `(file-mtime > ,(- (float-time) (* 7 24 60 60)))
+   "Notes modified this week"))
+
+(defun rata-roam-work-notes ()
+  "Show all org-roam notes tagged :work:."
+  (interactive)
+  (org-roam-ql-search
+   '(tags "work")
+   "Work notes"))
+
+(defun rata-roam-stale-todos ()
+  "Show org-roam notes with TODOs older than 2 weeks."
+  (interactive)
+  (org-roam-ql-search
+   '(and (todo) (file-mtime < ,(- (float-time) (* 14 24 60 60))))
+   "Stale TODOs (>2 weeks)"))
+```
+- **Note:** org-roam-ql query syntax may need adjustment — verify against actual API.
+  The exact predicates (`backlink-count`, `file-mtime`, `todo`) need testing.
+
+#### New Org Capture Templates (extend existing list)
+
+Add to `org-capture-templates`:
+
+```elisp
+;; Fleeting note / inbox
+("f" "Fleeting Note (Inbox)" entry
+ (file "~/workspace/second-brain/org-roam/inbox.org")
+ "** %U %?\n%i\n%a"
+ :empty-lines 1)
+```
+
+#### New Org-Roam Capture Templates (extend existing list)
+
+Add to `org-roam-capture-templates`:
+
+```elisp
+;; Meeting notes — minimal, auto-tagged :work: :hastodo:
+("m" "meeting" plain
+ "\n* Meeting Notes\n%?\n\n* Action Items\n** TODO \n"
+ :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
+                     "#+title: ${title}\n#+author: Jens Lordén\n#+date: %U\n#+filetags: :work:hastodo:\n")
+ :unnarrowed t)
+
+;; Tool / package evaluation
+("e" "tool evaluation" plain
+ "\n* ${title}\n\n** What it does\n%?\n\n** Pros\n- \n\n** Cons\n- \n\n** Alternatives & Comparison\n| Tool | Pros | Cons | Verdict |\n|------+------+------+---------|\n| ${title} | | | |\n| | | | |\n\n** Verdict\n/adopt · trial · reject · revisit/\n"
+ :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
+                     "#+title: ${title}\n#+author: Jens Lordén\n#+date: %U\n#+filetags: :tool-eval:\n")
+ :unnarrowed t)
+
+;; Troubleshooting log
+("T" "troubleshooting" plain
+ "\n* Problem\n%?\n\n* Environment\n- OS: \n- Tool version: \n\n* Steps Tried\n1. \n\n* Root Cause\n\n* Solution\n"
+ :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
+                     "#+title: ${title}\n#+author: Jens Lordén\n#+date: %U\n#+filetags: :troubleshooting:\n")
+ :unnarrowed t)
+```
+
+#### Tag-Based Agenda Inclusion (:hastodo: auto-tagging)
+
+Templates that include TODOs automatically add `:hastodo:` to filetags. The agenda
+scans only these files plus the existing flat task files.
+
+```elisp
+;; Add roam files with :hastodo: tag to agenda-files dynamically
+(defun rata-org-roam-agenda-files ()
+  "Return list of org-roam files tagged with :hastodo:."
+  (mapcar #'car
+          (org-roam-db-query
+           [:select [nodes:file]
+            :from tags
+            :left-join nodes
+            :on (= tags:node-id nodes:id)
+            :where (= tags:tag "hastodo")
+            :group-by nodes:file])))
+
+(defun rata-org-agenda-files-with-roam ()
+  "Return combined agenda files: static list + roam :hastodo: files."
+  (append org-agenda-files (rata-org-roam-agenda-files)))
+
+;; Override org-agenda-files dynamically
+(setq org-agenda-files-function #'rata-org-agenda-files-with-roam)
+```
+- Roam capture templates that include TODO headings set `:hastodo:` in filetags.
+- The meeting template auto-includes `:hastodo:` (has action items section).
+- Other templates: user manually adds `:hastodo:` if they add TODOs to a note.
+- **Performance:** Only queries roam DB (SQLite) — fast even at 1,400+ nodes.
+
+#### Org-Habit Setup (habits.org)
+
+Proper org-habit entries in `habits.org` with SCHEDULED repeaters. Replaces
+the checkbox-based habit tracking in the daily template.
+
+```elisp
+;; In org config — habits.org structure:
+;; * Habits
+;; ** TODO Workout
+;;    SCHEDULED: <2026-02-24 Mon .+1d>
+;;    :PROPERTIES:
+;;    :STYLE: habit
+;;    :END:
+;; ** TODO Chinese Study
+;;    SCHEDULED: <2026-02-24 Mon .+1d>
+;;    :PROPERTIES:
+;;    :STYLE: habit
+;;    :END:
+;; (etc. for: Reading, Supplements, Commit Dotfiles, Clear Inbox)
+```
+- habits.org already in `org-agenda-files` — habit graph appears in agenda.
+- `org-habit-show-habits-only-for-today nil` already set (shows full streak).
+- Daily template `Habits` section becomes optional quick-reference, not the source of truth.
+
+#### Weekly Review Agenda Command
+
+Custom agenda command for periodic review workflow:
+
+```elisp
+;; Add to org-agenda-custom-commands:
+("r" "Weekly Review"
+ ((tags-todo "+TIMESTAMP_IA<\"<-2w>\""
+             ((org-agenda-overriding-header "Stale TODOs (>2 weeks old)")
+              (org-super-agenda-groups
+               '((:auto-tags t)))))
+  (tags "+TIMESTAMP_IA>=\"<-7d>\""
+        ((org-agenda-overriding-header "Notes Modified This Week")
+         (org-agenda-files (rata-org-roam-agenda-files-all))
+         (org-super-agenda-groups
+          '((:auto-tags t)))))))
+```
+- `SPC o a` then `r` to trigger weekly review.
+- Surfaces stale TODOs (open >2 weeks) and this week's activity.
+- **Note:** The timestamp queries may need refinement — `TIMESTAMP_IA` matches
+  inactive timestamps from `:CREATED:` properties. Alternative: use file mtime
+  via a custom function.
+
+#### Work/Personal Tag Filtering
+
+Agenda already has `"w"` for Work Focus. Add consult-org-roam filtered search:
+
+```elisp
+;; Filtered roam search by tag
+(defun rata-roam-search-work ()
+  "Search org-roam notes filtered to :work: tag."
+  (interactive)
+  (let ((consult-org-roam-buffer-after-buffers t))
+    (consult-org-roam-search nil "work")))
+
+(defun rata-roam-search-personal ()
+  "Search org-roam notes excluding :work: tag."
+  (interactive)
+  (consult-org-roam-search))
+
+(rata-leader
+  :states '(normal visual insert emacs)
+  "orw" '(rata-roam-search-work     :which-key "search work notes")
+  "orP" '(rata-roam-search-personal :which-key "search personal notes"))
+```
+- Meeting template auto-tags `:work:` — all meeting notes are work-filtered.
+- `SPC o r w` searches only work-tagged roam notes.
+
+#### Fleeting Notes Workflow
+
+Dedicated `inbox.org` for quick thought capture. Weekly review processes inbox
+into proper roam notes.
+
+- **Capture:** `SPC o c f` dumps a timestamped entry into `inbox.org`.
+- **Process:** During weekly review, open `inbox.org`, read each entry, and either:
+  - Refile into an existing roam note (`org-refile`)
+  - Create a new roam note from it (`org-roam-node-insert` or manual)
+  - Delete if no longer relevant
+- **inbox.org** lives at `~/workspace/second-brain/org-roam/inbox.org`.
+
+```elisp
+;; Add inbox to agenda for visibility
+;; (already covered if inbox.org gets :hastodo: items)
+
+;; Keybinding for quick inbox capture
+(rata-leader
+  :states '(normal visual insert emacs)
+  "of" '((lambda () (interactive)
+           (org-capture nil "f"))
+         :which-key "fleeting note"))
+```
+
+#### Random Note in Dashboard (EXTEND init-dashboard)
+
+Add random note discovery to the dashboard start page:
+
+```elisp
+;; In init-dashboard.el — add to dashboard sections
+(defun rata-dashboard-random-note ()
+  "Return a random org-roam node for dashboard display."
+  (let* ((nodes (org-roam-db-query [:select [id title file] :from nodes
+                                    :order-by (random)
+                                    :limit 1]))
+         (node (car nodes)))
+    (when node
+      (format "  Rediscover: %s" (nth 1 node)))))
+```
+- Shows a random note title on the dashboard for serendipitous rediscovery.
+- Clickable — opens the note when selected.
+- Refreshes on each dashboard visit (new random note each time).
+
 ---
 
 ## 5. Keybinding Map (Complete)
@@ -1492,6 +1795,10 @@ SPC o    org
   SPC o c  org-capture
   SPC o a  org-agenda
   SPC o t  org-todo-list
+  SPC o f  fleeting note (quick capture to inbox.org)
+  SPC o b    blog/hugo
+    SPC o b e  org-hugo-export-wim-to-md (export to hugo)
+    SPC o b p  rata-hugo-preview (start server + open browser)
   SPC o r    org-roam
     SPC o r l  org-roam-buffer-toggle
     SPC o r f  org-roam-node-find        (standard)
@@ -1502,8 +1809,22 @@ SPC o    org
     SPC o r i  org-roam-node-insert
     SPC o r c  org-roam-capture
     SPC o r u  org-roam-ui-mode
+    SPC o r w  rata-roam-search-work     (search work-tagged notes)
+    SPC o r P  rata-roam-search-personal (search non-work notes)
     SPC o r d    dailies
       SPC o r d c  org-roam-dailies-capture-today
+    SPC o r t    transclusion
+      SPC o r t a  org-transclusion-add
+      SPC o r t A  org-transclusion-add-all
+      SPC o r t r  org-transclusion-remove
+      SPC o r t R  org-transclusion-remove-all
+      SPC o r t e  org-transclusion-live-sync-start (edit source)
+      SPC o r t m  org-transclusion-mode (toggle)
+    SPC o r q    roam queries (org-roam-ql)
+      SPC o r q o  rata-roam-orphan-notes (no backlinks)
+      SPC o r q r  rata-roam-recent-notes (modified this week)
+      SPC o r q w  rata-roam-work-notes (tagged :work:)
+      SPC o r q t  rata-roam-stale-todos (open >2 weeks)
 
 SPC p    project (projectile)
   SPC p p  projectile-switch-project
@@ -1638,6 +1959,21 @@ Work these in any order — all can be done independently:
 - [x] **init.el:** Add `(rata-load-module 'init-dashboard)` to module load order (after init-org).
 
 **Gotcha:** `(elpaca-wait)` must come *after* `use-package dashboard` (not before) so elpaca queues the install first. Delete stale `.elc` files after editing the module.
+
+### Remaining Work (v7) — Org & Org-Roam Supercharge
+
+- [x] **init-org.el:** Add `org-transclusion` (live content embedding, SPC o r t bindings).
+- [x] **init-org.el:** Add `ox-hugo` (blog export, SPC o b e/p bindings + `rata-hugo-preview` function).
+- [x] **init-org.el:** Add 3 new org-roam capture templates (meeting, tool-eval, troubleshooting) with auto-tagging.
+- [x] **init-org.el:** Add fleeting note capture template + `inbox.org` workflow (SPC o f quick capture).
+- [x] **init-org.el:** Implement tag-based agenda inclusion (`rata-org-roam-agenda-files` queries roam DB for `:hastodo:` tagged files).
+- [x] **init-org.el:** Design `org-roam-ql` keybindings + query functions (orphan notes, recent notes, work notes, stale TODOs).
+- [x] **init-org.el:** Add work/personal roam search filtering (`rata-roam-search-work`, SPC o r w).
+- [ ] **init-org.el:** Set up proper org-habit entries in `habits.org` (SCHEDULED repeaters, `:STYLE: habit`).
+- [x] **init-org.el:** Add weekly review agenda command (`"r"` in org-agenda-custom-commands: stale TODOs + week activity).
+- [x] **init-dashboard.el:** Add random roam note to dashboard (`rata-dashboard-random-note`).
+- [ ] **second-brain:** Create `inbox.org` file in org-roam directory.
+- [ ] **second-brain:** Convert habit checkboxes in `habits.org` to proper org-habit entries with SCHEDULED repeaters.
 
 ---
 
@@ -1797,6 +2133,39 @@ Work these in any order — all can be done independently:
 
 ---
 
+### Tag-based agenda inclusion (v7)
+- Roam capture templates with TODO sections auto-add `:hastodo:` to filetags.
+- `rata-org-roam-agenda-files` queries roam DB (SQLite) for files with `:hastodo:` tag.
+- Combined with static `org-agenda-files` via `org-agenda-files-function`.
+- **Performance:** DB query is fast (~ms) even at 1,400+ nodes. Avoid scanning
+  all roam files via `org-agenda-files` directory entry.
+- **Gotcha:** `org-agenda-files-function` is not a standard variable — may need
+  to use advice on `org-agenda-files` or `org-agenda-file-regexp` instead.
+  Test with `(setq org-agenda-files (rata-org-agenda-files-with-roam))` first,
+  then optimize with a hook if agenda becomes slow.
+
+### org-transclusion + org-roam (v7)
+- Transclusions reference roam nodes by ID: `#+transclude: [[id:abc123]]`.
+- Transclusion content is read-only by default — use `org-transclusion-live-sync-start`
+  to edit the source note from within the hub note.
+- Works well for MOC (Map of Content) notes that aggregate atomic notes.
+- Does NOT affect org-roam backlinks — transclusions don't create roam links.
+
+### ox-hugo blog workflow (v7)
+- Blog template sets `#+hugo_base_dir` pointing to Hugo project.
+- `org-hugo-export-wim-to-md` (What I Mean) exports the current subtree or file.
+- Hugo project lives at `~/workspace/second-brain/hugo/` — adjust if different.
+- `rata-hugo-preview` starts Hugo dev server and opens browser.
+- Prerequisites: `hugo` binary on `$PATH`.
+
+### org-roam-ql query accuracy (v7)
+- org-roam-ql API may differ from sketched queries. Test predicates against
+  actual `org-roam-ql-search` function signature.
+- Fallback: use raw `org-roam-db-query` with SQL for complex queries.
+- Weekly review stale TODO detection via timestamps may need custom predicate.
+
+---
+
 ## 8. Out of Scope (Explicitly Excluded)
 
 | Item | Reason |
@@ -1828,7 +2197,7 @@ Work these in any order — all can be done independently:
 | `jj.el` / Jujutsu UI | No mature Emacs package yet. Watch `https://github.com/bennyandresen/jujutsu.el` |
 | `init-mcp.el` stable | Module exists but experimental. Enable once ecosystem stabilizes. |
 | Per-project LSP config | `.dir-locals.el` patterns for LSP roots, env overrides. |
-| `org-roam-ql` keybindings | Package installed, needs keybinding design and workflow. |
+| ~~`org-roam-ql` keybindings~~ | Moved to v7 — keybinding design + query functions planned. |
 | Emacs as MCP server for Claude Code | Depends on mcp-server-emacs maturity. |
 | `evil-cleverparens` | Structural editing for lisps. Consider if elisp editing becomes frequent. |
 
@@ -1938,3 +2307,5 @@ Work these in any order — all can be done independently:
 | polymode             | Add to init-lang (v5)            | Yes                                     |
 | flyspell             | **Replaced by jinx**             | No (replaced)                           |
 | dashboard            | Add to init-dashboard (v6)       | Yes                                     |
+| org-transclusion     | Add to init-org (v7)             | Yes                                     |
+| ox-hugo              | Add to init-org (v7)             | Yes                                     |
