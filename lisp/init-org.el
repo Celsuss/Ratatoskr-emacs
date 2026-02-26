@@ -4,7 +4,9 @@
 (use-package org
   :defer t
   :after general
+  :hook (org-mode . auto-fill-mode)
   :config
+  (setq-default fill-column 80)
   (rata-leader
    :states '(normal visual)
    "o"  '(:ignore t :which-key "org")
