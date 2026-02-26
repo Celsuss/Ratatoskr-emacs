@@ -8,7 +8,7 @@
   :after general
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "am"   '(:ignore t :which-key "MCP")
     "ams"  '(mcp-server-start :which-key "start server")
     "amS"  '(mcp-server-stop  :which-key "stop server")

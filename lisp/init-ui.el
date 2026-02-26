@@ -48,7 +48,7 @@
 
 (with-eval-after-load 'init-evil
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "hf" '(helpful-callable :which-key "describe function")
     "hv" '(helpful-variable :which-key "describe variable")
     "hk" '(helpful-key      :which-key "describe key")))
@@ -62,7 +62,7 @@
 
 (with-eval-after-load 'init-evil
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "tg" '(golden-ratio-mode :which-key "golden ratio")))
 
 ;; --- hl-todo (highlight TODO/FIXME keywords) ---
@@ -80,7 +80,7 @@
 
 (with-eval-after-load 'init-evil
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "et" '(hl-todo-next     :which-key "next TODO")
     "eT" '(hl-todo-previous :which-key "prev TODO")))
 

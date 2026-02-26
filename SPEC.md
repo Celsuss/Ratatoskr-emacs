@@ -703,7 +703,12 @@ into containers, describe resources, port-forward — all without leaving the ed
 
 ```elisp
 (use-package yasnippet
-  :config (yas-global-mode 1))
+  :after general
+  :config
+  (setq yas-snippet-dirs
+        (list (expand-file-name "snippets" user-emacs-directory)
+              'yas-installed-snippets-dir))
+  (yas-global-mode 1))
 
 (use-package yasnippet-snippets
   :after yasnippet)
@@ -713,9 +718,27 @@ into containers, describe resources, port-forward — all without leaving the ed
   :config (yatemplate-fill-alist))
 ```
 
-- Store custom snippets in `~/.config/emacs-from-scratch/snippets/`.
+- Custom snippets live in `snippets/` at repo root (loaded before community snippets).
 - `SPC i s` → `yas-insert-snippet`.
 - `SPC i n` → `yas-new-snippet`.
+
+#### Custom Snippet Inventory (59 snippets)
+
+**org-mode** (14): `<sp` src-python, `<se` src-elisp, `<ss` src-shell, `<sr` src-rust, `<sy` src-yaml, `<w` warning, `<n` note, `<t` tip, `prop` properties drawer, `roam` org-roam header (auto ID + timestamp), `hugo` ox-hugo frontmatter, `todo` TODO with deadline, `meet` meeting notes template, `tbl` table.
+
+**python-mode** (12): `cls` class with `__init__`, `defs` staticmethod, `defcm` classmethod, `prop` property decorator, `adef` async def, `acls` async context manager, `log` logger setup, `fix` pytest fixture, `ptest` pytest test (arrange/act/assert), `tparam` pytest parametrize, `pydantic` BaseModel, `typroto` typing Protocol.
+
+**rust-mode** (10): `der` derive struct, `implnew` impl new, `impldisplay` impl Display, `implfrom` impl From, `testmod` test module, `res` Result type, `clap` Clap CLI struct, `serde` Serde struct, `tokasync` tokio async main, `modpub` pub mod + re-export.
+
+**emacs-lisp-mode** (6): `up` use-package block, `rata` rata-leader keybinding, `hook` add-hook lambda, `af` advice-add, `header` module file header, `defcmd` interactive command.
+
+**terraform-mode** (5): `k8s` Kubernetes provider, `helm` helm_release, `backend` S3 backend, `locals` common tags, `mod` module source.
+
+**yaml-mode** (5): `deploy` K8s Deployment, `svc` Service, `cm` ConfigMap, `sec` Secret, `ing` Ingress.
+
+**dockerfile-mode** (3): `multi` multi-stage build, `pyapp` Python app, `rustapp` Rust app (distroless).
+
+**sh-mode** (4): `strict` bash strict mode, `func` function, `trap` trap cleanup, `getopts` getopts loop.
 
 ### 4.9 `init-llm.el` — DONE
 

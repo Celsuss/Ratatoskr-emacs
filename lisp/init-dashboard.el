@@ -283,7 +283,7 @@
 
   ;; Keybinding to open dashboard
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "bh" '(dashboard-open :which-key "home (dashboard)"))
 
   (dashboard-setup-startup-hook))

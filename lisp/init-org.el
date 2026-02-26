@@ -6,7 +6,7 @@
   :after general
   :config
   (rata-leader
-   :states '(normal visual insert emacs)
+   :states '(normal visual)
    "o"  '(:ignore t :which-key "org")
    "oc" '(org-capture :which-key "org capture")
    "oa" '(org-agenda :which-key "org agenda")
@@ -199,7 +199,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 
   :config
   (rata-leader
-   :states '(normal visual insert emacs)
+   :states '(normal visual)
    "or"  '(:ignore t :which-key "Org roam")
    "orl" '(org-roam-buffer-toggle :which-key "toggle buffer")
    "orf" '(org-roam-node-find :which-key "find node")
@@ -296,7 +296,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
      "Stale TODOs (>2 weeks)"))
 
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "orq"  '(:ignore t :which-key "roam queries")
     "orqo" '(rata-roam-orphan-notes  :which-key "orphan notes")
     "orqr" '(rata-roam-recent-notes  :which-key "recent notes")
@@ -417,7 +417,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
     (consult-org-roam-search))
 
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "ors" '(consult-org-roam-search      :which-key "search roam")
     "orb" '(consult-org-roam-backlinks   :which-key "backlinks consult")
     "orF" '(consult-org-roam-file-find   :which-key "find file consult")
@@ -429,7 +429,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
   :after (org-roam general)
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "oru" '(org-roam-ui-mode :which-key "roam graph UI")))
 
 ;; --- Org Download (paste/drag images) ---
@@ -446,7 +446,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
   :after (org general)
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "ort"  '(:ignore t :which-key "transclusion")
     "orta" '(org-transclusion-add            :which-key "add transclusion")
     "ortA" '(org-transclusion-add-all        :which-key "add all transclusions")
@@ -469,7 +469,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
         (run-at-time 2 nil (lambda () (browse-url "http://localhost:1313"))))))
 
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "ob"  '(:ignore t :which-key "blog/hugo")
     "obe" '(org-hugo-export-wim-to-md :which-key "export to hugo")
     "obp" '(rata-hugo-preview         :which-key "preview post")))
@@ -480,7 +480,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
          (markdown-mode . writegood-mode))
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "tw"  '(writegood-mode :which-key "writegood")))
 
 (provide 'init-org)

@@ -17,7 +17,7 @@
   (lsp-completion-provider :none)
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "L"   '(:ignore t :which-key "lsp")
     "Ld"  '(lsp-find-definition :which-key "definition")
     "Lr"  '(lsp-find-references :which-key "references")
@@ -44,7 +44,7 @@
   (global-flycheck-mode)
   (setq flycheck-display-errors-delay 0.3)
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "en"  '(flycheck-next-error :which-key "next error")
     "ep"  '(flycheck-previous-error :which-key "prev error")))
 
@@ -60,7 +60,7 @@
   :commands (magit-status magit-blame magit-log magit-find-file magit-diff-buffer-file)
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "gg"  '(magit-status :which-key "status")
     "gG"  '(consult-git-grep :which-key "git grep")
     "gs"  '(magit-status :which-key "status (alt)")
@@ -75,7 +75,7 @@
   :after magit
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "gF"  '(forge-list-pullreqs :which-key "pull requests")
     "gI"  '(forge-list-issues :which-key "issues")))
 
@@ -90,7 +90,7 @@
   :commands (vterm-toggle vterm-toggle-cd)
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "t"   '(:ignore t :which-key "toggle")
     "tt"  '(vterm-toggle :which-key "terminal")
     "tT"  '(vterm-toggle-cd :which-key "terminal (cd)")))
@@ -107,7 +107,7 @@
   :config
   (projectile-mode +1)
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "pp"  '(projectile-switch-project :which-key "switch project")
     "pb"  '(consult-project-buffer :which-key "project buffer")
     "pt"  '(projectile-run-project-tests :which-key "run tests")
@@ -120,7 +120,7 @@
   :after (consult projectile)
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "pf"  '(consult-projectile-find-file :which-key "find file")
     "ps"  '(consult-projectile-ripgrep :which-key "ripgrep project")))
 
@@ -131,7 +131,7 @@
   (dirvish-override-dired-mode)
   (setq dirvish-attributes '(nerd-icons file-size vc-state git-msg))
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "fd"  '(dirvish :which-key "dirvish")))
 
 ;; --- Esup (startup profiler) ---
@@ -142,7 +142,7 @@
 
 (with-eval-after-load 'general
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "hP"  '(esup :which-key "profile startup")))
 
 ;; --- Jinx (modern spellcheck, replaces flyspell) ---
@@ -153,7 +153,7 @@
   :config
   (global-jinx-mode)
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "ts" '(jinx-correct :which-key "spell correct")))
 
 ;; --- Diff-hl (git gutter indicators) ---
@@ -172,7 +172,7 @@
   :after (consult flycheck general)
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "el" '(consult-flycheck :which-key "list errors")))
 
 ;; --- Editorconfig ---
@@ -186,7 +186,7 @@
   :after general
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "go" '(browse-at-remote :which-key "open on remote")))
 
 ;; --- Restclient (HTTP client) ---
@@ -195,7 +195,7 @@
   :after general
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     :keymaps 'restclient-mode-map
     "mr"  '(:ignore t :which-key "restclient")
     "mrr" '(restclient-http-send-current      :which-key "send request")

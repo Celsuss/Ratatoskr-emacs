@@ -87,7 +87,7 @@ The config follows a modular structure: `early-init.el` → `init.el` → module
 
 ```elisp
 (rata-leader
-  :states '(normal visual insert emacs)
+  :states '(normal visual)
   "x"  '(:ignore t :which-key "group name")
   "xx" '(some-command :which-key "description"))
 ```

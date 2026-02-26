@@ -7,7 +7,7 @@
   :commands kubel
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "ak"  '(:ignore t :which-key "kubernetes")
     "akk" '(kubel :which-key "kubel")
     "akn" '(kubel-set-namespace :which-key "set namespace")

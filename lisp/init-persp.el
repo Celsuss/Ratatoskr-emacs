@@ -9,7 +9,7 @@
   :config
   (persp-mode 1)
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "l"   '(:ignore t :which-key "layouts")
     "ll"  '(persp-switch :which-key "switch layout")
     "ln"  '(persp-add-new :which-key "new layout")

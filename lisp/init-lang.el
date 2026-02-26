@@ -33,7 +33,7 @@
   :hook (rustic-mode . cargo-minor-mode)
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     :keymaps 'rustic-mode-map
     "mc"  '(:ignore t :which-key "cargo")
     "mcb" '(cargo-process-build       :which-key "cargo build")
@@ -86,7 +86,7 @@
       (compile "terraform init")))
 
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     :keymaps 'terraform-mode-map
     "mT"  '(:ignore t :which-key "terraform")
     "mTp" '(rata-terraform-plan  :which-key "terraform plan")
@@ -103,7 +103,7 @@
   :commands docker
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "aD" '(docker :which-key "docker")))
 
 ;; --- Markdown ---
@@ -121,7 +121,7 @@
   :commands markdown-preview-mode
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     :keymaps 'markdown-mode-map
     "mp"  '(:ignore t :which-key "preview")
     "mpp" '(markdown-preview-mode :which-key "preview in browser")))
@@ -132,7 +132,7 @@
   :config
   (dap-auto-configure-mode t)
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "d"   '(:ignore t :which-key "debug")
     "dd"  '(dap-debug :which-key "debug")
     "dn"  '(dap-next :which-key "next")
@@ -154,7 +154,7 @@
   :after (python general)
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     :keymaps 'python-ts-mode-map
     "mt"  '(:ignore t :which-key "test")
     "mtt" '(python-pytest-file :which-key "test file")
@@ -196,7 +196,7 @@
       (compile "updpkgsums")))
 
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     :keymaps 'pkgbuild-mode-map
     "mp"  '(:ignore t :which-key "pkgbuild")
     "mpb" '(rata-makepkg-build    :which-key "makepkg build")
@@ -215,7 +215,7 @@
   :after (ansible general)
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     :keymaps 'ansible-key-map
     "ma"  '(:ignore t :which-key "ansible")
     "mad" '(ansible-doc :which-key "ansible doc")))
@@ -226,7 +226,7 @@
   :commands (ein:run ein:login ein:notebooklist-open)
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "aj"  '(:ignore t :which-key "jupyter")
     "ajr" '(ein:run                  :which-key "start jupyter")
     "ajl" '(ein:login                :which-key "login to jupyter")

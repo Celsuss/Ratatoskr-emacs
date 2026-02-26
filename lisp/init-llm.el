@@ -11,7 +11,7 @@
     :stream t)
   (setq gptel-default-mode 'org-mode)
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "ai"    '(:ignore t :which-key "AI")
     "aig"   '(:ignore t :which-key "gptel")
     "aigg"  '(gptel           :which-key "gptel chat")
@@ -27,7 +27,7 @@
   (setq ellama-provider
         (make-llm-ollama :chat-model "mistral:latest" :embedding-model "nomic-embed-text"))
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "aie"   '(:ignore t :which-key "ellama")
     "aiee"  '(ellama-chat         :which-key "ellama chat")
     "aiea"  '(ellama-ask-about    :which-key "ask about region")
@@ -39,7 +39,7 @@
   :config
   (setq aidermacs-default-model "claude-sonnet-4-5")
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "aia"   '(:ignore t :which-key "aider")
     "aiaa"  '(aidermacs-transient-menu :which-key "aider menu")
     "aiao"  '(aidermacs-open           :which-key "open aider")))
@@ -51,7 +51,7 @@
   (agent-shell-anthropic-claude-acp-command '("claude-code-acp"))
   :config
   (rata-leader
-    :states '(normal visual insert emacs)
+    :states '(normal visual)
     "aic"   '(:ignore t :which-key "claude")
     "aics"  '(agent-shell                             :which-key "agent shell")
     "aicc"  '(agent-shell-anthropic-start-claude-code  :which-key "claude code")))
