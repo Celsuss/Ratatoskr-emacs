@@ -37,7 +37,7 @@ init.el                — elpaca bootstrap, module loader
   ├── init-lang        (rustic, cargo, go, python, dockerfile, terraform, just, docker, markdown, markdown-preview-mode, dap-mode, tree-sitter, yaml-pro, python-pytest, pkgbuild-mode, ansible-mode, ein, polymode)  PARTIAL
   ├── init-k8s         (kubel, kubel-evil — kubectl interface)                    ✓ DONE
   ├── init-snippets    (yasnippet, yasnippet-snippets, yatemplate)          ✓ DONE
-  ├── init-llm         (gptel, ellama, aidermacs)                           ✓ DONE
+  ├── init-llm         (gptel, ellama, aidermacs, agent-shell)               ✓ DONE
   ├── init-mcp         (mcp — experimental, commented out in init.el)       ✓ DONE
   ├── init-persp       (persp-mode workspaces, SPC L bindings)              ✓ DONE
   ├── init-org         (org, org-roam, org-super-agenda, org-kanban, org-modern, org-appear, consult-org-roam, org-roam-ui, org-roam-ql, writegood-mode, org-download, org-transclusion, ox-hugo)  DONE
@@ -719,9 +719,9 @@ into containers, describe resources, port-forward — all without leaving the ed
 
 ### 4.9 `init-llm.el` — DONE
 
-**Packages:** `gptel`, `ellama`, `aidermacs`
+**Packages:** `gptel`, `ellama`, `aidermacs`, `agent-shell`
 
-**Strategy:** Ollama for gptel/ellama (local), Anthropic Claude for aidermacs (agentic).
+**Strategy:** Ollama for gptel/ellama/aidermacs (local), Claude Code for agent-shell (web login).
 
 #### gptel
 ```elisp
@@ -770,8 +770,22 @@ into containers, describe resources, port-forward — all without leaving the ed
     "aio"  '(aidermacs-open           :which-key "open aider")))
 ```
 
-**API key management:** Keys should live in `~/.authinfo.gpg` or be set via `auth-source`.
-Do not hardcode in config.
+#### agent-shell
+```elisp
+(use-package agent-shell
+  :after general
+  :config
+  (rata-leader
+    :states '(normal visual insert emacs)
+    "aia"  '(agent-shell                             :which-key "agent shell")
+    "aiC"  '(agent-shell-anthropic-start-claude-code  :which-key "claude code")))
+```
+
+**Prerequisites:** Claude Code CLI installed (`npm install -g @anthropic-ai/claude-code`)
+and authenticated via `claude login` (web login — no API key needed).
+
+**API key management:** Not required for the current setup. gptel/ellama/aidermacs use
+Ollama locally, agent-shell uses Claude Code web login.
 
 ### 4.10 `init-mcp.el` — DONE (Experimental)
 
@@ -1654,6 +1668,8 @@ SPC a    AI
     SPC a i e  ellama-enhance-code
     SPC a i A  aidermacs-transient-menu
     SPC a i o  aidermacs-open
+    SPC a i a  agent-shell
+    SPC a i C  claude code
   SPC a k    kubernetes
     SPC a k k  kubel
     SPC a k n  kubel-set-namespace
@@ -2314,7 +2330,7 @@ Work these in any order — all can be done independently:
 | mcp-server           | Add to init-mcp (experimental)   | Experimental                            |
 | mcp                  | Add to init-mcp (experimental)   | Experimental                            |
 | claude-code-ide?     | **Replaced by aidermacs**        | No                                      |
-| Emacs Agent Shell?   | **Covered by aidermacs**         | No                                      |
+| agent-shell          | Add to init-llm                  | Yes                                     |
 | ECA Emacs?           | Not needed                       | No                                      |
 | no-littering         | Add to init-system               | Yes                                     |
 | exec-path-from-shell | Add to init-system               | Yes                                     |

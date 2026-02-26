@@ -111,6 +111,11 @@
   :defer t)
 
 ;; --- Markdown Preview ---
+(use-package web-server
+  :ensure (web-server :host github :repo "eschulte/emacs-web-server"
+                      :main "web-server.el")
+  :defer t)
+
 (use-package markdown-preview-mode
   :after (markdown-mode general)
   :commands markdown-preview-mode

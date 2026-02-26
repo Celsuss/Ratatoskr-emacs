@@ -71,3 +71,25 @@ lock:
 # Update all packages and regenerate lockfile
 update:
     {{emacs_bin}} --init-directory {{init_dir}} --batch -l early-init.el -l init.el --eval "(progn (elpaca-update-all) (elpaca-lock))"
+
+# Install system dependencies (Arch Linux)
+install-deps:
+    @echo "=== Core tools ==="
+    sudo pacman -S --needed --noconfirm \
+        git ripgrep fd enchant shfmt editorconfig-core-c
+    @echo ""
+    @echo "=== Language servers & formatters ==="
+    sudo pacman -S --needed --noconfirm \
+        python-black prettier rust-analyzer gopls pyright
+    @echo ""
+    @echo "=== Dev tools ==="
+    sudo pacman -S --needed --noconfirm \
+        cargo python-pytest terraform kubectl docker hugo
+    @echo ""
+    @echo "=== AUR packages ==="
+    yay -S --needed --noconfirm claude-code-acp
+    @echo ""
+    @echo "=== Rust components ==="
+    rustup component add rustfmt 2>/dev/null || true
+    @echo ""
+    @echo "All system dependencies installed."
