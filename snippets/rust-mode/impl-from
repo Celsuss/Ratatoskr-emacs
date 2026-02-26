@@ -1,0 +1,9 @@
+# -*- mode: snippet -*-
+# name: impl-from
+# key: implfrom
+# --
+impl From<${1:Source}> for ${2:Target} {
+    fn from(${3:value}: $1) -> Self {
+        ${0:todo!()}
+    }
+}

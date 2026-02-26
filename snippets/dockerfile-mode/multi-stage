@@ -1,0 +1,15 @@
+# -*- mode: snippet -*-
+# name: multi-stage
+# key: multi
+# --
+FROM ${1:golang:1.21-alpine} AS builder
+WORKDIR /app
+COPY . .
+RUN ${2:go build -o /app/bin}
+
+FROM ${3:alpine:3.18}
+COPY --from=builder /app/bin /usr/local/bin/
+${4:RUN apk add --no-cache ca-certificates}
+USER nobody
+ENTRYPOINT ["${5:/usr/local/bin/app}"]
+$0

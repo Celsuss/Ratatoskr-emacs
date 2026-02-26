@@ -1,0 +1,14 @@
+# -*- mode: snippet -*-
+# name: rust-app
+# key: rustapp
+# --
+FROM rust:${1:1.75} AS builder
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY src/ src/
+RUN cargo build --release
+
+FROM gcr.io/distroless/cc-debian12
+COPY --from=builder /app/target/release/${2:app} /usr/local/bin/
+ENTRYPOINT ["${3:/usr/local/bin/$2}"]
+$0

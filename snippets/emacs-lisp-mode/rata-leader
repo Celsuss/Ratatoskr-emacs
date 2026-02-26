@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: rata-leader
+# key: rata
+# --
+(rata-leader
+  :states '(normal visual insert emacs)
+  "${1:prefix}"  '(:ignore t :which-key "${2:group}")
+  "${1:prefix}${3:key}" '(${4:command} :which-key "${5:description}"))

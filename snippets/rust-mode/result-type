@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: result-type
+# key: res
+# --
+Result<${1:T}, ${2:Error}>

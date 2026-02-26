@@ -1,0 +1,21 @@
+# -*- mode: snippet -*-
+# name: meeting
+# key: meet
+# --
+** ${1:Meeting Title}
+:PROPERTIES:
+:ID: `(org-id-new)`
+:END:
+#+filetags: :work:meeting:hastodo:
+
+*Date:* `(format-time-string "[%Y-%m-%d %a %H:%M]")`
+*Attendees:* ${2:names}
+
+*** Agenda
+- ${3:topic}
+
+*** Notes
+$0
+
+*** Action Items
+- [ ]

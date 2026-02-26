@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: table
+# key: tbl
+# --
+| ${1:Header 1} | ${2:Header 2} | ${3:Header 3} |
+|---+---+---|
+| $0 |  |  |

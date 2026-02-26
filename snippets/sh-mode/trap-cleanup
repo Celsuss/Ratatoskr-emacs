@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+# name: trap-cleanup
+# key: trap
+# --
+cleanup() {
+    ${1:rm -rf "\$TMPDIR"}
+}
+trap cleanup EXIT
+
+$0

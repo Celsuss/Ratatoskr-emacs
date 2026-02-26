@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: add-hook-lambda
+# key: hook
+# --
+(add-hook '${1:mode}-hook
+          (lambda ()
+            ${0:}))

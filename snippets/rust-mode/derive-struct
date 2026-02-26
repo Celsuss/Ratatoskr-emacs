@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: derive-struct
+# key: der
+# --
+#[derive(Debug, Clone${1:, Serialize, Deserialize})]
+pub struct ${2:Name} {
+    ${0:field: Type,}
+}

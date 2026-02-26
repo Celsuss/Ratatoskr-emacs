@@ -1,0 +1,25 @@
+# -*- mode: snippet -*-
+# name: k8s-ingress
+# key: ing
+# --
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ${1:name}
+  namespace: ${2:default}
+  annotations:
+    ${3:nginx.ingress.kubernetes.io/rewrite-target: /}
+spec:
+  ingressClassName: ${4:nginx}
+  rules:
+    - host: ${5:example.com}
+      http:
+        paths:
+          - path: ${6:/}
+            pathType: Prefix
+            backend:
+              service:
+                name: ${7:service}
+                port:
+                  number: ${8:80}
+$0

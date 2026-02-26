@@ -1,0 +1,13 @@
+# -*- mode: snippet -*-
+# name: async-context-manager
+# key: acls
+# --
+class ${1:ClassName}:
+    """${2:Async context manager.}"""
+
+    async def __aenter__(self):
+        ${3:pass}
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        ${0:pass}

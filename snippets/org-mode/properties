@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: properties
+# key: prop
+# --
+:PROPERTIES:
+:${1:PROPERTY}: ${2:value}
+:END:
+$0

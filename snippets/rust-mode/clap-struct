@@ -1,0 +1,15 @@
+# -*- mode: snippet -*-
+# name: clap-struct
+# key: clap
+# --
+use clap::Parser;
+
+/// ${1:CLI description}
+#[derive(Parser, Debug)]
+#[command(version, about)]
+struct ${2:Args} {
+    /// ${3:Argument description}
+    #[arg(short, long)]
+    ${4:name}: ${5:String},
+    $0
+}

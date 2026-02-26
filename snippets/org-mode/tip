@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: tip
+# key: <t
+# --
+#+begin_tip
+$0
+#+end_tip

@@ -1,0 +1,13 @@
+# -*- mode: snippet -*-
+# name: pytest-parametrize
+# key: tparam
+# --
+@pytest.mark.parametrize(
+    "${1:arg}",
+    [
+        ${2:value1},
+        ${3:value2},
+    ],
+)
+def test_${4:name}($1):
+    ${0:pass}

@@ -1,0 +1,16 @@
+# -*- mode: snippet -*-
+# name: helm-release
+# key: helm
+# --
+resource "helm_release" "${1:name}" {
+  name       = "$1"
+  repository = "${2:https://charts.example.com}"
+  chart      = "${3:chart}"
+  version    = "${4:1.0.0}"
+  namespace  = "${5:default}"
+
+  values = [
+    file("${6:values.yaml}")
+  ]
+  $0
+}

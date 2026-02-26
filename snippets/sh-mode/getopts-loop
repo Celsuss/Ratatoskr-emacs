@@ -1,0 +1,14 @@
+# -*- mode: snippet -*-
+# name: getopts-loop
+# key: getopts
+# --
+while getopts "${1:hv}" opt; do
+    case "\$opt" in
+        h) echo "Usage: \$0 [-h] [-v]"; exit 0 ;;
+        v) VERBOSE=1 ;;
+        *) echo "Unknown option: -\$opt" >&2; exit 1 ;;
+    esac
+done
+shift \$((OPTIND - 1))
+
+$0

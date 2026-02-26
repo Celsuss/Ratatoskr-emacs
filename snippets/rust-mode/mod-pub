@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: mod-pub
+# key: modpub
+# --
+pub mod ${1:module};
+pub use $1::${0:*};

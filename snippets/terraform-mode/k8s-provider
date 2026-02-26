@@ -1,0 +1,9 @@
+# -*- mode: snippet -*-
+# name: k8s-provider
+# key: k8s
+# --
+provider "kubernetes" {
+  config_path    = "${1:~/.kube/config}"
+  config_context = "${2:context}"
+}
+$0

@@ -1,0 +1,11 @@
+# -*- mode: snippet -*-
+# name: hugo-frontmatter
+# key: hugo
+# --
+#+hugo_base_dir: ~/workspace/second-brain/hugo/
+#+hugo_section: ${1:posts}
+#+hugo_auto_set_lastmod: t
+#+hugo_tags: ${2:tag}
+#+hugo_draft: ${3:true}
+
+$0

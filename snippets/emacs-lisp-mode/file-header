@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+# name: file-header
+# key: header
+# --
+;;; -*- lexical-binding: t; -*-
+;;; ${1:filename}.el --- ${2:Description}
+
+$0
+
+(provide '${1:$(yas-text)})

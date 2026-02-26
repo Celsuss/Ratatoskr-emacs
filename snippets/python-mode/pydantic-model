@@ -1,0 +1,12 @@
+# -*- mode: snippet -*-
+# name: pydantic-model
+# key: pydantic
+# --
+from pydantic import BaseModel
+
+
+class ${1:ModelName}(BaseModel):
+    """${2:Model description.}"""
+
+    ${3:field}: ${4:str}
+    $0

@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: interactive-command
+# key: defcmd
+# --
+(defun ${1:rata-command} ()
+  "${2:Docstring.}"
+  (interactive)
+  ${0:})

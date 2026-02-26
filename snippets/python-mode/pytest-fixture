@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: pytest-fixture
+# key: fix
+# --
+@pytest.fixture(scope="${1:function}")
+def ${2:name}(${3:}):
+    """${4:Fixture description.}"""
+    ${0:pass}

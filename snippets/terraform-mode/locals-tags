@@ -1,0 +1,13 @@
+# -*- mode: snippet -*-
+# name: locals-tags
+# key: locals
+# --
+locals {
+  common_tags = {
+    Environment = var.environment
+    Project     = "${1:project}"
+    ManagedBy   = "terraform"
+    Team        = "${2:team}"
+  }
+}
+$0

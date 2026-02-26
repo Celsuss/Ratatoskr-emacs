@@ -1,0 +1,13 @@
+# -*- mode: snippet -*-
+# name: typing-protocol
+# key: typroto
+# --
+from typing import Protocol
+
+
+class ${1:ProtocolName}(Protocol):
+    """${2:Protocol description.}"""
+
+    def ${3:method}(self${4:, ${5:args}}) -> ${6:None}:
+        ...
+    $0

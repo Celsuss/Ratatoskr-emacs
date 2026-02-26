@@ -1,0 +1,14 @@
+# -*- mode: snippet -*-
+# name: backend-s3
+# key: backend
+# --
+terraform {
+  backend "s3" {
+    bucket         = "${1:tf-state}"
+    key            = "${2:state.tfstate}"
+    region         = "${3:eu-west-1}"
+    encrypt        = true
+    dynamodb_table = "${4:tf-lock}"
+  }
+}
+$0

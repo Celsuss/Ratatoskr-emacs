@@ -1,0 +1,12 @@
+# -*- mode: snippet -*-
+# name: pytest-test
+# key: ptest
+# --
+def test_${1:name}(${2:}):
+    """${3:Test description.}"""
+    # Arrange
+    ${4:}
+    # Act
+    ${5:result = None}
+    # Assert
+    assert ${0:result}

@@ -1,0 +1,11 @@
+# -*- mode: snippet -*-
+# name: impl-new
+# key: implnew
+# --
+impl ${1:Type} {
+    pub fn new(${2:args}) -> Self {
+        Self {
+            ${0:}
+        }
+    }
+}

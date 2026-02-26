@@ -1,0 +1,12 @@
+# -*- mode: snippet -*-
+# name: roam-header
+# key: roam
+# --
+:PROPERTIES:
+:ID: `(org-id-new)`
+:END:
+#+title: ${1:Title}
+#+filetags: :${2:tag}:
+#+created: `(format-time-string "[%Y-%m-%d %a]")`
+
+$0

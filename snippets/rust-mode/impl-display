@@ -1,0 +1,9 @@
+# -*- mode: snippet -*-
+# name: impl-display
+# key: impldisplay
+# --
+impl fmt::Display for ${1:Type} {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "${2:{}}", ${0:self})
+    }
+}

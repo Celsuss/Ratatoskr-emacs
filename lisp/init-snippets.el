@@ -4,6 +4,9 @@
 (use-package yasnippet
   :after general
   :config
+  (setq yas-snippet-dirs
+        (list (expand-file-name "snippets" user-emacs-directory)
+              'yas-installed-snippets-dir))
   (yas-global-mode 1)
   (rata-leader
     :states '(normal visual insert emacs)

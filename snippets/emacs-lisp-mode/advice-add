@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: advice-add
+# key: af
+# --
+(advice-add '${1:function} :${2:around}
+            (lambda (${3:orig-fn &rest args})
+              ${0:}))

@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: property-decorator
+# key: prop
+# --
+@property
+def ${1:name}(self):
+    """${2:Docstring.}"""
+    return self._${1:$(yas-text)}

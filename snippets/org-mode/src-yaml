@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: src-yaml
+# key: <sy
+# --
+#+begin_src yaml
+$0
+#+end_src
