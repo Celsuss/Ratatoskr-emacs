@@ -28,6 +28,15 @@
   (general-create-definer rata-leader
     :prefix "SPC")
 
+  (general-create-definer rata-local-leader
+    :prefix ",")
+
+  (general-simulate-key "C-c C-c" :name rata-send-c-c-c-c)
+
+  (rata-local-leader
+    :states '(normal visual)
+    "," '(rata-send-c-c-c-c :which-key "C-c C-c"))
+
   ;; Custom functions for new keybindings
   (defun rata-kill-buffer-and-window ()
     "Kill the current buffer and delete its window."
