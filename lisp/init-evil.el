@@ -160,6 +160,9 @@
   ;; Hide winum 1-9 from which-key (key 0 shows "window 0..9")
   ;; Must be pushed AFTER rata-leader so it lands in front of general.el's rules
   (push '((nil . "winum-select-window-[1-9]") . t)
+        which-key-replacement-alist)
+  ;; Rename key "0" to "0..9" in which-key display
+  (push '(("0" . "winum-select-window-0-or-10") . ("0..9" . "window 0..9"))
         which-key-replacement-alist))
 
 ;; --- Undo-fu (better undo for evil) ---
