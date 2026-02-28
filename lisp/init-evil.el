@@ -52,7 +52,7 @@
    "/"   '(consult-ripgrep :which-key "project search")
 
    "f"   '(:ignore t :which-key "files")
-   "ff"  '(consult-find :which-key "find file")
+   "ff"  '(find-file :which-key "find file")
    "fs"  '(save-buffer :which-key "save file")
    "fr"  '(consult-recent-file :which-key "recent file")
    "fL"  '(consult-locate :which-key "locate file")
