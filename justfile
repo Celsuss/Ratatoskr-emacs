@@ -74,25 +74,55 @@ update:
 
 # Install system dependencies (Arch Linux)
 install-deps:
-    @echo "=== Core tools ==="
-    sudo pacman -S --needed --noconfirm \
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    pacman_pkgs=(
+        # Core tools
         git ripgrep fd enchant shfmt editorconfig-core-c
-    @echo ""
-    @echo "=== Language servers & formatters ==="
-    sudo pacman -S --needed --noconfirm \
-        python-black prettier rust-analyzer gopls pyright
-    @echo ""
-    @echo "=== Dev tools ==="
-    sudo pacman -S --needed --noconfirm \
-        cargo python-pytest terraform kubectl docker hugo
-    @echo ""
-    @echo "=== AUR packages ==="
-    yay -S --needed --noconfirm claude-code-acp
-    @echo ""
-    @echo "=== Rust components ==="
+        # Language servers & formatters
+        python-black prettier rust-analyzer gopls pyright go-tools
+        # Dev tools
+        cargo python-pytest terraform kubectl docker hugo delve
+    )
+
+    aur_pkgs=(claude-code-acp gomodifytags)
+
+    # --- Pacman packages ---
+    missing_pacman=()
+    for pkg in "${pacman_pkgs[@]}"; do
+        if ! pacman -Q "$pkg" &>/dev/null; then
+            missing_pacman+=("$pkg")
+        fi
+    done
+
+    if [ ${#missing_pacman[@]} -gt 0 ]; then
+        echo "Missing pacman packages: ${missing_pacman[*]}"
+        sudo pacman -S "${missing_pacman[@]}"
+    else
+        echo "All pacman packages already installed."
+    fi
+
+    # --- AUR packages ---
+    missing_aur=()
+    for pkg in "${aur_pkgs[@]}"; do
+        if ! yay -Q "$pkg" &>/dev/null; then
+            missing_aur+=("$pkg")
+        fi
+    done
+
+    if [ ${#missing_aur[@]} -gt 0 ]; then
+        echo "Missing AUR packages: ${missing_aur[*]}"
+        yay -S "${missing_aur[@]}"
+    else
+        echo "All AUR packages already installed."
+    fi
+
+    # --- Rust components (not pacman, no partial upgrade risk) ---
     rustup component add rustfmt 2>/dev/null || true
-    @echo ""
-    @echo "All system dependencies installed."
+
+    echo ""
+    echo "Done."
 
 # Run convention linting (fast, no Emacs needed)
 lint:
