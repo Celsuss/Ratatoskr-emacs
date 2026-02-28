@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Pre-commit hook: run the full test suite before allowing a commit.
+# Install with: just install-hooks
+
+set -euo pipefail
+
+echo "Running pre-commit checks..."
+just test
+
+echo "All checks passed."

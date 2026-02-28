@@ -121,3 +121,8 @@ compile:
 
 # Run all tests (lint + compile + startup)
 test: lint compile batch
+
+# Configure git to use .githooks/ for hooks (one-time setup)
+install-hooks:
+    git config core.hooksPath .githooks
+    @echo "Git hooks installed from .githooks/"
