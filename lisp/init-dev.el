@@ -32,6 +32,7 @@
 ;; --- LSP UI ---
 (use-package lsp-ui
   :after lsp-mode
+  :hook (lsp-mode . lsp-ui-mode)
   :custom
   (lsp-ui-doc-enable t)
   (lsp-ui-doc-show-with-cursor t)
