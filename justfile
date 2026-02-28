@@ -81,9 +81,9 @@ install-deps:
         # Core tools
         git ripgrep fd enchant shfmt editorconfig-core-c
         # Language servers & formatters
-        python-black prettier rust-analyzer gopls pyright go-tools
+        python-black prettier gopls pyright go-tools
         # Dev tools
-        cargo python-pytest terraform kubectl docker hugo delve
+        rustup python-pytest terraform kubectl docker hugo delve
     )
 
     aur_pkgs=(claude-code-acp gomodifytags)
@@ -118,8 +118,11 @@ install-deps:
         echo "All AUR packages already installed."
     fi
 
-    # --- Rust components (not pacman, no partial upgrade risk) ---
-    rustup component add rustfmt 2>/dev/null || true
+    # --- Rust toolchain (rustup, not pacman — avoids binary conflicts) ---
+    rustup toolchain install nightly 2>/dev/null || true
+    rustup component add rust-analyzer --toolchain nightly 2>/dev/null || true
+    rustup component add clippy 2>/dev/null || true
+    rustup component add rustfmt --toolchain nightly 2>/dev/null || true
 
     echo ""
     echo "Done."
