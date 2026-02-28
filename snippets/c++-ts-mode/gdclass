@@ -1,0 +1,31 @@
+# -*- mode: snippet -*-
+# name: GDExtension class header
+# key: gdclass
+# --
+#ifndef ${1:CLASS_NAME}_H
+#define $1_H
+
+#include <godot_cpp/classes/${2:node}.hpp>
+
+namespace godot {
+
+class ${3:$1} : public ${4:Node} {
+	GDCLASS($3, $4)
+
+protected:
+	static void _bind_methods();
+
+public:
+	$3();
+	~$3() override;
+
+	void _ready() override;
+	void _process(double delta) override;
+
+private:
+	$0
+};
+
+} // namespace godot
+
+#endif // $1_H

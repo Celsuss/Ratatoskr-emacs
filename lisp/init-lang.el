@@ -10,7 +10,9 @@
         (json       "https://github.com/tree-sitter/tree-sitter-json")
         (yaml       "https://github.com/ikatyang/tree-sitter-yaml")
         (toml       "https://github.com/tree-sitter/tree-sitter-toml")
-        (dockerfile "https://github.com/camdencheek/tree-sitter-dockerfile")))
+        (dockerfile "https://github.com/camdencheek/tree-sitter-dockerfile")
+        (cpp        "https://github.com/tree-sitter/tree-sitter-cpp")
+        (c          "https://github.com/tree-sitter/tree-sitter-c")))
 
 ;; --- treesit-auto: auto-install grammars & remap modes ---
 (use-package treesit-auto
@@ -93,6 +95,65 @@
 ;; --- Dockerfile ---
 (use-package dockerfile-mode
   :defer t)
+
+;; --- C++ / C (GDExtension / general) ---
+(add-to-list 'auto-mode-alist '("\\.h\\'" . c++-ts-mode))
+(add-hook 'c++-ts-mode-hook #'lsp-deferred)
+(add-hook 'c-ts-mode-hook #'lsp-deferred)
+
+(with-eval-after-load 'lsp-mode
+  (setq lsp-clients-clangd-args
+        '("--header-insertion=never"
+          "--clang-tidy"
+          "--completion-style=detailed"
+          "--background-index")))
+
+(with-eval-after-load 'apheleia
+  (setf (alist-get 'c++-ts-mode apheleia-mode-alist) 'clang-format)
+  (setf (alist-get 'c-ts-mode apheleia-mode-alist) 'clang-format))
+
+;; --- DAP / LLDB (C++ debugging) ---
+(with-eval-after-load 'dap-mode
+  (require 'dap-lldb))
+
+;; --- CMake ---
+(use-package cmake-mode
+  :mode (("CMakeLists\\.txt\\'" . cmake-mode)
+         ("\\.cmake\\'" . cmake-mode))
+  :after general
+  :config
+  (defun rata-cmake-configure ()
+    "Run cmake configure with build/ directory."
+    (interactive)
+    (let ((default-directory (projectile-project-root)))
+      (compile "cmake -S . -B build -G 'Unix Makefiles'")))
+
+  (defun rata-cmake-build ()
+    "Run cmake build."
+    (interactive)
+    (let ((default-directory (projectile-project-root)))
+      (compile "cmake --build build")))
+
+  (defun rata-cmake-clean ()
+    "Clean cmake build directory."
+    (interactive)
+    (let ((default-directory (projectile-project-root)))
+      (compile "cmake --build build --target clean")))
+
+  (defun rata-cmake-rebuild ()
+    "Clean and rebuild cmake project."
+    (interactive)
+    (let ((default-directory (projectile-project-root)))
+      (compile "cmake --build build --clean-first")))
+
+  (rata-leader
+    :states '(normal visual)
+    :keymaps 'cmake-mode-map
+    "mc"  '(:ignore t :which-key "cmake")
+    "mcc" '(rata-cmake-configure :which-key "configure")
+    "mcb" '(rata-cmake-build     :which-key "build")
+    "mcl" '(rata-cmake-clean     :which-key "clean")
+    "mcr" '(rata-cmake-rebuild   :which-key "rebuild")))
 
 ;; --- Terraform ---
 (use-package terraform-mode

@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: GDExtension property registration
+# key: gdprop
+# --
+ClassDB::bind_method(D_METHOD("get_${1:property_name}"), &${2:ClassName}::get_$1);
+ClassDB::bind_method(D_METHOD("set_$1", "value"), &$2::set_$1);
+ADD_PROPERTY(PropertyInfo(Variant::${3:FLOAT}, "$1"), "set_$1", "get_$1");
+$0

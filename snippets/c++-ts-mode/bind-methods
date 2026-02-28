@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: GDExtension _bind_methods
+# key: bindm
+# --
+void ${1:ClassName}::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("${2:method_name}"), &$1::$2);
+	$0
+}
