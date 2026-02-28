@@ -33,13 +33,11 @@ just todos
 
 ## Version Control
 
-Use **Jujutsu (`jj`)** exclusively — do not issue `git` commands unless absolutely necessary.
-
 ```bash
-jj status
-jj diff
-jj commit -m "description"
-jj log
+git status
+git diff
+git commit -m "description"
+git log
 ```
 
 ## Architecture

@@ -2134,10 +2134,6 @@ Work these in any order — all can be done independently:
 - forge requires a GitHub token in `~/.authinfo.gpg`:
   `machine api.github.com login USERNAME^forge password TOKEN`
 
-### magit + jj coexistence
-- Use magit for repos not managed with jj (open-source contributions, etc.).
-- jj integration in Emacs is nascent; track `jj.el` as a future item.
-
 ### projectile vs project.el SPC p bindings
 - Current `init-evil.el` uses `consult-project-buffer` and `consult-project-find` (project.el-based).
 - These bindings must be replaced with projectile equivalents in step 6.
@@ -2281,7 +2277,6 @@ Work these in any order — all can be done independently:
 
 | Item | Notes |
 |------|-------|
-| `jj.el` / Jujutsu UI | No mature Emacs package yet. Watch `https://github.com/bennyandresen/jujutsu.el` |
 | `init-mcp.el` stable | Module exists but experimental. Enable once ecosystem stabilizes. |
 | Per-project LSP config | `.dir-locals.el` patterns for LSP roots, env overrides. |
 | ~~`org-roam-ql` keybindings~~ | Moved to v7 — keybinding design + query functions planned. |
