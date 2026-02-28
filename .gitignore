@@ -32,6 +32,7 @@ org-roam.db
 /straight/
 /quelpa/
 /elpaca/
+/tree-sitter/
 
 # State and history (unless you use no-littering)
 /auto-save-list/
