@@ -12,14 +12,14 @@
         (toml       "https://github.com/tree-sitter/tree-sitter-toml")
         (dockerfile "https://github.com/camdencheek/tree-sitter-dockerfile")))
 
-;; --- Remap major modes to tree-sitter variants ---
-(setq major-mode-remap-alist
-      '((python-mode     . python-ts-mode)
-        (go-mode         . go-ts-mode)
-        (json-mode       . json-ts-mode)
-        (yaml-mode       . yaml-ts-mode)
-        (toml-mode       . toml-ts-mode)
-        (dockerfile-mode . dockerfile-ts-mode)))
+;; --- treesit-auto: auto-install grammars & remap modes ---
+(use-package treesit-auto
+  :demand t
+  :custom
+  (treesit-auto-install 'prompt)
+  :config
+  (treesit-auto-add-to-auto-mode-alist 'all)
+  (global-treesit-auto-mode))
 
 ;; --- Rust (rustic) ---
 (use-package rustic
@@ -113,6 +113,7 @@
 ;; --- Markdown Preview ---
 (use-package web-server
   :ensure (web-server :host github :repo "eschulte/emacs-web-server"
+                      :local-repo "emacs-web-server.github.eschulte"
                       :main "web-server.el")
   :defer t)
 
