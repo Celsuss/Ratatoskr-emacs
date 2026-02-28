@@ -147,7 +147,7 @@
   (winum-mode)
   (rata-leader
    :states '(normal visual)
-   "0" '(winum-select-window-0-or-10 :which-key "window 0")
+   "0" '(winum-select-window-0-or-10 :which-key "window 0..9")
    "1" '(winum-select-window-1 :which-key "window 1")
    "2" '(winum-select-window-2 :which-key "window 2")
    "3" '(winum-select-window-3 :which-key "window 3")
@@ -156,7 +156,11 @@
    "6" '(winum-select-window-6 :which-key "window 6")
    "7" '(winum-select-window-7 :which-key "window 7")
    "8" '(winum-select-window-8 :which-key "window 8")
-   "9" '(winum-select-window-9 :which-key "window 9")))
+   "9" '(winum-select-window-9 :which-key "window 9"))
+  ;; Hide winum 1-9 from which-key (key 0 shows "window 0..9")
+  ;; Must be pushed AFTER rata-leader so it lands in front of general.el's rules
+  (push '((nil . "winum-select-window-[1-9]") . t)
+        which-key-replacement-alist))
 
 ;; --- Undo-fu (better undo for evil) ---
 (use-package undo-fu

@@ -22,7 +22,8 @@
   (setq which-key-idle-delay 0.1
         which-key-idle-secondary-delay 0.05
         which-key-allow-imprecise-window-fit t)
-  (which-key-mode))
+  (which-key-mode)
+)
 
 ;; --- Nerd Icons ---
 ;; Run M-x nerd-icons-install-fonts once after first install
