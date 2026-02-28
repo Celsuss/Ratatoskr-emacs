@@ -44,3 +44,5 @@ transient/history.el
 
 # Tmp
 logo.png
+
+docs/*

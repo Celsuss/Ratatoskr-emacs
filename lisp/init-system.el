@@ -21,6 +21,13 @@
       ediff-window-setup-function #'ediff-setup-windows-plain)
 (add-hook 'ediff-after-quit-hook-internal #'winner-undo)
 
+;; Auth-source: read credentials from ~/.authinfo.gpg
+(setq auth-sources '("~/.authinfo.gpg"))
+
+(defun rata-auth-get (host &optional user)
+  "Get password from auth-source for HOST, optionally filtering by USER."
+  (auth-source-pick-first-password :host host :user user))
+
 ;; TRAMP
 (setq tramp-default-method "ssh")
 (with-eval-after-load 'tramp
