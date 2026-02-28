@@ -29,6 +29,18 @@ just reset
 
 # Find TODOs in .el files
 just todos
+
+# Run all tests (lint + compile + startup)
+just test
+
+# Run convention linting only (fast)
+just lint
+
+# Byte-compile all files
+just compile
+
+# Install git pre-commit hook (one-time)
+just install-hooks
 ```
 
 ## Version Control
