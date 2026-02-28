@@ -33,11 +33,11 @@
     "aiea"  '(ellama-ask-about    :which-key "ask about region")
     "aiec"  '(ellama-enhance-code :which-key "enhance code")))
 
-;; --- aidermacs (Anthropic Claude) ---
+;; --- aidermacs (Ollama local) ---
 (use-package aidermacs
   :after general
   :config
-  (setq aidermacs-default-model "claude-sonnet-4-5")
+  (setq aidermacs-default-model "ollama_chat/deepseek-coder:latest")
   (rata-leader
     :states '(normal visual)
     "aia"   '(:ignore t :which-key "aider")

@@ -15,7 +15,7 @@ A modular, Evil-based Emacs configuration built for speed and productivity.
 - *Org-mode* — org-roam, org-super-agenda, org-kanban, org-download, org-transclusion, ox-hugo (blog export)
 - *Kubernetes* — kubel integration for cluster management
 - *Git* — magit, diff-hl (gutter indicators), browse-at-remote
-- *LLM tools* — gptel, ellama (Ollama), aidermacs (Anthropic API)
+- *LLM tools* — gptel, ellama, aidermacs (Ollama)
 - *Snippets* — yasnippet with 63 custom snippets across 9 modes
 - *Multiple cursors* via =evil-mc=
 - *REST client* — restclient for =.http= files
