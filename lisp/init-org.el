@@ -88,6 +88,16 @@
   (setq org-enforce-todo-dependencies t)
   (setq org-enforce-todo-checkbox-dependencies t)
 
+  ;;;; Org Babel — source block execution
+  (org-babel-do-load-languages
+   'org-babel-load-languages
+   '((shell      . t)
+     (python     . t)
+     (rust       . t)
+     (emacs-lisp . t)))
+  (setq org-confirm-babel-evaluate nil)
+  (setq org-babel-python-command "python3")
+
   ;; Capture templates
   (setq org-capture-templates
         '(("t" "TODO" entry (file "~/workspace/second-brain/org-roam/todo.org")
@@ -118,6 +128,9 @@
            (file "~/workspace/second-brain/org-roam/inbox.org")
            "** %U %?\n%i\n%a"
            :empty-lines 1))))
+
+;; --- ob-rust (Rust source blocks for org-babel) ---
+(use-package ob-rust :ensure t :defer t)
 
 ;; --- Org Roam ---
 (use-package org-roam
