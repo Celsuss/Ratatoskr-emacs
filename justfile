@@ -93,3 +93,31 @@ install-deps:
     rustup component add rustfmt 2>/dev/null || true
     @echo ""
     @echo "All system dependencies installed."
+
+# Run convention linting (fast, no Emacs needed)
+lint:
+    ./scripts/lint.sh
+
+# Byte-compile all .el files to catch errors
+compile:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    errors=0
+    for f in init.el lisp/init-*.el; do
+        echo "Compiling $f..."
+        if ! {{emacs_bin}} --init-directory {{init_dir}} --batch \
+            --eval "(setq byte-compile-error-on-warn nil)" \
+            -f batch-byte-compile "$f" 2>&1; then
+            errors=$((errors + 1))
+        fi
+    done
+    # Clean up .elc files (we don't want them in the repo)
+    find . -name "*.elc" -not -path "./elpaca/*" -delete 2>/dev/null || true
+    if [ "$errors" -gt 0 ]; then
+        echo "COMPILE FAILED: $errors file(s) had errors"
+        exit 1
+    fi
+    echo "All files compiled successfully."
+
+# Run all tests (lint + compile + startup)
+test: lint compile batch
