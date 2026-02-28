@@ -228,7 +228,8 @@
   ;; Banner / logo
   (setq dashboard-startup-banner (expand-file-name "logo.png" user-emacs-directory)
         dashboard-banner-logo-title "Ratatoskr Emacs"
-        dashboard-image-banner-max-height 200)
+        dashboard-image-banner-max-height 200
+        dashboard-image-extra-props '(:mask heuristic))
 
   ;; Layout
   (setq dashboard-center-content t
