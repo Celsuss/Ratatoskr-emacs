@@ -8,11 +8,17 @@ A modular, Evil-based Emacs configuration built for speed and productivity.
 - *Elpaca* package manager with lockfile support for reproducible builds
 - *Modular architecture* — each concern lives in its own =lisp/init-*.el= file
 - *Completion stack* — orderless + vertico + marginalia + consult + embark
-- *LSP support* with =lsp-mode=, =lsp-ui=, and =corfu= completion
-- *Language support* — Python, Rust, Go, YAML, Ansible, Helm templates, PKGBUILDs, Jupyter notebooks
-- *Org-mode* — org-roam, org-super-agenda, org-kanban, org-download
+- *LSP support* with =lsp-mode=, =lsp-ui=, =breadcrumb= header context, and =corfu= completion
+- *Apheleia* format-on-save (lsp formatting disabled — apheleia owns all formatting)
+- *Language support* — Python, Rust, Go, C++, CMake, Terraform, YAML, Ansible, Helm templates, Dockerfile, Markdown, Just, PKGBUILDs, Jupyter notebooks
+- *Godot 4.x / GDExtension* game development (clangd, dap-lldb, CMake)
+- *Org-mode* — org-roam, org-super-agenda, org-kanban, org-download, org-transclusion, ox-hugo (blog export)
 - *Kubernetes* — kubel integration for cluster management
+- *Git* — magit, diff-hl (gutter indicators), browse-at-remote
 - *LLM tools* — gptel, ellama (Ollama), aidermacs (Anthropic API)
+- *Snippets* — yasnippet with 63 custom snippets across 9 modes
+- *Multiple cursors* via =evil-mc=
+- *REST client* — restclient for =.http= files
 - *Workspaces* via =persp-mode=
 - *Dashboard* start page with agenda, org-roam stats, and git status
 - *Resilient startup* — modules load inside =condition-case=; one broken module won't take down the rest
@@ -22,13 +28,15 @@ A modular, Evil-based Emacs configuration built for speed and productivity.
 - Emacs 29+ (tree-sitter support)
 - [[https://just.systems][just]] (command runner)
 - =enchant= (system package, for =jinx= spell checking)
+- Nerd-icons fonts (=just install-fonts=)
+- Arch Linux recommended — =just install-deps= uses =pacman= / =yay=
 
 ** Getting Started
 
 *** Clone
 
 #+begin_src sh
-  git clone https://github.com/<user>/Ratatoskr-emacs.git ~/workspace/Ratatoskr-emacs
+  git clone https://github.com/Celsuss/Ratatoskr-emacs.git ~/workspace/Ratatoskr-emacs
 #+end_src
 
 *** Run
@@ -65,12 +73,17 @@ To install icon fonts and tree-sitter grammars:
 | =just reset=            | Clean then run                               |
 | =just check <file>=     | Byte-compile a file for syntax checking      |
 | =just load <file>=      | Batch-load a module to verify it parses      |
-| =just batch=            | Full batch init (loads all modules)          |
+| =just batch=            | Full batch init (loads all modules)           |
+| =just test=             | Run all tests (lint + compile + startup)     |
+| =just lint=             | Run convention linting (fast, no Emacs)      |
+| =just compile=          | Byte-compile all =.el= files                   |
 | =just todos=            | Find TODOs in =.el= files                      |
 | =just lock=             | Generate elpaca lockfile                     |
 | =just update=           | Update all packages and regenerate lockfile  |
 | =just install-fonts=    | Install nerd-icons fonts (one-time)          |
 | =just install-grammars= | Install tree-sitter grammars (one-time)      |
+| =just install-deps=     | Install system dependencies (Arch Linux)     |
+| =just install-hooks=    | Install git pre-commit hook (one-time)       |
 
 ** Architecture
 
@@ -94,10 +107,11 @@ To install icon fonts and tree-sitter grammars:
 | =init-dev=        | LSP, corfu, flycheck, magit, projectile, vterm, dirvish |
 | =init-lang=       | Tree-sitter, language-specific modes and formatters     |
 | =init-k8s=        | Kubel for Kubernetes cluster management                 |
+| =init-gamedev=    | Godot 4.x / GDExtension development                    |
 | =init-snippets=   | Yasnippet + community snippets                          |
 | =init-llm=        | gptel, ellama, aidermacs                                |
 | =init-persp=      | Workspace management via persp-mode                     |
-| =init-org=        | Org-roam, org-super-agenda, org-kanban                  |
+| =init-org=        | Org-roam, org-super-agenda, org-kanban, org-transclusion |
 | =init-dashboard=  | Start page with agenda, roam stats, git status          |
 
 ** Keybindings
@@ -107,19 +121,27 @@ All keybindings use =general.el= with =SPC= as the global leader in Evil normal/
 | Prefix  | Group      |
 |---------+------------|
 | =SPC b=   | Buffers    |
+| =SPC c=   | Compile    |
 | =SPC d=   | Debug      |
 | =SPC e=   | Errors     |
 | =SPC f=   | Files      |
 | =SPC g=   | Git        |
 | =SPC h=   | Help       |
 | =SPC j=   | Jump       |
-| =SPC l=   | LSP        |
-| =SPC L=   | Layouts    |
+| =SPC l=   | Layouts    |
+| =SPC L=   | LSP        |
+| =SPC n=   | Narrow     |
 | =SPC o=   | Org        |
 | =SPC p=   | Project    |
+| =SPC q=   | Quit       |
+| =SPC r=   | Register   |
 | =SPC s=   | Search     |
 | =SPC t=   | Toggle     |
 | =SPC w=   | Window     |
+| =SPC x=   | Text       |
+| =SPC y=   | Yank       |
+| =SPC ;=   | Comment    |
+| =SPC a g= | Gamedev    |
 | =SPC a i= | AI tools   |
 | =SPC a k= | Kubernetes |
 
