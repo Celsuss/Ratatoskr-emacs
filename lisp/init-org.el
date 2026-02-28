@@ -222,7 +222,11 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
    "ori" '(org-roam-node-insert :which-key "insert node")
    "orc" '(org-roam-capture :which-key "capture node")
    "ord"  '(:ignore t :which-key "Org roam dailies")
-   "ordc" '(org-roam-dailies-capture-today :which-key "journal today"))
+   "ordc" '(org-roam-dailies-capture-today :which-key "capture today")
+   "ordt" '(org-roam-dailies-goto-today :which-key "goto today")
+   "ordy" '(org-roam-dailies-goto-yesterday :which-key "goto yesterday")
+   "ordm" '(org-roam-dailies-goto-tomorrow :which-key "goto tomorrow")
+   "ordd" '(org-roam-dailies-goto-date :which-key "goto date"))
 
   ;; Dailies
   (setq org-roam-dailies-directory "~/workspace/second-brain/org-roam/daily")
