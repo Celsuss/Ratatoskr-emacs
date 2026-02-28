@@ -24,7 +24,8 @@
 (use-package rustic
   :hook (rustic-mode . lsp-deferred)
   :custom
-  (rustic-lsp-client 'lsp-mode))
+  (rustic-lsp-client 'lsp-mode)
+  (rustic-analyzer-command '("rustup" "run" "nightly" "rust-analyzer")))
 
 ;; --- Cargo (Rust build commands) ---
 (use-package cargo
