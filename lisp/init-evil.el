@@ -48,7 +48,7 @@
       (delete-window)))
 
   (rata-leader
-   :states '(normal visual)
+   :states '(normal visual motion)
    "SPC" '(execute-extended-command :which-key "execute command")
    "TAB" '(evil-switch-to-windows-last-buffer :which-key "last buffer")
    "/"   '(consult-ripgrep :which-key "project search")
@@ -184,7 +184,7 @@
   :config
   (winum-mode)
   (rata-leader
-   :states '(normal visual)
+   :states '(normal visual motion)
    "0" '(winum-select-window-0-or-10 :which-key "window 0..9")
    "1" '(winum-select-window-1 :which-key "window 1")
    "2" '(winum-select-window-2 :which-key "window 2")

@@ -24,7 +24,7 @@
   :config
   (setq-default fill-column 80)
   (rata-leader
-   :states '(normal visual)
+   :states '(normal visual motion)
    "o"  '(:ignore t :which-key "org")
    "oc" '(org-capture :which-key "org capture")
    "oa" '(org-agenda :which-key "org agenda")
@@ -150,6 +150,38 @@
            (file ,(expand-file-name "inbox.org" rata-org-roam-dir))
            "** %U %?\n%i\n%a"
            :empty-lines 1))))
+
+;; --- Org Agenda Evil setup ---
+;; org-agenda-mode is in evil-emacs-state-modes by default, which disables evil
+;; entirely. Switch to motion state so the SPC leader and evil navigation work.
+(with-eval-after-load 'org-agenda
+  (evil-set-initial-state 'org-agenda-mode 'motion)
+  (evil-define-key 'motion org-agenda-mode-map
+    (kbd "j")   #'org-agenda-next-line
+    (kbd "k")   #'org-agenda-previous-line
+    (kbd "RET") #'org-agenda-switch-to
+    (kbd "TAB") #'org-agenda-goto
+    (kbd "t")   #'org-agenda-todo
+    (kbd "s")   #'org-agenda-schedule
+    (kbd "d")   #'org-agenda-deadline
+    (kbd "r")   #'org-agenda-redo
+    (kbd "q")   #'org-agenda-quit
+    (kbd "Q")   #'org-agenda-Quit
+    (kbd ".")   #'org-agenda-goto-today
+    (kbd "f")   #'org-agenda-later
+    (kbd "b")   #'org-agenda-earlier
+    (kbd "v")   #'org-agenda-view-mode-dispatch
+    (kbd "[")   #'org-agenda-earlier
+    (kbd "]")   #'org-agenda-later))
+
+;; --- org-super-agenda + Evil compatibility ---
+;; org-super-agenda-header-map is a copy of org-agenda-mode-map taken at load
+;; time and applied as a `keymap' text property on group-header lines.
+;; Text-property keymaps have higher priority than evil's emulation maps, so
+;; SPC/j/k on headers bypass evil entirely.
+;; Fix: replace with an empty sparse keymap so lookups fall through to evil.
+(with-eval-after-load 'org-super-agenda
+  (setq org-super-agenda-header-map (make-sparse-keymap)))
 
 ;; --- ob-rust (Rust source blocks for org-babel) ---
 (use-package ob-rust :ensure t :defer t)
