@@ -43,7 +43,44 @@
   :after general
   :config
   (global-flycheck-mode)
-  (setq flycheck-display-errors-delay 0.3))
+  (setq flycheck-display-errors-delay 0.3)
+  ;; Fix: org-lint returns propertized strings for line numbers (designed for
+  ;; tabulated-list display). flycheck passes them raw to flycheck-error-new-at
+  ;; which expects a number-or-marker. Redefine the checker to convert first.
+  (with-eval-after-load 'org
+    (flycheck-define-generic-checker 'org-lint
+      "An Org mode syntax checker using `org-lint'."
+      :start (lambda (checker callback)
+               (condition-case err
+                   (let ((errors
+                          (delq nil
+                                (mapcar
+                                 (lambda (e)
+                                   (pcase e
+                                     (`(,_n [,line ,_trust ,desc ,_checker])
+                                      (flycheck-error-new-at
+                                       (string-to-number line) nil 'info desc
+                                       :checker checker))
+                                     (_
+                                      (flycheck-error-new-at
+                                       1 nil 'warning
+                                       (format "Unexpected org-lint format: %S" e)
+                                       :checker checker))))
+                                 (org-lint)))))
+                     (funcall callback 'finished errors))
+                 (error (funcall callback 'errored
+                                 (error-message-string err)))))
+      :modes '(org-mode)
+      :enabled #'flycheck-org-lint-available-p
+      :verify (lambda (_)
+                (let ((org-version (when (require 'org nil 'no-error)
+                                     (org-version))))
+                  (list (flycheck-verification-result-new
+                         :label "Org-lint available"
+                         :message (if (fboundp 'org-lint)
+                                      (format "yes (Org %s)" org-version)
+                                    "no")
+                         :face (if (fboundp 'org-lint) 'success 'warning))))))))
 
 ;; --- Apheleia (format on save) ---
 (use-package apheleia
