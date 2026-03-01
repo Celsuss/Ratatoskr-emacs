@@ -60,17 +60,36 @@
   (load custom-file))
 
 ;; --- 6. Load Core Modules ---
+(defvar rata--failed-modules nil
+  "List of (MODULE . ERROR-STRING) for modules that failed to load.")
+
 (defun rata-load-module (module)
   "Require MODULE with error handling.
 When `init-file-debug' is set (--debug-init), errors propagate
-normally for a full backtrace.  Otherwise, catch and log them so
-the remaining modules still load."
+normally for a full backtrace.  Otherwise, catch and log them to
+`rata--failed-modules' so remaining modules still load."
   (if init-file-debug
       (require module)
     (condition-case err
         (require module)
-      (error (message "WARNING: Failed to load %s: %s"
-                      module (error-message-string err))))))
+      (error
+       (let ((msg (error-message-string err)))
+         (push (cons module msg) rata--failed-modules)
+         (message "WARNING: Failed to load %s: %s" module msg))))))
+
+(defun rata-report-init-errors ()
+  "Print a summary of any modules that failed to load."
+  (when rata--failed-modules
+    (with-current-buffer (get-buffer-create "*init-errors*")
+      (erase-buffer)
+      (insert "Ratatoskr: the following modules failed to load:\n\n")
+      (dolist (entry (nreverse rata--failed-modules))
+        (insert (format "  %-25s %s\n" (car entry) (cdr entry))))
+      (insert "\nRun M-x debug-init or `just debug' for a full backtrace.\n"))
+    (message "WARNING: %d module(s) failed — see *init-errors* buffer"
+             (length rata--failed-modules))))
+
+(add-hook 'emacs-startup-hook #'rata-report-init-errors)
 
 (rata-load-module 'init-pkg)
 (rata-load-module 'init-system)
@@ -88,3 +107,4 @@ the remaining modules still load."
 (rata-load-module 'init-persp)
 (rata-load-module 'init-org)
 (rata-load-module 'init-dashboard)
+(elpaca-wait) ; ensure all packages fully loaded before startup hooks fire

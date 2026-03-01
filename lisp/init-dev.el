@@ -43,11 +43,7 @@
   :after general
   :config
   (global-flycheck-mode)
-  (setq flycheck-display-errors-delay 0.3)
-  (rata-leader
-    :states '(normal visual)
-    "en"  '(flycheck-next-error :which-key "next error")
-    "ep"  '(flycheck-previous-error :which-key "prev error")))
+  (setq flycheck-display-errors-delay 0.3))
 
 ;; --- Apheleia (format on save) ---
 (use-package apheleia
@@ -109,7 +105,7 @@
   (projectile-mode +1)
   (rata-leader
     :states '(normal visual)
-    "pp"  '(projectile-switch-project :which-key "switch project")
+    "pS"  '(projectile-switch-project :which-key "switch project")
     "pb"  '(consult-project-buffer :which-key "project buffer")
     "pt"  '(projectile-run-project-tests :which-key "run tests")
     "pk"  '(projectile-kill-buffers :which-key "kill project buffers")
@@ -151,6 +147,7 @@
 (use-package jinx
   :after general
   :demand t
+  :if (executable-find "enchant-2")
   :config
   (global-jinx-mode)
   (rata-leader
@@ -170,11 +167,7 @@
 
 ;; --- Consult-flycheck ---
 (use-package consult-flycheck
-  :after (consult flycheck general)
-  :config
-  (rata-leader
-    :states '(normal visual)
-    "el" '(consult-flycheck :which-key "list errors")))
+  :after (consult flycheck))
 
 ;; --- Editorconfig ---
 (use-package editorconfig

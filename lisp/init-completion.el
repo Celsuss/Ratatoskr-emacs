@@ -6,7 +6,6 @@
   :custom
   (completion-styles '(orderless basic))
   (completion-category-overrides '((file (styles partial-completion))))
-  (completion-category-defaults nil)
   (completion-pcm-leading-wildcard t))
 
 ;; --- Vertico Vertical Completion UI ---

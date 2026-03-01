@@ -1,6 +1,22 @@
 ;;; -*- lexical-binding: t; -*-
 ;;; init-org.el --- Org mode configuration
 
+;; --- Path customizations (override before use-package org loads) ---
+
+(defgroup rata nil
+  "Ratatoskr Emacs customizations."
+  :group 'convenience)
+
+(defcustom rata-org-roam-dir (expand-file-name "~/workspace/second-brain/org-roam/")
+  "Base directory for org-roam files."
+  :type 'directory
+  :group 'rata)
+
+(defcustom rata-hugo-dir (expand-file-name "~/workspace/second-brain/hugo/")
+  "Hugo blog directory."
+  :type 'directory
+  :group 'rata)
+
 (use-package org
   :defer t
   :after general
@@ -27,10 +43,11 @@
   (setq org-agenda-restore-windows-after-quit t)
   (setq org-agenda-window-frame-fractions '(0.8 . 0.9))
 
-  (defadvice org-agenda (around split-vertically activate)
-    (let ((split-width-threshold 40)
-          (split-height-threshold nil))
-      ad-do-it))
+  (advice-add 'org-agenda :around
+              (lambda (orig-fun &rest args)
+                (let ((split-width-threshold 40)
+                      (split-height-threshold nil))
+                  (apply orig-fun args))))
 
   (setq org-agenda-prefix-format
         '((agenda . " %i %?-12t% s")
@@ -38,15 +55,17 @@
           (tags   . " %i %?-12t% s")
           (search . " %i %?-12t% s")))
 
-  (setq org-agenda-files '("~/workspace/second-brain/org-roam/todo.org"
-                           "~/workspace/second-brain/org-roam/work_tasks.org"
-                           "~/workspace/second-brain/org-roam/homelab_tasks.org"
-                           "~/workspace/second-brain/org-roam/emacs_tweak_tasks.org"
-                           "~/workspace/second-brain/org-roam/dotfiles_tweak_tasks.org"
-                           "~/workspace/second-brain/org-roam/curriculum_tasks.org"
-                           "~/workspace/second-brain/org-roam/projects/"
-                           "~/workspace/second-brain/org-roam/habits.org"
-                           "~/workspace/second-brain/org-roam/inbox.org"))
+  (setq org-agenda-files
+        (mapcar (lambda (f) (expand-file-name f rata-org-roam-dir))
+                '("todo.org"
+                  "work_tasks.org"
+                  "homelab_tasks.org"
+                  "emacs_tweak_tasks.org"
+                  "dotfiles_tweak_tasks.org"
+                  "curriculum_tasks.org"
+                  "projects/"
+                  "habits.org"
+                  "inbox.org")))
 
   ;; Tag-based agenda inclusion: dynamically add roam files with :hastodo: tag
   (defun rata-org-roam-agenda-files ()
@@ -82,7 +101,7 @@
   (setq org-agenda-skip-scheduled-if-done nil)
 
   ;; Org directory
-  (setq org-directory "~/workspace/second-brain/org-roam/")
+  (setq org-directory rata-org-roam-dir)
 
   ;; Dependency tracking
   (setq org-enforce-todo-dependencies t)
@@ -95,37 +114,40 @@
      (python     . t)
      (rust       . t)
      (emacs-lisp . t)))
-  (setq org-confirm-babel-evaluate nil)
+  (setq org-confirm-babel-evaluate
+        (lambda (lang _body)
+          (not (member lang '("emacs-lisp" "elisp")))))
   (setq org-babel-python-command "python3")
 
   ;; Capture templates
   (setq org-capture-templates
-        '(("t" "TODO" entry (file "~/workspace/second-brain/org-roam/todo.org")
+        `(("t" "TODO" entry (file ,(expand-file-name "todo.org" rata-org-roam-dir))
            "** TODO %?\n  :PROPERTIES:\n  :CREATED: %U\n  :END:")
 
-          ("w" "Work Task" entry (file "~/workspace/second-brain/org-roam/work_tasks.org")
+          ("w" "Work Task" entry (file ,(expand-file-name "work_tasks.org" rata-org-roam-dir))
            "** TODO %? :work:\n  :PROPERTIES:\n  :CREATED: %U\n  :END:")
 
-          ("h" "Home Lab Task" entry (file+headline "~/workspace/second-brain/org-roam/homelab_tasks.org" "Tasks")
+          ("h" "Home Lab Task" entry
+           (file+headline ,(expand-file-name "homelab_tasks.org" rata-org-roam-dir) "Tasks")
            "** TODO %? :homelab:\n  :PROPERTIES:\n  :CREATED: %U\n  :END:")
 
-          ("e" "Emacs Tweak" entry (file "~/workspace/second-brain/org-roam/emacs_tweak_tasks.org")
+          ("e" "Emacs Tweak" entry (file ,(expand-file-name "emacs_tweak_tasks.org" rata-org-roam-dir))
            "** TODO %? :emacs:\n  :PROPERTIES:\n  :CREATED: %U\n  :END:")
 
-          ("d" "Dotfiles Tweak" entry (file "~/workspace/second-brain/org-roam/dotfiles_tweak_tasks.org")
+          ("d" "Dotfiles Tweak" entry (file ,(expand-file-name "dotfiles_tweak_tasks.org" rata-org-roam-dir))
            "** TODO %? :dotfiles:\n  :PROPERTIES:\n  :CREATED: %U\n  :END:")
 
-          ("c" "Curriculum Task" entry (file "~/workspace/second-brain/org-roam/curriculum_tasks.org")
+          ("c" "Curriculum Task" entry (file ,(expand-file-name "curriculum_tasks.org" rata-org-roam-dir))
            "** TODO %? :curriculum:\n  :PROPERTIES:\n  :CREATED: %U\n  :END:")
 
           ("l" "Link/Read Later" entry
-           (file+headline "~/workspace/second-brain/org-roam/reading-list.org" "Reading List")
+           (file+headline ,(expand-file-name "reading-list.org" rata-org-roam-dir) "Reading List")
            "* TODO %a :reading:\nCaptured on: %U\n"
            :empty-lines 1
            :immediate-finish t)
 
           ("f" "Fleeting Note (Inbox)" entry
-           (file "~/workspace/second-brain/org-roam/inbox.org")
+           (file ,(expand-file-name "inbox.org" rata-org-roam-dir))
            "** %U %?\n%i\n%a"
            :empty-lines 1))))
 
@@ -136,15 +158,19 @@
 (use-package org-roam
   :after (org general)
   :custom
-  (org-roam-directory (file-truename "~/workspace/second-brain/org-roam/"))
+  (org-roam-directory (file-truename rata-org-roam-dir))
   (org-roam-completion-everywhere t)
   (org-roam-mode-sections
    (list #'org-roam-backlinks-section
          #'org-roam-reflinks-section
          #'org-roam-unlinked-references-section))
-  (org-roam-capture-templates '(("d" "default" plain
+  (org-roam-capture-templates `(("d" "default" plain
                                  "%?"
-                                 :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org" "#+title: ${title}\n#+author: Jens Lordén\n#+date: %U\n\n* ${title}")
+                                 :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
+                                                    ,(concat "#+title: ${title}\n"
+                                                             "#+author: " user-full-name "\n"
+                                                             "#+date: %U\n\n"
+                                                             "* ${title}"))
                                  :unnarrowed t)
 
                                 ("p" "project" plain
@@ -164,14 +190,13 @@ Describe the outcome of this project.
 %?"
 
                                  :if-new (file+head "projects/%<%Y%m%d%H%M%S>-${slug}.org"
-                                                    "#+title: ${title}
-#+author: Jens Lordén
-#+date: %U
-#+filetags: :project:${slug}:
-#+SEQ_TODO: TODO STRT WAIT | DONE
-#+startup: content
-\n
-")
+                                                    ,(concat "#+title: ${title}\n"
+                                                             "#+author: " user-full-name "\n"
+                                                             "#+date: %U\n"
+                                                             "#+filetags: :project:${slug}:\n"
+                                                             "#+SEQ_TODO: TODO STRT WAIT | DONE\n"
+                                                             "#+startup: content\n"
+                                                             "\n"))
                                  :unnarrowed t)
 
 
@@ -186,30 +211,38 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 :end:"
 
                                  :if-new (file+head "blog-posts/%<%Y%m%d%H%M%S>-${slug}.org"
-                                                    "#+title: ${title}
-#+author: Jens Lordén
-#+date: %U
-#+hugo_base_dir: ../hugo/
-\n
-")
+                                                    ,(concat "#+title: ${title}\n"
+                                                             "#+author: " user-full-name "\n"
+                                                             "#+date: %U\n"
+                                                             "#+hugo_base_dir: ../hugo/\n"
+                                                             "\n"))
                                  :unnarrowed t)
 
                                 ("m" "meeting" plain
                                  "\n* Meeting Notes\n%?\n\n* Action Items\n** TODO \n"
                                  :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
-                                                    "#+title: ${title}\n#+author: Jens Lordén\n#+date: %U\n#+filetags: :work:hastodo:\n")
+                                                    ,(concat "#+title: ${title}\n"
+                                                             "#+author: " user-full-name "\n"
+                                                             "#+date: %U\n"
+                                                             "#+filetags: :work:hastodo:\n"))
                                  :unnarrowed t)
 
                                 ("e" "tool evaluation" plain
                                  "\n* ${title}\n\n** What it does\n%?\n\n** Pros\n- \n\n** Cons\n- \n\n** Alternatives & Comparison\n| Tool | Pros | Cons | Verdict |\n|------+------+------+---------|\n| ${title} | | | |\n| | | | |\n\n** Verdict\n/adopt · trial · reject · revisit/\n"
                                  :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
-                                                    "#+title: ${title}\n#+author: Jens Lordén\n#+date: %U\n#+filetags: :tool-eval:\n")
+                                                    ,(concat "#+title: ${title}\n"
+                                                             "#+author: " user-full-name "\n"
+                                                             "#+date: %U\n"
+                                                             "#+filetags: :tool-eval:\n"))
                                  :unnarrowed t)
 
                                 ("T" "troubleshooting" plain
                                  "\n* Problem\n%?\n\n* Environment\n- OS: \n- Tool version: \n\n* Steps Tried\n1. \n\n* Root Cause\n\n* Solution\n"
                                  :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
-                                                    "#+title: ${title}\n#+author: Jens Lordén\n#+date: %U\n#+filetags: :troubleshooting:\n")
+                                                    ,(concat "#+title: ${title}\n"
+                                                             "#+author: " user-full-name "\n"
+                                                             "#+date: %U\n"
+                                                             "#+filetags: :troubleshooting:\n"))
                                  :unnarrowed t)))
 
   :config
@@ -229,14 +262,14 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
    "ordd" '(org-roam-dailies-goto-date :which-key "goto date"))
 
   ;; Dailies
-  (setq org-roam-dailies-directory "~/workspace/second-brain/org-roam/daily")
+  (setq org-roam-dailies-directory (expand-file-name "daily" rata-org-roam-dir))
   (setq org-roam-dailies-capture-templates
         `(("d" "default" entry
            "** %<%H:%M> %?"
            :target (file+head+olp "%<%Y-%m-%d>.org"
                                   "#+title: %<%A %B %d, %Y>
 #+filetags: :daily:
-#+author: Jens
+#+author: Jens Lordén
 
 * Daily notes for %<%A %B %d, %Y>
 
@@ -379,7 +412,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
            ((agenda ""
                     ((org-agenda-span 'day)
                      (org-agenda-start-day nil)
-                     (org-agenda-files '("~/workspace/second-brain/org-roam/habits.org"))
+                     (org-agenda-files (list (expand-file-name "habits.org" rata-org-roam-dir)))
                      (org-agenda-start-with-log-mode t)
                      (org-agenda-log-mode-items '(closed state))
                      (org-habit-graph-column 50)
@@ -481,7 +514,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
   (defun rata-hugo-preview ()
     "Start Hugo server for previewing blog posts."
     (interactive)
-    (let ((default-directory (expand-file-name "~/workspace/second-brain/hugo/")))
+    (let ((default-directory rata-hugo-dir))
       (if (get-buffer "*hugo-server*")
           (browse-url "http://localhost:1313")
         (start-process "hugo-server" "*hugo-server*" "hugo" "server" "-D")

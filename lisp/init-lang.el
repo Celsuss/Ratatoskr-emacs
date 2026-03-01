@@ -17,6 +17,7 @@
 ;; --- treesit-auto: auto-install grammars & remap modes ---
 (use-package treesit-auto
   :demand t
+  :if (treesit-available-p)
   :custom
   (treesit-auto-install 'prompt)
   :config
@@ -83,6 +84,7 @@
     "msr" '(go-tag-remove :which-key "remove struct tags")))
 
 (use-package dap-dlv-go
+  :ensure nil
   :after dap-mode)
 
 ;; --- Python ---
@@ -123,25 +125,29 @@
   :after general
   :config
   (defun rata-cmake-configure ()
-    "Run cmake configure with build/ directory."
+    "Run cmake configure, generating build/ with Unix Makefiles.
+Runs from the projectile project root."
     (interactive)
     (let ((default-directory (projectile-project-root)))
       (compile "cmake -S . -B build -G 'Unix Makefiles'")))
 
   (defun rata-cmake-build ()
-    "Run cmake build."
+    "Build the cmake project in build/.
+Runs from the projectile project root."
     (interactive)
     (let ((default-directory (projectile-project-root)))
       (compile "cmake --build build")))
 
   (defun rata-cmake-clean ()
-    "Clean cmake build directory."
+    "Clean the cmake build directory without reconfiguring.
+Runs from the projectile project root."
     (interactive)
     (let ((default-directory (projectile-project-root)))
       (compile "cmake --build build --target clean")))
 
   (defun rata-cmake-rebuild ()
-    "Clean and rebuild cmake project."
+    "Clean and rebuild the cmake project in one step.
+Runs from the projectile project root."
     (interactive)
     (let ((default-directory (projectile-project-root)))
       (compile "cmake --build build --clean-first")))
@@ -161,19 +167,22 @@
   :after general
   :config
   (defun rata-terraform-plan ()
-    "Run terraform plan in the current directory."
+    "Run `terraform plan` in the directory of the current file.
+Shows the execution plan without applying changes."
     (interactive)
     (let ((default-directory (file-name-directory (buffer-file-name))))
       (compile "terraform plan")))
 
   (defun rata-terraform-apply ()
-    "Run terraform apply in the current directory."
+    "Run `terraform apply` in the directory of the current file.
+Applies the execution plan to the infrastructure."
     (interactive)
     (let ((default-directory (file-name-directory (buffer-file-name))))
       (compile "terraform apply")))
 
   (defun rata-terraform-init ()
-    "Run terraform init in the current directory."
+    "Run `terraform init` in the directory of the current file.
+Initializes the working directory with providers and modules."
     (interactive)
     (let ((default-directory (file-name-directory (buffer-file-name))))
       (compile "terraform init")))
@@ -266,25 +275,29 @@
 
   ;; Custom makepkg helper functions
   (defun rata-makepkg-build ()
-    "Run makepkg in the current PKGBUILD directory."
+    "Build the current PKGBUILD package using makepkg -sf.
+Skips checksums (-s) and forces rebuilding (-f)."
     (interactive)
     (let ((default-directory (file-name-directory (buffer-file-name))))
       (compile "makepkg -sf")))
 
   (defun rata-makepkg-srcinfo ()
-    "Generate .SRCINFO from current PKGBUILD."
+    "Generate .SRCINFO from the current PKGBUILD.
+Required for AUR submissions."
     (interactive)
     (let ((default-directory (file-name-directory (buffer-file-name))))
       (compile "makepkg --printsrcinfo > .SRCINFO")))
 
   (defun rata-namcap-check ()
-    "Run namcap on the current PKGBUILD."
+    "Run namcap linter on the current PKGBUILD file.
+Reports packaging errors and policy violations."
     (interactive)
     (let ((default-directory (file-name-directory (buffer-file-name))))
       (compile (format "namcap %s" (buffer-file-name)))))
 
   (defun rata-updpkgsums ()
-    "Run updpkgsums on the current PKGBUILD."
+    "Update checksums in the current PKGBUILD using updpkgsums.
+Downloads sources and recalculates sha256sums."
     (interactive)
     (let ((default-directory (file-name-directory (buffer-file-name))))
       (compile "updpkgsums")))

@@ -175,8 +175,12 @@
 
 ;; --- Custom Widget: Random Roam Note ---
 
+(defvar rata-dashboard--random-note-cache nil
+  "Cached random roam note; list of (id title file), refreshed each session.")
+
 (defun rata-dashboard-insert-random-note (_list-size)
-  "Insert a random org-roam note widget for serendipitous rediscovery."
+  "Insert a random org-roam note widget for serendipitous rediscovery.
+Result is cached per session; reset by `dashboard-after-initialize-hook'."
   (dashboard-insert-heading "Rediscover:"
                             nil
                             (when (display-graphic-p)
@@ -185,17 +189,20 @@
                                                   :v-adjust 0.0
                                                   :face 'dashboard-heading)))
   (insert "\n")
-  (let ((node (condition-case nil
-                  (progn
-                    (require 'org-roam)
-                    (require 'org-roam-db)
-                    (car (org-roam-db-query
-                          [:select [id title file]
-                           :from nodes
-                           :where (= level 0)
-                           :order-by (random)
-                           :limit 1])))
-                (error nil))))
+  (unless rata-dashboard--random-note-cache
+    (setq rata-dashboard--random-note-cache
+          (condition-case nil
+              (progn
+                (require 'org-roam)
+                (require 'org-roam-db)
+                (car (org-roam-db-query
+                      [:select [id title file]
+                       :from nodes
+                       :where (= level 0)
+                       :order-by (random)
+                       :limit 1])))
+            (error nil))))
+  (let ((node rata-dashboard--random-note-cache))
     (if node
         (let* ((title (nth 1 node))
                (file (nth 2 node)))
@@ -208,6 +215,10 @@
           (insert "\n"))
       (insert "    (org-roam not available)\n")))
   (insert "\n"))
+
+;; Reset the cache on each new dashboard session so a fresh note is picked
+(add-hook 'dashboard-after-initialize-hook
+          (lambda () (setq rata-dashboard--random-note-cache nil)))
 
 ;; --- Dashboard Package ---
 
@@ -225,8 +236,10 @@
   (add-to-list 'dashboard-item-generators
                '(rata-random-note . rata-dashboard-insert-random-note))
 
-  ;; Banner / logo
-  (setq dashboard-startup-banner (expand-file-name "logo.png" user-emacs-directory)
+  ;; Banner / logo (fall back to built-in if logo.png is missing)
+  (setq dashboard-startup-banner
+        (let ((logo (expand-file-name "logo.png" user-emacs-directory)))
+          (if (file-exists-p logo) logo 'official))
         dashboard-banner-logo-title "Ratatoskr Emacs"
         dashboard-image-banner-max-height 200
         dashboard-image-extra-props '(:mask heuristic))
@@ -288,8 +301,5 @@
     "bh" '(dashboard-open :which-key "home (dashboard)"))
 
   (dashboard-setup-startup-hook))
-
-;; Ensure dashboard is fully installed before init completes
-(elpaca-wait)
 
 (provide 'init-dashboard)
