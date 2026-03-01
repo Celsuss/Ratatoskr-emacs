@@ -42,5 +42,6 @@ recentf
 history
 transient/history.el
 /var/
+/elfeed-db/
 
 docs/*

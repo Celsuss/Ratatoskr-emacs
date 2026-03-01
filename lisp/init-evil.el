@@ -25,8 +25,10 @@
 (use-package general
   :demand t
   :config
+  (general-override-mode 1)
   (general-create-definer rata-leader
-    :prefix "SPC")
+    :prefix "SPC"
+    :keymaps 'override)
 
   (general-create-definer rata-local-leader
     :prefix ",")
