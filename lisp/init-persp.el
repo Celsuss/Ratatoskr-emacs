@@ -1,6 +1,11 @@
 ;;; -*- lexical-binding: t; -*-
 ;;; init-persp.el --- Workspace management with persp-mode
 
+(defface rata-persp-active-layout
+  '((t :foreground "#fabd2f" :weight bold))
+  "Face for the active layout label in the layouts transient state.
+Uses gruvbox bright yellow.")
+
 (use-package persp-mode
   :after general
   :demand t
@@ -31,7 +36,8 @@ Active layout is shown as [Name]; others as Name; empty slots as -."
            (cur   (safe-persp-name (get-current-persp))))
       (cond
        ((null name)        "-")
-       ((string= name cur) (format "[%s]" name))
+       ((string= name cur) (propertize (format "[%s]" name)
+                                       'face 'rata-persp-active-layout))
        (t                  name))))
 
   ;; Generate rata-persp-switch-1 … rata-persp-switch-9 (keys 1–9, indices 0–8)
@@ -56,15 +62,15 @@ Active layout is shown as [Name]; others as Name; empty slots as -."
      ("l" "switch (name)" persp-switch)]
     ["Layouts"
      :class transient-row
-     ("1" (lambda () (rata-persp-layout-label 1)) rata-persp-switch-1)
-     ("2" (lambda () (rata-persp-layout-label 2)) rata-persp-switch-2)
-     ("3" (lambda () (rata-persp-layout-label 3)) rata-persp-switch-3)
-     ("4" (lambda () (rata-persp-layout-label 4)) rata-persp-switch-4)
-     ("5" (lambda () (rata-persp-layout-label 5)) rata-persp-switch-5)
-     ("6" (lambda () (rata-persp-layout-label 6)) rata-persp-switch-6)
-     ("7" (lambda () (rata-persp-layout-label 7)) rata-persp-switch-7)
-     ("8" (lambda () (rata-persp-layout-label 8)) rata-persp-switch-8)
-     ("9" (lambda () (rata-persp-layout-label 9)) rata-persp-switch-9)]
+     ("1" (lambda () (rata-persp-layout-label 1)) rata-persp-switch-1 :transient transient--do-exit)
+     ("2" (lambda () (rata-persp-layout-label 2)) rata-persp-switch-2 :transient transient--do-exit)
+     ("3" (lambda () (rata-persp-layout-label 3)) rata-persp-switch-3 :transient transient--do-exit)
+     ("4" (lambda () (rata-persp-layout-label 4)) rata-persp-switch-4 :transient transient--do-exit)
+     ("5" (lambda () (rata-persp-layout-label 5)) rata-persp-switch-5 :transient transient--do-exit)
+     ("6" (lambda () (rata-persp-layout-label 6)) rata-persp-switch-6 :transient transient--do-exit)
+     ("7" (lambda () (rata-persp-layout-label 7)) rata-persp-switch-7 :transient transient--do-exit)
+     ("8" (lambda () (rata-persp-layout-label 8)) rata-persp-switch-8 :transient transient--do-exit)
+     ("9" (lambda () (rata-persp-layout-label 9)) rata-persp-switch-9 :transient transient--do-exit)]
     ["Manage"
      :class transient-row
      ("N" "new"    persp-add-new)
