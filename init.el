@@ -83,6 +83,7 @@ the remaining modules still load."
 (rata-load-module 'init-gamedev)
 (rata-load-module 'init-snippets)
 (rata-load-module 'init-llm)
+(rata-load-module 'init-irc)
 ;; (rata-load-module 'init-mcp)      ; experimental — uncomment when stable
 (rata-load-module 'init-persp)
 (rata-load-module 'init-org)
