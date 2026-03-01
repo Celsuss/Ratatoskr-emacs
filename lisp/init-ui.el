@@ -14,7 +14,11 @@
 ;; --- Theme ---
 (use-package gruvbox-theme
   :config
-  (load-theme 'gruvbox-dark-medium t))
+  (load-theme 'gruvbox-dark-medium t)
+  (set-face-attribute 'line-number nil
+                      :background (face-attribute 'default :background))
+  (set-face-attribute 'line-number-current-line nil
+                      :background (face-attribute 'default :background)))
 
 ;; --- Which-key ---
 (use-package which-key
