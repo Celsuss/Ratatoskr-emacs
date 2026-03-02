@@ -12,6 +12,18 @@
   (when (daemonp)
     (exec-path-from-shell-initialize)))
 
+;; --- GC Magic Hack (adaptive GC threshold) ---
+;; Replaces manual gc-cons-threshold reset; idles at low threshold,
+;; bumps to 16MB during interactive use to avoid micro-stutters.
+;; Deferred to avoid blocking elpaca queue on first install.
+(use-package gcmh
+  :defer 1
+  :custom
+  (gcmh-idle-delay 5)
+  (gcmh-high-cons-threshold (* 16 1024 1024))
+  :config
+  (gcmh-mode 1))
+
 ;; Recent file tracking
 (recentf-mode 1)
 (setq recentf-max-saved-items 200)
@@ -23,6 +35,12 @@
 
 ;; Auth-source: read credentials from ~/.authinfo.gpg
 (setq auth-sources '("~/.authinfo.gpg"))
+
+;; GPG: use loopback pinentry so passphrase prompts don't freeze Emacs
+(use-package epa
+  :ensure nil
+  :custom
+  (epg-pinentry-mode 'loopback))
 
 (defun rata-auth-get (host &optional user)
   "Get password from auth-source for HOST, optionally filtering by USER."

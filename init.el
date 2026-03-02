@@ -1,11 +1,13 @@
 ;;; -*- lexical-binding: t; -*-
 ;;; init.el --- Ratatoskr Emacs configuration entry point
 
-;; --- 1. Performance Hook ---
-;; Reset GC threshold after initialization is finished
+;; --- 1. GC ---
+;; gcmh (in init-system.el) handles runtime GC tuning;
+;; early-init.el sets gc-cons-threshold to most-positive-fixnum for startup.
+;; Fallback: reset GC threshold after startup (gcmh takes over ~1s later).
 (add-hook 'emacs-startup-hook
           (lambda ()
-            (setq gc-cons-threshold (* 2 1024 1024)))) ; 2mb
+            (setq gc-cons-threshold (* 16 1024 1024)))) ; gcmh takes over later
 
 ;; --- 2. Elpaca Bootstrap ---
 (defvar elpaca-installer-version 0.11)
@@ -44,12 +46,15 @@
     (require 'elpaca)
     (elpaca-generate-autoloads "elpaca" repo)
     (let ((load-source-file-function nil)) (load "./elpaca-autoloads"))))
-(add-hook 'after-init-hook #'elpaca-process-queues)
 (elpaca `(,@elpaca-order))
 
 ;; --- 3. Elpaca use-package integration ---
 (elpaca elpaca-use-package
   (elpaca-use-package-mode))
+
+;; Process bootstrap queue synchronously so packages are on load-path
+;; before modules are loaded below.
+(elpaca-wait)
 
 ;; --- 4. Module Loader ---
 (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))

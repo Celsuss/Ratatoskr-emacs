@@ -99,6 +99,7 @@
    "sk"  '(consult-keep-lines :which-key "keep lines")
    "si"  '(consult-info :which-key "info")
    "sw"  '(wgrep-change-to-wgrep-mode :which-key "wgrep")
+   "sp"  '(consult-ripgrep :which-key "project search")
 
    "g"   '(:ignore t :which-key "git")
 

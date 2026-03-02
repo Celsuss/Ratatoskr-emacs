@@ -10,11 +10,11 @@
 
 ;; --- Vertico Vertical Completion UI ---
 (use-package vertico
-  :init
-  (vertico-mode)
+  :demand t
   :custom
   (vertico-cycle t)
   :config
+  (vertico-mode)
   (setq vertico-resize nil
         vertico-count 10))
 
@@ -27,7 +27,7 @@
 ;; --- Marginalia Annotations ---
 (use-package marginalia
   :after vertico
-  :init
+  :config
   (marginalia-mode)
   :custom
   (marginalia-annotators '(marginalia-annotators-heavy marginalia-annotators-light nil)))
@@ -56,14 +56,22 @@
 
 ;; --- Corfu (in-buffer completion popup) ---
 (use-package corfu
+  :demand t
   :custom
   (corfu-auto t)
   (corfu-auto-prefix 1)
   (corfu-auto-delay 0.2)
   (corfu-cycle t)
-  :init
+  :config
   (global-corfu-mode)
   (corfu-history-mode))
+
+;; --- Corfu Terminal (child-frame fallback for TUI) ---
+(use-package corfu-terminal
+  :after corfu
+  :config
+  (unless (display-graphic-p)
+    (corfu-terminal-mode 1)))
 
 ;; --- Cape (completion-at-point extensions) ---
 (use-package cape
