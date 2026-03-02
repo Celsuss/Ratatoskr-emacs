@@ -265,6 +265,51 @@
   :config
   (global-evil-mc-mode 1))
 
+;; --- Evil-snipe (2-char jump motions) ---
+(use-package evil-snipe
+  :after evil
+  :config
+  (evil-snipe-mode 1)
+  (evil-snipe-override-mode 1))
+
+;; --- Evil-indent-plus (indentation text objects) ---
+(use-package evil-indent-plus
+  :after evil
+  :config
+  (evil-indent-plus-default-bindings))
+
+;; --- Evil-exchange (swap text regions) ---
+(use-package evil-exchange
+  :after evil
+  :config
+  (evil-exchange-install))
+
+;; --- Evil-lion (alignment operator) ---
+(use-package evil-lion
+  :after evil
+  :config
+  (evil-lion-mode))
+
+;; --- Evil-owl (register/mark previews) ---
+(use-package evil-owl
+  :after evil
+  :config
+  (setq evil-owl-display-method 'posframe
+        evil-owl-extra-posframe-args '(:width 60 :height 20
+                                       :internal-border-width 1))
+  (evil-owl-mode 1))
+
+;; --- Lispyville (structural Lisp editing) ---
+(use-package lispyville
+  :after evil
+  :hook ((emacs-lisp-mode lisp-mode) . lispyville-mode)
+  :config
+  (lispyville-set-key-theme '(operators c-w additional)))
+
+;; --- Evil-anzu (search match counter) ---
+(use-package evil-anzu
+  :after evil)
+
 ;; --- Smartparens ---
 (use-package smartparens
   :after evil

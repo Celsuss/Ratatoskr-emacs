@@ -151,6 +151,13 @@
            "** %U %?\n%i\n%a"
            :empty-lines 1))))
 
+;; --- Evil Org (context-aware o/O for tables and items) ---
+(use-package evil-org
+  :after (org evil)
+  :hook (org-mode . evil-org-mode)
+  :config
+  (evil-org-set-key-theme '(navigation insert textobjects additional calendar)))
+
 ;; --- Org Agenda Evil setup ---
 ;; org-agenda-mode is in evil-emacs-state-modes by default, which disables evil
 ;; entirely. Switch to motion state so the SPC leader and evil navigation work.
