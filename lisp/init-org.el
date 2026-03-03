@@ -74,11 +74,11 @@
       (mapcar #'car
               (org-roam-db-query
                [:select [nodes:file]
-                :from tags
-                :left-join nodes
-                :on (= tags:node-id nodes:id)
-                :where (= tags:tag "hastodo")
-                :group-by nodes:file]))))
+                        :from tags
+                        :left-join nodes
+                        :on (= tags:node-id nodes:id)
+                        :where (= tags:tag "hastodo")
+                        :group-by nodes:file]))))
 
   (defun rata-org-agenda-files-with-roam ()
     "Return combined agenda files: static list + roam :hastodo: files."
@@ -387,12 +387,12 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
      "Stale TODOs (>2 weeks)"))
 
   (rata-leader
-    :states '(normal visual)
-    "orq"  '(:ignore t :which-key "roam queries")
-    "orqo" '(rata-roam-orphan-notes  :which-key "orphan notes")
-    "orqr" '(rata-roam-recent-notes  :which-key "recent notes")
-    "orqw" '(rata-roam-work-notes    :which-key "work notes")
-    "orqt" '(rata-roam-stale-todos   :which-key "stale TODOs")))
+   :states '(normal visual)
+   "orq"  '(:ignore t :which-key "roam queries")
+   "orqo" '(rata-roam-orphan-notes  :which-key "orphan notes")
+   "orqr" '(rata-roam-recent-notes  :which-key "recent notes")
+   "orqw" '(rata-roam-work-notes    :which-key "work notes")
+   "orqt" '(rata-roam-stale-todos   :which-key "stale TODOs")))
 
 ;; --- Org Super Agenda ---
 (use-package org-super-agenda
@@ -508,20 +508,32 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
     (consult-org-roam-search))
 
   (rata-leader
-    :states '(normal visual)
-    "ors" '(consult-org-roam-search      :which-key "search roam")
-    "orb" '(consult-org-roam-backlinks   :which-key "backlinks consult")
-    "orF" '(consult-org-roam-file-find   :which-key "find file consult")
-    "orw" '(rata-roam-search-work        :which-key "search work notes")
-    "orP" '(rata-roam-search-personal    :which-key "search personal notes")))
+   :states '(normal visual)
+   "ors" '(consult-org-roam-search      :which-key "search roam")
+   "orb" '(consult-org-roam-backlinks   :which-key "backlinks consult")
+   "orF" '(consult-org-roam-file-find   :which-key "find file consult")
+   "orw" '(rata-roam-search-work        :which-key "search work notes")
+   "orP" '(rata-roam-search-personal    :which-key "search personal notes")))
+
+;; --- simple-httpd (explicit recipe to disambiguate from eschulte/emacs-web-server) ---
+(use-package simple-httpd
+  :ensure (simple-httpd :host github :repo "skeeto/emacs-web-server"
+                        :local-repo "emacs-web-server.github.skeeto"
+                        :main "simple-httpd.el")
+  :defer t)
+;; (use-package simple-httpd
+;;   :ensure (simple-httpd :host github :repo "skeeto/emacs-httpd"
+;;                         :local-repo "emacs-httpd.github.skeeto"
+;;                         :main "simple-httpd.el")
+;; :defer t)
 
 ;; --- Org Roam UI (graph visualization) ---
 (use-package org-roam-ui
   :after (org-roam general)
   :config
   (rata-leader
-    :states '(normal visual)
-    "oru" '(org-roam-ui-mode :which-key "roam graph UI")))
+   :states '(normal visual)
+   "oru" '(org-roam-ui-mode :which-key "roam graph UI")))
 
 ;; --- Org Download (paste/drag images) ---
 (use-package org-download
@@ -537,14 +549,14 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
   :after (org general)
   :config
   (rata-leader
-    :states '(normal visual)
-    "ort"  '(:ignore t :which-key "transclusion")
-    "orta" '(org-transclusion-add            :which-key "add transclusion")
-    "ortA" '(org-transclusion-add-all        :which-key "add all transclusions")
-    "ortr" '(org-transclusion-remove         :which-key "remove transclusion")
-    "ortR" '(org-transclusion-remove-all     :which-key "remove all")
-    "orte" '(org-transclusion-live-sync-start :which-key "edit source")
-    "ortm" '(org-transclusion-mode           :which-key "toggle mode")))
+   :states '(normal visual)
+   "ort"  '(:ignore t :which-key "transclusion")
+   "orta" '(org-transclusion-add            :which-key "add transclusion")
+   "ortA" '(org-transclusion-add-all        :which-key "add all transclusions")
+   "ortr" '(org-transclusion-remove         :which-key "remove transclusion")
+   "ortR" '(org-transclusion-remove-all     :which-key "remove all")
+   "orte" '(org-transclusion-live-sync-start :which-key "edit source")
+   "ortm" '(org-transclusion-mode           :which-key "toggle mode")))
 
 ;; --- ox-hugo (org to Hugo markdown export) ---
 (use-package ox-hugo
@@ -560,10 +572,10 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
         (run-at-time 2 nil (lambda () (browse-url "http://localhost:1313"))))))
 
   (rata-leader
-    :states '(normal visual)
-    "ob"  '(:ignore t :which-key "blog/hugo")
-    "obe" '(org-hugo-export-wim-to-md :which-key "export to hugo")
-    "obp" '(rata-hugo-preview         :which-key "preview post")))
+   :states '(normal visual)
+   "ob"  '(:ignore t :which-key "blog/hugo")
+   "obe" '(org-hugo-export-wim-to-md :which-key "export to hugo")
+   "obp" '(rata-hugo-preview         :which-key "preview post")))
 
 ;; --- Writegood Mode ---
 (use-package writegood-mode
@@ -571,7 +583,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
          (markdown-mode . writegood-mode))
   :config
   (rata-leader
-    :states '(normal visual)
-    "tw"  '(writegood-mode :which-key "writegood")))
+   :states '(normal visual)
+   "tw"  '(writegood-mode :which-key "writegood")))
 
 (provide 'init-org)

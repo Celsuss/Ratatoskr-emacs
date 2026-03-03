@@ -300,6 +300,10 @@ Result is cached per session; reset by `dashboard-after-initialize-hook'."
     :states '(normal visual)
     "bh" '(dashboard-open :which-key "home (dashboard)"))
 
+  ;; Make dashboard the initial buffer (works for both regular and daemon mode)
+  (setq initial-buffer-choice (lambda () (get-buffer-create dashboard-buffer-name)))
+  (add-hook 'server-after-make-frame-hook #'dashboard-open)
+
   (dashboard-setup-startup-hook))
 
 (provide 'init-dashboard)

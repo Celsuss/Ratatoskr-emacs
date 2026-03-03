@@ -10,6 +10,7 @@
             (setq gc-cons-threshold (* 16 1024 1024)))) ; gcmh takes over later
 
 ;; --- 2. Elpaca Bootstrap ---
+(setq elpaca-queue-limit 20)
 (defvar elpaca-installer-version 0.11)
 (defvar elpaca-directory (expand-file-name "elpaca/" user-emacs-directory))
 (defvar elpaca-builds-directory (expand-file-name "builds/" elpaca-directory))
@@ -50,7 +51,7 @@
 
 ;; --- 3. Elpaca use-package integration ---
 (elpaca elpaca-use-package
-  (elpaca-use-package-mode))
+        (elpaca-use-package-mode))
 
 ;; Process bootstrap queue synchronously so packages are on load-path
 ;; before modules are loaded below.
@@ -103,6 +104,7 @@ normally for a full backtrace.  Otherwise, catch and log them to
 (rata-load-module 'init-completion)
 (rata-load-module 'init-dev)
 (rata-load-module 'init-lang)
+(rata-load-module 'init-casual)
 (rata-load-module 'init-k8s)
 (rata-load-module 'init-gamedev)
 (rata-load-module 'init-snippets)

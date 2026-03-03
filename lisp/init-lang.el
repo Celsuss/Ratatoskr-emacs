@@ -16,8 +16,8 @@
 
 ;; --- treesit-auto: auto-install grammars & remap modes ---
 (use-package treesit-auto
-  :demand t
   :if (treesit-available-p)
+  :demand t
   :custom
   (treesit-auto-install 'prompt)
   :config
@@ -89,8 +89,7 @@
 
 ;; --- Python ---
 (use-package pyvenv
-  :config
-  (pyvenv-mode t))
+  :hook (python-ts-mode . pyvenv-mode))
 
 (add-hook 'python-ts-mode-hook #'lsp-deferred)
 
@@ -254,7 +253,9 @@ Initializes the working directory with providers and modules."
 
 ;; --- Python-pytest ---
 (use-package python-pytest
-  :after (python general)
+  :after general
+  :commands (python-pytest python-pytest-file python-pytest-function
+             python-pytest-repeat python-pytest-last-failed)
   :config
   (rata-leader
     :states '(normal visual)
@@ -362,5 +363,31 @@ Downloads sources and recalculates sha256sums."
              '("/templates/.*\\.ya?ml\\'" . poly-yaml-go-template-mode))
 (add-to-list 'auto-mode-alist
              '("\\.tpl\\'" . poly-yaml-go-template-mode))
+
+;; --- Combobulate (tree-sitter structural editing) ---
+(use-package combobulate
+  :ensure (combobulate :host github :repo "mickeynp/combobulate")
+  :after evil
+  :hook ((python-ts-mode     . combobulate-mode)
+         (go-ts-mode         . combobulate-mode)
+         (yaml-ts-mode       . combobulate-mode)
+         (json-ts-mode       . combobulate-mode)
+         (typescript-ts-mode . combobulate-mode)
+         (toml-ts-mode       . combobulate-mode)
+         (css-mode           . combobulate-mode)
+         (html-mode          . combobulate-mode))
+  :config
+  (rata-leader
+    :states '(normal visual)
+    :keymaps 'combobulate-key-map
+    "mS"  '(:ignore t :which-key "structural")
+    "mSs" '(combobulate-avy-jump          :which-key "avy jump node")
+    "mSu" '(combobulate-navigate-up       :which-key "up (parent)")
+    "mSd" '(combobulate-navigate-down     :which-key "down (child)")
+    "mSn" '(combobulate-navigate-next     :which-key "next sibling")
+    "mSp" '(combobulate-navigate-previous :which-key "prev sibling")
+    "mSk" '(combobulate-drag-up           :which-key "drag up")
+    "mSj" '(combobulate-drag-down         :which-key "drag down")
+    "mSt" '(combobulate                   :which-key "transient menu")))
 
 (provide 'init-lang)
