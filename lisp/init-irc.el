@@ -44,6 +44,12 @@
                           (mapcar #'buffer-name buffers)))
       (message "No IRC server buffers open"))))
 
+(defun rata-irc-connect-all ()
+  "Connect to all primary IRC networks silently."
+  (interactive)
+  (circe "Libera Chat")
+  (circe "QuakeNet"))
+
 (defun rata-irc-quit ()
   "Quit all IRC connections."
   (interactive)
@@ -55,7 +61,8 @@
 ;; --- Circe ---
 (use-package circe
   :after general
-  :commands circe
+  ;; :commands circe
+  :commands (circe rata-irc-connect-all)
   :custom
   (circe-network-options
    `(("Libera Chat"
@@ -66,24 +73,35 @@
       :user "celsuss"
       :sasl-username "celsuss"
       :sasl-password ,(lambda (_) (rata-auth-get "irc.libera.chat" "celsuss"))
-      :channels ("#emacs" "#archlinux" "#systemcrafters"))
+      :channels (,(mapconcat #'identity
+                             '("#emacs" "#spacemacs" "##llamas" "#linux" "#Linuxkompis"
+                               "#archlinux" "#archlinux-offtopic" "#archlinux-devops"
+                               "#archlinux-projects" "#archlinux-releng" "#archlinux-pacman"
+                               "#archlinux-nordics" "#archlinux-testing")
+                             ",")))
+     ;; :channels ("#emacs" "#archlinux" "#systemcrafters"))
      ("QuakeNet"
-      :host "irc.quakenet.org"
+      :host "stockholm.se.quakenet.org"
       :port 6667
       :nick "Celsuss"
       :user "Celsuss"
-      :channels ("#fitness"))))
+      :channels (,(mapconcat #'identity
+                             '("#sweclockers" "#stockholm")
+                             ",")))))
+
   (circe-reduce-lurker-spam t)
   :config
   (require 'lui-track-bar)
   (enable-circe-color-nicks)
   (enable-lui-track-bar)
   (add-hook 'circe-server-connected-hook #'rata-irc-quakenet-auth)
-
+  :init
   (rata-leader
     :states '(normal visual)
     "ac"  '(:ignore t :which-key "chat")
-    "acc" '(circe :which-key "connect IRC")
+    "acc" '(rata-irc-connect-all :which-key "connect IRC")
+    ;; "acc" '(circe :which-key "connect IRC")
+    "acc" '(rata-irc-connect-all :which-key "connect IRC")
     "acl" '(rata-irc-list-channels :which-key "list channels")
     "acn" '(rata-irc-next-activity :which-key "next activity")
     "acq" '(rata-irc-quit :which-key "quit IRC")
