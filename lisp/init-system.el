@@ -99,4 +99,13 @@
   (global-set-key (kbd "C-M-`") #'popper-cycle)
   (global-set-key (kbd "M-~") #'popper-toggle-type))
 
+;; Auto-save buffers on focus loss, buffer switch, idle
+(use-package super-save
+  :defer 1
+  :custom
+  (super-save-auto-save-when-idle t)
+  (super-save-idle-duration 10)
+  :config
+  (super-save-mode 1))
+
 (provide 'init-system)
