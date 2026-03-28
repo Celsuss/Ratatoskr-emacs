@@ -100,8 +100,6 @@
     :states '(normal visual)
     "ac"  '(:ignore t :which-key "chat")
     "acc" '(rata-irc-connect-all :which-key "connect IRC")
-    ;; "acc" '(circe :which-key "connect IRC")
-    "acc" '(rata-irc-connect-all :which-key "connect IRC")
     "acl" '(rata-irc-list-channels :which-key "list channels")
     "acn" '(rata-irc-next-activity :which-key "next activity")
     "acq" '(rata-irc-quit :which-key "quit IRC")

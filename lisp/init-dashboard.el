@@ -48,26 +48,34 @@
 
 ;; --- Custom Widget: Agenda (7-day overview) ---
 
+(defvar rata-dashboard--agenda-cache nil
+  "Cached agenda entries; refreshed per session.")
+
 (defun rata-dashboard--agenda-entries ()
-  "Return a list of (DATE-STRING . ENTRIES) for the next 7 days."
-  (require 'org-agenda)
-  (let* ((today (calendar-current-date))
-         (results '()))
-    (dotimes (i 7)
-      (let* ((date (calendar-gregorian-from-absolute
-                    (+ (calendar-absolute-from-gregorian today) i)))
-             (files (org-agenda-files nil 'ifmode))
-             (entries (apply #'org-agenda-get-day-entries files date
-                             '(:scheduled :deadline :timestamp)))
-             (day-name (if (= i 0) "Today"
-                         (if (= i 1) "Tomorrow"
-                           (format-time-string "%A %b %d"
-                                               (encode-time 0 0 0
-                                                            (nth 1 date)
-                                                            (nth 0 date)
-                                                            (nth 2 date)))))))
-        (push (cons day-name entries) results)))
-    (nreverse results)))
+  "Return a list of (DATE-STRING . ENTRIES) for the next 7 days.
+Only queries if org-agenda is already loaded; never triggers org load at startup."
+  (or rata-dashboard--agenda-cache
+      (setq rata-dashboard--agenda-cache
+            (when (featurep 'org-agenda)
+              (condition-case nil
+                  (let* ((today (calendar-current-date))
+                         (results '()))
+                    (dotimes (i 7)
+                      (let* ((date (calendar-gregorian-from-absolute
+                                    (+ (calendar-absolute-from-gregorian today) i)))
+                             (files (org-agenda-files nil 'ifmode))
+                             (entries (apply #'org-agenda-get-day-entries files date
+                                             '(:scheduled :deadline :timestamp)))
+                             (day-name (if (= i 0) "Today"
+                                         (if (= i 1) "Tomorrow"
+                                           (format-time-string "%A %b %d"
+                                                               (encode-time 0 0 0
+                                                                            (nth 1 date)
+                                                                            (nth 0 date)
+                                                                            (nth 2 date)))))))
+                        (push (cons day-name entries) results)))
+                    (nreverse results))
+                (error nil))))))
 
 (defun rata-dashboard-insert-agenda (_list-size)
   "Insert a 7-day agenda overview widget into the dashboard."
@@ -79,9 +87,7 @@
                                                   :v-adjust 0.0
                                                   :face 'dashboard-heading)))
   (insert "\n")
-  (let ((agenda-data (condition-case nil
-                         (rata-dashboard--agenda-entries)
-                       (error nil))))
+  (let ((agenda-data (rata-dashboard--agenda-entries)))
     (if (null agenda-data)
         (insert "    No agenda data available.\n")
       (dolist (day agenda-data)
@@ -100,25 +106,33 @@
 
 ;; --- Custom Widget: Org-roam Stats ---
 
+(defvar rata-dashboard--roam-stats-cache nil
+  "Cached roam stats (TOTAL . MODIFIED-THIS-WEEK); refreshed per session.")
+
 (defun rata-dashboard--roam-stats ()
-  "Return (TOTAL-NOTES . MODIFIED-THIS-WEEK) from org-roam."
-  (condition-case nil
-      (progn
-        (require 'org-roam)
-        (require 'org-roam-db)
-        (let* ((total (caar (org-roam-db-query
-                             "SELECT count(*) FROM nodes WHERE level = 0")))
-               (roam-dir (expand-file-name org-roam-directory))
-               (week-ago (time-subtract (current-time) (days-to-time 7)))
-               (modified 0))
-          (when (file-directory-p roam-dir)
-            (dolist (file (directory-files-recursively roam-dir "\\.org$"))
-              (let ((mtime (file-attribute-modification-time
-                            (file-attributes file))))
-                (when (time-less-p week-ago mtime)
-                  (cl-incf modified)))))
-          (cons (or total 0) modified)))
-    (error (cons 0 0))))
+  "Return (TOTAL-NOTES . MODIFIED-THIS-WEEK) from org-roam.
+Only queries if org-roam is already loaded and the DB exists; never
+triggers a full DB sync at startup."
+  (or rata-dashboard--roam-stats-cache
+      (setq rata-dashboard--roam-stats-cache
+            (condition-case nil
+                (if (and (featurep 'org-roam)
+                         (fboundp 'org-roam-db-query)
+                         (bound-and-true-p org-roam-directory))
+                    (let* ((total (caar (org-roam-db-query
+                                         "SELECT count(*) FROM nodes WHERE level = 0")))
+                           (roam-dir (expand-file-name org-roam-directory))
+                           (week-ago (time-subtract (current-time) (days-to-time 7)))
+                           (modified 0))
+                      (when (file-directory-p roam-dir)
+                        (dolist (file (directory-files-recursively roam-dir "\\.org$"))
+                          (let ((mtime (file-attribute-modification-time
+                                        (file-attributes file))))
+                            (when (time-less-p week-ago mtime)
+                              (cl-incf modified)))))
+                      (cons (or total 0) modified))
+                  (cons 0 0))
+              (error (cons 0 0))))))
 
 (defun rata-dashboard-insert-roam-stats (_list-size)
   "Insert org-roam statistics widget into the dashboard."
@@ -192,9 +206,8 @@ Result is cached per session; reset by `dashboard-after-initialize-hook'."
   (unless rata-dashboard--random-note-cache
     (setq rata-dashboard--random-note-cache
           (condition-case nil
-              (progn
-                (require 'org-roam)
-                (require 'org-roam-db)
+              (when (and (featurep 'org-roam)
+                         (fboundp 'org-roam-db-query))
                 (car (org-roam-db-query
                       [:select [id title file]
                        :from nodes
@@ -216,9 +229,12 @@ Result is cached per session; reset by `dashboard-after-initialize-hook'."
       (insert "    (org-roam not available)\n")))
   (insert "\n"))
 
-;; Reset the cache on each new dashboard session so a fresh note is picked
+;; Reset caches on each new dashboard session so fresh data is picked
 (add-hook 'dashboard-after-initialize-hook
-          (lambda () (setq rata-dashboard--random-note-cache nil)))
+          (lambda ()
+            (setq rata-dashboard--random-note-cache nil
+                  rata-dashboard--roam-stats-cache nil
+                  rata-dashboard--agenda-cache nil)))
 
 ;; --- Dashboard Package ---
 
