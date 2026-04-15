@@ -21,6 +21,18 @@
   :config
   (evil-collection-init))
 
+;; Fix evil-collection-dashboard: newer dashboard.el binds lambdas
+;; (not symbols) to shortcut keys; symbol-function chokes on them.
+(with-eval-after-load 'evil-collection-dashboard
+  (defun evil-collection-dashboard-setup-jump-commands (&rest _)
+    "Set up bindings for jump commands in Dashboard."
+    (evil-collection-define-key 'normal 'dashboard-mode-map
+      "r" (lookup-key dashboard-mode-map "r")
+      "m" (lookup-key dashboard-mode-map "m")
+      "p" (lookup-key dashboard-mode-map "p")
+      "a" (lookup-key dashboard-mode-map "a")
+      "e" (lookup-key dashboard-mode-map "e"))))
+
 ;; --- General (leader key) ---
 (use-package general
   :demand t

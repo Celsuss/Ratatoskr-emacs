@@ -3,7 +3,9 @@
 
 ;; Redirect auto-generated files out of user-emacs-directory
 (use-package no-littering
-  :demand t)
+  :demand t
+  :config
+  (no-littering-theme-backups))
 
 ;; Copy shell environment into Emacs (critical for daemon mode)
 (use-package exec-path-from-shell
@@ -98,5 +100,14 @@
   (global-set-key (kbd "M-`") #'popper-toggle)
   (global-set-key (kbd "C-M-`") #'popper-cycle)
   (global-set-key (kbd "M-~") #'popper-toggle-type))
+
+;; Auto-save buffers on focus loss, buffer switch, idle
+(use-package super-save
+  :defer 1
+  :custom
+  (super-save-auto-save-when-idle t)
+  (super-save-idle-duration 10)
+  :config
+  (super-save-mode 1))
 
 (provide 'init-system)

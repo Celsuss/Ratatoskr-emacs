@@ -34,7 +34,7 @@ org-roam.db
 /elpaca/
 /tree-sitter/
 
-# State and history (unless you use no-littering)
+# State and history (no-littering puts state under var/ and etc/)
 /auto-save-list/
 /server/
 *.elc
@@ -42,6 +42,12 @@ recentf
 history
 transient/history.el
 /var/
+/etc/
 /elfeed-db/
+/persp-confs/
+/custom.el
+/.org-id-locations
+/projectile-bookmarks.eld
+/.agent-shell/
 
 docs/*

@@ -26,9 +26,9 @@ debug:
 cli:
     {{emacs_bin}} --init-directory {{init_dir}} -nw
 
-# Byte-compile a single .el file for syntax checking
+# Byte-compile a single .el file for syntax checking (removes .elc after)
 check file:
-    {{emacs_bin}} --init-directory {{init_dir}} --batch --eval "(byte-compile-file \"{{file}}\")"
+    {{emacs_bin}} --init-directory {{init_dir}} --batch --eval "(byte-compile-file \"{{file}}\")" ; rm -f "{{file}}c"
 
 # Batch-load a single module to verify it parses
 load file:
