@@ -3,7 +3,9 @@
 
 ;; Redirect auto-generated files out of user-emacs-directory
 (use-package no-littering
-  :demand t)
+  :demand t
+  :config
+  (no-littering-theme-backups))
 
 ;; Copy shell environment into Emacs (critical for daemon mode)
 (use-package exec-path-from-shell
