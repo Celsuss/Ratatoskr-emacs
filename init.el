@@ -124,6 +124,7 @@ normally for a full backtrace.  Otherwise, catch and log them to
 (rata-load-module 'init-gamedev)
 (rata-load-module 'init-snippets)
 (rata-load-module 'init-llm)
+(rata-load-module 'init-khoj)
 (rata-load-module 'init-irc)
 (rata-load-module 'init-elfeed)
 ;; (rata-load-module 'init-mcp)      ; experimental — uncomment when stable
