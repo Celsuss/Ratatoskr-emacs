@@ -56,8 +56,11 @@ The config follows a modular structure: `early-init.el` → `init.el` → module
 
 ```
 init-pkg → init-system → init-ui → init-evil → init-completion →
-init-dev → init-lang → init-k8s → init-gamedev → init-snippets →
-init-llm → init-irc → init-elfeed → init-persp → init-org → init-dashboard
+init-dev → init-lang → init-rust → init-go → init-python → init-cpp →
+init-cmake → init-terraform → init-just → init-docker → init-markdown →
+init-yaml → init-ansible → init-jupyter → init-helm → init-pkgbuild →
+init-casual → init-k8s → init-gamedev → init-snippets → init-llm →
+init-irc → init-elfeed → init-persp → init-org → init-dashboard
 ```
 
 **Key modules:**
@@ -67,7 +70,8 @@ init-llm → init-irc → init-elfeed → init-persp → init-org → init-dashb
 - `init-evil.el` — evil + evil-collection, `general.el` with `rata-leader` definer (`SPC`), winum; contains `(elpaca-wait)` to synchronize general + evil before downstream modules use them
 - `init-completion.el` — orderless + vertico + marginalia + consult + embark + corfu
 - `init-dev.el` — lsp-mode, apheleia (formatting), flycheck, magit, projectile, vterm, diff-hl
-- `init-lang.el` — tree-sitter, language-specific modes (python, rust, go, terraform, etc.)
+- `init-lang.el` — cross-cutting language infrastructure: tree-sitter (treesit-auto + grammar sources), dap-mode core, combobulate. Per-language config lives in dedicated `init-<lang>.el` files that load after this one.
+- `init-<lang>.el` — one file per language: `init-rust`, `init-go`, `init-python`, `init-cpp`, `init-cmake`, `init-terraform`, `init-just`, `init-docker`, `init-markdown`, `init-yaml`, `init-ansible`, `init-jupyter`, `init-helm`, `init-pkgbuild`. Each contains the `use-package` forms, mode-local keybindings, and helper functions for that one language.
 - `init-org.el` — org-agenda with org-super-agenda, org-roam, org-transclusion, ox-hugo
 
 **Error handling:** `rata-load-module` wraps each require in `condition-case`. Failed modules are logged to `rata--failed-modules` and reported in the `*init-errors*` buffer at startup. With `--debug-init`, errors propagate for full backtraces.
