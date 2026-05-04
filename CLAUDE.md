@@ -45,6 +45,12 @@ just todos
 just install-hooks
 ```
 
+## Repository Context & Navigation
+
+- **Primary Context Source:** Always consult `repomix-output.xml` first when you need to understand the repository structure, review module dependencies, or plan cross-file changes.
+- **File Contents:** This file contains the complete, up-to-date, and packed context of all relevant Terraform code, optimized in XML format.
+- **Context Refresh:** If you make significant changes to the Terraform files or if the context seems stale, run `repomix` to regenerate the `repomix-output.xml` file before proceeding with further analysis.
+
 ## Architecture
 
 The config follows a modular structure: `early-init.el` → `init.el` → modules in `lisp/`.

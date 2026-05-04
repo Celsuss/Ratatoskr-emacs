@@ -51,13 +51,32 @@
     :states '(normal visual)
     "," '(rata-send-c-c-c-c :which-key "C-c C-c"))
 
-  ;; Custom functions for new keybindings
+  ;; Custom functions for keybindings
   (defun rata-kill-buffer-and-window ()
     "Kill the current buffer and delete its window."
     (interactive)
     (kill-current-buffer)
     (when (> (count-windows) 1)
       (delete-window)))
+
+  (defun rata-delete-current-file ()
+    "Delete the file visited by the current buffer, then kill the buffer."
+    (interactive)
+    (when (buffer-file-name)
+      (delete-file (buffer-file-name))
+      (kill-buffer)))
+
+  (defun rata-toggle-relative-line-numbers ()
+    "Toggle between relative and absolute line numbers."
+    (interactive)
+    (if (eq display-line-numbers 'relative)
+        (setq display-line-numbers t)
+      (setq display-line-numbers 'relative)))
+
+  (defun rata-reload-init-file ()
+    "Reload the Emacs init file."
+    (interactive)
+    (load-file user-init-file))
 
   (rata-leader
    :states '(normal visual motion)
@@ -71,11 +90,7 @@
    "fr"  '(consult-recent-file :which-key "recent file")
    "fL"  '(consult-locate :which-key "locate file")
    "fR"  '(rename-visited-file :which-key "rename file")
-   "fD"  '((lambda () (interactive)
-              (when (buffer-file-name)
-                (delete-file (buffer-file-name))
-                (kill-buffer)))
-            :which-key "delete file")
+   "fD"  '(rata-delete-current-file :which-key "delete file")
    "fC"  '(copy-file :which-key "copy file")
 
    "b"   '(:ignore t :which-key "buffers")
@@ -168,11 +183,7 @@
 
    "t"   '(:ignore t :which-key "toggle")
    "tn"  '(display-line-numbers-mode :which-key "line numbers")
-   "tr"  '((lambda () (interactive)
-              (if (eq display-line-numbers 'relative)
-                  (setq display-line-numbers t)
-                (setq display-line-numbers 'relative)))
-            :which-key "relative numbers")
+   "tr"  '(rata-toggle-relative-line-numbers :which-key "relative numbers")
    "tl"  '(toggle-truncate-lines :which-key "truncate lines")
    "tg"  '(golden-ratio-mode :which-key "golden ratio")
 
@@ -185,7 +196,7 @@
    "q"   '(:ignore t :which-key "quit")
    "qq"  '(save-buffers-kill-terminal :which-key "quit emacs")
    "qQ"  '(kill-emacs :which-key "quit without saving")
-   "qr"  '((lambda () (interactive) (load-file user-init-file)) :which-key "reload init.el")))
+   "qr"  '(rata-reload-init-file :which-key "reload init.el")))
 
 ;; Synchronize elpaca queue — general + evil must be ready before
 ;; any downstream module calls rata-leader

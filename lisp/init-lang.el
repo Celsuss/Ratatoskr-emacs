@@ -24,6 +24,12 @@
   (global-treesit-auto-mode))
 
 ;; --- DAP Mode (debugging) ---
+;; Explicit autoloads so commands are available before lsp-mode triggers dap-mode loading.
+(dolist (cmd '(dap-debug dap-next dap-step-in dap-step-out dap-continue
+               dap-breakpoint-toggle dap-breakpoint-condition
+               dap-ui-repl dap-disconnect))
+  (autoload cmd "dap-mode" nil t))
+
 (use-package dap-mode
   :after lsp-mode
   :config
@@ -42,9 +48,20 @@
     "dq"  '(dap-disconnect :which-key "disconnect")))
 
 ;; --- Combobulate (tree-sitter structural editing) ---
+;; Explicit autoloads so commands are available before evil triggers combobulate loading.
+(dolist (cmd '(combobulate combobulate-avy-jump
+               combobulate-navigate-up combobulate-navigate-down
+               combobulate-navigate-next combobulate-navigate-previous
+               combobulate-drag-up combobulate-drag-down))
+  (autoload cmd "combobulate" nil t))
+
 (use-package combobulate
   :ensure (combobulate :host github :repo "mickeynp/combobulate")
   :after evil
+  :commands (combobulate combobulate-avy-jump
+             combobulate-navigate-up combobulate-navigate-down
+             combobulate-navigate-next combobulate-navigate-previous
+             combobulate-drag-up combobulate-drag-down)
   :hook ((python-ts-mode     . combobulate-mode)
          (go-ts-mode         . combobulate-mode)
          (yaml-ts-mode       . combobulate-mode)

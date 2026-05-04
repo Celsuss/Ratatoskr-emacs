@@ -3,6 +3,7 @@
 
 (use-package go-mode
   :hook (go-mode . lsp-deferred)
+  :commands (go-import-add go-goto-imports)
   :config
   (setq go-tab-width 4)
   ;; Use goimports instead of gofmt (manages imports automatically)

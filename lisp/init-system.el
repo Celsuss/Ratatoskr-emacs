@@ -30,6 +30,9 @@
 (recentf-mode 1)
 (setq recentf-max-saved-items 200)
 
+;; Winner mode (undo/redo window configurations)
+(winner-mode 1)
+
 ;; Ediff: side-by-side in same frame, restore windows on quit
 (setq ediff-split-window-function #'split-window-horizontally
       ediff-window-setup-function #'ediff-setup-windows-plain)

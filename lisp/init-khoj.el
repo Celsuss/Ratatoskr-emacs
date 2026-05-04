@@ -3,6 +3,9 @@
 
 (use-package khoj
   :after general
+  :commands (khoj khoj--chat khoj--new-conversation-session
+             khoj--open-conversation-session khoj--delete-conversation-session
+             khoj--server-index-files)
   :custom
   (khoj-server-url "http://khoj.homelab.local")
   (khoj-server-is-local t)
