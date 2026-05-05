@@ -104,6 +104,16 @@
   (global-set-key (kbd "C-M-`") #'popper-cycle)
   (global-set-key (kbd "M-~") #'popper-toggle-type))
 
+;; Auto-revert buffers when files change on disk (e.g. external edits by Claude Code)
+(use-package autorevert
+  :ensure nil
+  :defer 2
+  :config
+  (setq auto-revert-verbose nil)
+  (setq auto-revert-use-notify t)
+  (setq auto-revert-avoid-polling t)
+  (global-auto-revert-mode 1))
+
 ;; Auto-save buffers on focus loss, buffer switch, idle
 (use-package super-save
   :defer 1
