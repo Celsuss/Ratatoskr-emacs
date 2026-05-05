@@ -30,6 +30,9 @@
 (recentf-mode 1)
 (setq recentf-max-saved-items 200)
 
+;; Winner mode (undo/redo window configurations)
+(winner-mode 1)
+
 ;; Ediff: side-by-side in same frame, restore windows on quit
 (setq ediff-split-window-function #'split-window-horizontally
       ediff-window-setup-function #'ediff-setup-windows-plain)
@@ -100,6 +103,16 @@
   (global-set-key (kbd "M-`") #'popper-toggle)
   (global-set-key (kbd "C-M-`") #'popper-cycle)
   (global-set-key (kbd "M-~") #'popper-toggle-type))
+
+;; Auto-revert buffers when files change on disk (e.g. external edits by Claude Code)
+(use-package autorevert
+  :ensure nil
+  :defer 2
+  :config
+  (setq auto-revert-verbose nil)
+  (setq auto-revert-use-notify t)
+  (setq auto-revert-avoid-polling t)
+  (global-auto-revert-mode 1))
 
 ;; Auto-save buffers on focus loss, buffer switch, idle
 (use-package super-save
