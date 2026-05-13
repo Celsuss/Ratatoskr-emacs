@@ -250,8 +250,7 @@ When present the file is included in org-agenda via the :hastodo: query."
                                  :unnarrowed t)
 
                                 ("p" "project" plain
-                                 "\n* TODO ${title}
-One of [[id:1ae70a1c-485e-43fb-acc2-4c364510d632][my projects]].
+                                 "One of [[id:1ae70a1c-485e-43fb-acc2-4c364510d632][my projects]].
 
 ** Goal
 Describe the outcome of this project.
@@ -272,7 +271,7 @@ Describe the outcome of this project.
                                                              "#+filetags: :project:${slug}:hastodo:\n"
                                                              "#+SEQ_TODO: TODO STRT WAIT | DONE\n"
                                                              "#+startup: content\n"
-                                                             "\n"))
+                                                             "\n\n* TODO ${title}\n"))
                                  :unnarrowed t)
 
 
@@ -295,30 +294,33 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
                                  :unnarrowed t)
 
                                 ("m" "meeting" plain
-                                 "\n* Meeting Notes\n%?\n\n* Action Items\n** TODO \n"
+                                 "%?\n\n* Action Items\n** TODO \n"
                                  :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
                                                     ,(concat "#+title: ${title}\n"
                                                              "#+author: " user-full-name "\n"
                                                              "#+date: %U\n"
-                                                             "#+filetags: :work:hastodo:\n"))
+                                                             "#+filetags: :work:hastodo:\n"
+                                                             "\n\n* Meeting Notes\n"))
                                  :unnarrowed t)
 
                                 ("e" "tool evaluation" plain
-                                 "\n* ${title}\n\n** What it does\n%?\n\n** Pros\n- \n\n** Cons\n- \n\n** Alternatives & Comparison\n| Tool | Pros | Cons | Verdict |\n|------+------+------+---------|\n| ${title} | | | |\n| | | | |\n\n** Verdict\n/adopt · trial · reject · revisit/\n"
+                                 "\n** What it does\n%?\n\n** Pros\n- \n\n** Cons\n- \n\n** Alternatives & Comparison\n| Tool | Pros | Cons | Verdict |\n|------+------+------+---------|\n| ${title} | | | |\n| | | | |\n\n** Verdict\n/adopt · trial · reject · revisit/\n"
                                  :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
                                                     ,(concat "#+title: ${title}\n"
                                                              "#+author: " user-full-name "\n"
                                                              "#+date: %U\n"
-                                                             "#+filetags: :tool-eval:\n"))
+                                                             "#+filetags: :tool-eval:\n"
+                                                             "\n\n* ${title}\n"))
                                  :unnarrowed t)
 
                                 ("T" "troubleshooting" plain
-                                 "\n* Problem\n%?\n\n* Environment\n- OS: \n- Tool version: \n\n* Steps Tried\n1. \n\n* Root Cause\n\n* Solution\n"
+                                 "%?\n\n* Environment\n- OS: \n- Tool version: \n\n* Steps Tried\n1. \n\n* Root Cause\n\n* Solution\n"
                                  :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
                                                     ,(concat "#+title: ${title}\n"
                                                              "#+author: " user-full-name "\n"
                                                              "#+date: %U\n"
-                                                             "#+filetags: :troubleshooting:\n"))
+                                                             "#+filetags: :troubleshooting:\n"
+                                                             "\n\n* Problem\n"))
                                  :unnarrowed t)))
 
   :config
