@@ -45,6 +45,12 @@ just todos
 just install-hooks
 ```
 
+## Repository Context & Navigation
+
+- **Primary Context Source:** Always consult `repomix-output.xml` first when you need to understand the repository structure, review module dependencies, or plan cross-file changes.
+- **File Contents:** This file contains the complete, up-to-date, and packed context of all relevant Terraform code, optimized in XML format.
+- **Context Refresh:** If you make significant changes to the Terraform files or if the context seems stale, run `repomix` to regenerate the `repomix-output.xml` file before proceeding with further analysis.
+
 ## Architecture
 
 The config follows a modular structure: `early-init.el` → `init.el` → modules in `lisp/`.
@@ -56,8 +62,11 @@ The config follows a modular structure: `early-init.el` → `init.el` → module
 
 ```
 init-pkg → init-system → init-ui → init-evil → init-completion →
-init-dev → init-lang → init-k8s → init-gamedev → init-snippets →
-init-llm → init-irc → init-elfeed → init-persp → init-org → init-dashboard
+init-dev → init-lang → init-rust → init-go → init-python → init-cpp →
+init-cmake → init-terraform → init-just → init-docker → init-markdown →
+init-yaml → init-ansible → init-jupyter → init-helm → init-pkgbuild →
+init-casual → init-k8s → init-gamedev → init-snippets → init-llm →
+init-irc → init-elfeed → init-persp → init-org → init-dashboard
 ```
 
 **Key modules:**
@@ -67,7 +76,8 @@ init-llm → init-irc → init-elfeed → init-persp → init-org → init-dashb
 - `init-evil.el` — evil + evil-collection, `general.el` with `rata-leader` definer (`SPC`), winum; contains `(elpaca-wait)` to synchronize general + evil before downstream modules use them
 - `init-completion.el` — orderless + vertico + marginalia + consult + embark + corfu
 - `init-dev.el` — lsp-mode, apheleia (formatting), flycheck, magit, projectile, vterm, diff-hl
-- `init-lang.el` — tree-sitter, language-specific modes (python, rust, go, terraform, etc.)
+- `init-lang.el` — cross-cutting language infrastructure: tree-sitter (treesit-auto + grammar sources), dap-mode core, combobulate. Per-language config lives in dedicated `init-<lang>.el` files that load after this one.
+- `init-<lang>.el` — one file per language: `init-rust`, `init-go`, `init-python`, `init-cpp`, `init-cmake`, `init-terraform`, `init-just`, `init-docker`, `init-markdown`, `init-yaml`, `init-ansible`, `init-jupyter`, `init-helm`, `init-pkgbuild`. Each contains the `use-package` forms, mode-local keybindings, and helper functions for that one language.
 - `init-org.el` — org-agenda with org-super-agenda, org-roam, org-transclusion, ox-hugo
 
 **Error handling:** `rata-load-module` wraps each require in `condition-case`. Failed modules are logged to `rata--failed-modules` and reported in the `*init-errors*` buffer at startup. With `--debug-init`, errors propagate for full backtraces.

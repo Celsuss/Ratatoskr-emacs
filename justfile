@@ -152,8 +152,14 @@ compile:
     fi
     echo "All files compiled successfully."
 
-# Run all tests (lint + compile + startup)
-test: lint compile batch
+# Run ERT tests (keybinding safety + module health + no-littering)
+test-ert:
+    {{emacs_bin}} --init-directory {{init_dir}} --batch \
+        -l ert \
+        -l tests/run-tests.el
+
+# Run all tests (lint + compile + startup + ERT)
+test: lint compile batch test-ert
 
 # Configure git to use .githooks/ for hooks (one-time setup)
 install-hooks:

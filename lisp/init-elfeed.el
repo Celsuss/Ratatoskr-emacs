@@ -89,7 +89,7 @@
 (use-package elfeed
   :ensure t
   :after general
-  :commands elfeed
+  :commands (elfeed elfeed-update elfeed-search-set-filter)
   :hook (elfeed-search-mode . elfeed-update)
   :hook (elfeed-search-mode . rata-elfeed-start-update-timer)
   :custom

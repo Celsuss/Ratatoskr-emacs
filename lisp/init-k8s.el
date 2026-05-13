@@ -4,7 +4,8 @@
 ;; --- Kubel (interactive kubectl interface) ---
 (use-package kubel
   :after general
-  :commands kubel
+  :commands (kubel kubel-set-namespace kubel-set-context
+             kubel-port-forward-pod kubel-get-pod-logs)
   :config
   (rata-leader
     :states '(normal visual)

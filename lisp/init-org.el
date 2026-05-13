@@ -17,9 +17,15 @@
   :type 'directory
   :group 'rata)
 
+(defun rata-org-capture-fleeting ()
+  "Capture a fleeting note to inbox.org."
+  (interactive)
+  (org-capture nil "f"))
+
 (use-package org
   :defer t
   :after general
+  :commands (org-capture org-agenda org-todo-list org-deadline)
   :hook (org-mode . auto-fill-mode)
   :config
   (setq-default fill-column 80)
@@ -30,8 +36,7 @@
    "oa" '(org-agenda :which-key "org agenda")
    "ot" '(org-todo-list :which-key "list all TODOs")
    "od" '(org-deadline :which-key "deadline")
-   "of" '((lambda () (interactive) (org-capture nil "f"))
-          :which-key "fleeting note"))
+   "of" '(rata-org-capture-fleeting :which-key "fleeting note"))
 
   ;;;; Org Agenda
   (setq org-agenda-inhibit-startup t)
@@ -56,16 +61,7 @@
           (search . " %i %?-12t% s")))
 
   (setq org-agenda-files
-        (mapcar (lambda (f) (expand-file-name f rata-org-roam-dir))
-                '("todo.org"
-                  "work_tasks.org"
-                  "homelab_tasks.org"
-                  "emacs_tweak_tasks.org"
-                  "dotfiles_tweak_tasks.org"
-                  "curriculum_tasks.org"
-                  "projects/"
-                  "habits.org"
-                  "inbox.org")))
+        (list (expand-file-name "inbox.org" rata-org-roam-dir)))
 
   ;; Tag-based agenda inclusion: dynamically add roam files with :hastodo: tag
   (defun rata-org-roam-agenda-files ()
@@ -82,7 +78,7 @@
 
   (defun rata-org-agenda-files-with-roam ()
     "Return combined agenda files: static list + roam :hastodo: files."
-    (append org-agenda-files (rata-org-roam-agenda-files)))
+    (delete-dups (append org-agenda-files (rata-org-roam-agenda-files))))
 
   ;; Advise org-agenda to include roam :hastodo: files
   (defun rata-org-agenda-files-advice (orig-fun &rest args)
@@ -90,6 +86,7 @@
     (let ((org-agenda-files (rata-org-agenda-files-with-roam)))
       (apply orig-fun args)))
   (advice-add 'org-agenda :around #'rata-org-agenda-files-advice)
+  (advice-add 'org-todo-list :around #'rata-org-agenda-files-advice)
 
   (org-super-agenda-mode)
 
@@ -194,6 +191,46 @@
 (use-package ob-rust :ensure t :defer t)
 
 ;; --- Org Roam ---
+(dolist (cmd '(org-roam-buffer-toggle org-roam-node-find org-roam-graph
+               org-roam-node-insert org-roam-capture
+               org-roam-dailies-capture-today org-roam-dailies-goto-today
+               org-roam-dailies-goto-yesterday org-roam-dailies-goto-tomorrow
+               org-roam-dailies-goto-date))
+  (autoload cmd "org-roam" nil t))
+
+(defun rata-toggle-hastodo-filetag ()
+  "Toggle :hastodo: filetag on the current org-roam buffer.
+When present the file is included in org-agenda via the :hastodo: query."
+  (interactive)
+  (unless (org-roam-file-p)
+    (user-error "Not an org-roam file"))
+  (save-excursion
+    (goto-char (point-min))
+    (if (re-search-forward "^#\\+filetags:.*:hastodo:" nil t)
+        (progn
+          (goto-char (point-min))
+          (re-search-forward "^#\\+filetags:" nil t)
+          (save-restriction
+            (narrow-to-region (point) (line-end-position))
+            (goto-char (point-min))
+            (while (re-search-forward ":hastodo" nil t)
+              (replace-match "")))
+          (message "Removed :hastodo: — file excluded from agenda"))
+      (goto-char (point-min))
+      (if (re-search-forward "^#\\+filetags:\\s-*" nil t)
+          (progn
+            (goto-char (line-end-position))
+            (unless (eq (char-before) ?:) (insert ":"))
+            (insert "hastodo:")
+            (message "Added :hastodo: — file included in agenda"))
+        (goto-char (point-min))
+        (re-search-forward "^#\\+\\(title\\|date\\|author\\):" nil t)
+        (end-of-line)
+        (insert "\n#+filetags: :hastodo:")
+        (message "Added #+filetags: :hastodo: — file included in agenda"))))
+  (save-buffer)
+  (org-roam-db-update-file))
+
 (use-package org-roam
   :after (org general)
   :custom
@@ -228,11 +265,11 @@ Describe the outcome of this project.
 *** TODO Define milestones
 %?"
 
-                                 :if-new (file+head "projects/%<%Y%m%d%H%M%S>-${slug}.org"
+                                 :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
                                                     ,(concat "#+title: ${title}\n"
                                                              "#+author: " user-full-name "\n"
                                                              "#+date: %U\n"
-                                                             "#+filetags: :project:${slug}:\n"
+                                                             "#+filetags: :project:${slug}:hastodo:\n"
                                                              "#+SEQ_TODO: TODO STRT WAIT | DONE\n"
                                                              "#+startup: content\n"
                                                              "\n"))
@@ -249,7 +286,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 :export_file_name:
 :end:"
 
-                                 :if-new (file+head "blog-posts/%<%Y%m%d%H%M%S>-${slug}.org"
+                                 :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
                                                     ,(concat "#+title: ${title}\n"
                                                              "#+author: " user-full-name "\n"
                                                              "#+date: %U\n"
@@ -352,40 +389,46 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
            :empty-lines-before 1
            :empty-lines-after 1)))
 
+  (rata-leader
+   :states '(normal visual)
+   "oh" '(rata-toggle-hastodo-filetag :which-key "toggle agenda inclusion"))
+
   (org-roam-db-autosync-mode))
 
 ;; --- Org Roam QL ---
+
+(defun rata-roam-orphan-notes ()
+  "Show org-roam notes with zero backlinks."
+  (interactive)
+  (org-roam-ql-search
+   '(not (backlink-count > 0))
+   "Orphan notes (no backlinks)"))
+
+(defun rata-roam-recent-notes ()
+  "Show org-roam notes modified in the last 7 days."
+  (interactive)
+  (org-roam-ql-search
+   `(file-mtime > ,(- (float-time) (* 7 24 60 60)))
+   "Notes modified this week"))
+
+(defun rata-roam-work-notes ()
+  "Show all org-roam notes tagged :work:."
+  (interactive)
+  (org-roam-ql-search
+   '(tags "work")
+   "Work notes"))
+
+(defun rata-roam-stale-todos ()
+  "Show org-roam notes with TODOs older than 2 weeks."
+  (interactive)
+  (org-roam-ql-search
+   `(and (todo) (file-mtime < ,(- (float-time) (* 14 24 60 60))))
+   "Stale TODOs (>2 weeks)"))
+
 (use-package org-roam-ql
   :after (org-roam general)
+  :commands (org-roam-ql-search)
   :config
-  (defun rata-roam-orphan-notes ()
-    "Show org-roam notes with zero backlinks."
-    (interactive)
-    (org-roam-ql-search
-     '(not (backlink-count > 0))
-     "Orphan notes (no backlinks)"))
-
-  (defun rata-roam-recent-notes ()
-    "Show org-roam notes modified in the last 7 days."
-    (interactive)
-    (org-roam-ql-search
-     `(file-mtime > ,(- (float-time) (* 7 24 60 60)))
-     "Notes modified this week"))
-
-  (defun rata-roam-work-notes ()
-    "Show all org-roam notes tagged :work:."
-    (interactive)
-    (org-roam-ql-search
-     '(tags "work")
-     "Work notes"))
-
-  (defun rata-roam-stale-todos ()
-    "Show org-roam notes with TODOs older than 2 weeks."
-    (interactive)
-    (org-roam-ql-search
-     `(and (todo) (file-mtime < ,(- (float-time) (* 14 24 60 60))))
-     "Stale TODOs (>2 weeks)"))
-
   (rata-leader
    :states '(normal visual)
    "orq"  '(:ignore t :which-key "roam queries")
@@ -492,21 +535,23 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
   (org-appear-autosubmarkers t))
 
 ;; --- Consult Org Roam ---
+
+(defun rata-roam-search-work ()
+  "Search org-roam notes filtered to :work: tag."
+  (interactive)
+  (consult-org-roam-search nil "work"))
+
+(defun rata-roam-search-personal ()
+  "Search org-roam notes excluding :work: tag."
+  (interactive)
+  (consult-org-roam-search))
+
 (use-package consult-org-roam
   :after (org-roam consult general)
+  :commands (consult-org-roam-search consult-org-roam-backlinks
+             consult-org-roam-file-find)
   :config
   (consult-org-roam-mode 1)
-
-  (defun rata-roam-search-work ()
-    "Search org-roam notes filtered to :work: tag."
-    (interactive)
-    (consult-org-roam-search nil "work"))
-
-  (defun rata-roam-search-personal ()
-    "Search org-roam notes excluding :work: tag."
-    (interactive)
-    (consult-org-roam-search))
-
   (rata-leader
    :states '(normal visual)
    "ors" '(consult-org-roam-search      :which-key "search roam")
@@ -545,6 +590,11 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
         org-download-method 'directory))
 
 ;; --- Org Transclusion (live embedding of content) ---
+(dolist (cmd '(org-transclusion-add org-transclusion-add-all
+               org-transclusion-remove org-transclusion-remove-all
+               org-transclusion-live-sync-start org-transclusion-mode))
+  (autoload cmd "org-transclusion" nil t))
+
 (use-package org-transclusion
   :after (org general)
   :config
@@ -559,18 +609,20 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
    "ortm" '(org-transclusion-mode           :which-key "toggle mode")))
 
 ;; --- ox-hugo (org to Hugo markdown export) ---
+
+(defun rata-hugo-preview ()
+  "Start Hugo server for previewing blog posts."
+  (interactive)
+  (let ((default-directory rata-hugo-dir))
+    (if (get-buffer "*hugo-server*")
+        (browse-url "http://localhost:1313")
+      (start-process "hugo-server" "*hugo-server*" "hugo" "server" "-D")
+      (run-at-time 2 nil (lambda () (browse-url "http://localhost:1313"))))))
+
 (use-package ox-hugo
   :after (ox general)
+  :commands (org-hugo-export-wim-to-md)
   :config
-  (defun rata-hugo-preview ()
-    "Start Hugo server for previewing blog posts."
-    (interactive)
-    (let ((default-directory rata-hugo-dir))
-      (if (get-buffer "*hugo-server*")
-          (browse-url "http://localhost:1313")
-        (start-process "hugo-server" "*hugo-server*" "hugo" "server" "-D")
-        (run-at-time 2 nil (lambda () (browse-url "http://localhost:1313"))))))
-
   (rata-leader
    :states '(normal visual)
    "ob"  '(:ignore t :which-key "blog/hugo")

@@ -1,8 +1,8 @@
 ;;; -*- lexical-binding: t; -*-
 ;;; init-ui.el --- UI configuration
 
-;; Relative line numbers
-(setq display-line-numbers-type 'relative)
+;; Absolute line numbers
+(setq display-line-numbers-type t)
 (global-display-line-numbers-mode t)
 
 ;; Disable UI chrome (belt + suspenders with early-init.el)

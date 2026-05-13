@@ -87,8 +87,11 @@
   (add-to-list 'corfu-margin-formatters #'nerd-icons-corfu-formatter))
 
 ;; --- Wgrep (editable grep buffers) ---
+(autoload 'wgrep-change-to-wgrep-mode "wgrep" nil t)
+
 (use-package wgrep
   :after embark
+  :commands (wgrep-change-to-wgrep-mode wgrep-finish-edit wgrep-abort-changes)
   :custom
   (wgrep-auto-save-buffer t))
 

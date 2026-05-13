@@ -8,7 +8,11 @@
 
 ;; --- LSP Mode ---
 (use-package lsp-mode
-  :commands (lsp lsp-deferred)
+  :commands (lsp lsp-deferred
+             lsp-find-definition lsp-find-references lsp-rename
+             lsp-execute-code-action lsp-format-buffer
+             lsp-find-implementation lsp-find-type-definition
+             lsp-workspace-restart)
   :custom
   (lsp-prefer-flymake nil)
   (lsp-enable-on-type-formatting nil)
@@ -138,6 +142,9 @@
 ;; --- Projectile ---
 (use-package projectile
   :after general
+  :commands (projectile-mode projectile-switch-project
+             projectile-run-project-tests projectile-kill-buffers
+             projectile-replace projectile-replace-regexp)
   :config
   (projectile-mode +1)
   (rata-leader
@@ -150,8 +157,12 @@
     "pR"  '(projectile-replace-regexp :which-key "replace regexp")))
 
 ;; --- Consult Projectile ---
+(autoload 'consult-projectile-find-file "consult-projectile" nil t)
+(autoload 'consult-projectile-ripgrep "consult-projectile" nil t)
+
 (use-package consult-projectile
   :after (consult projectile)
+  :commands (consult-projectile-find-file consult-projectile-ripgrep)
   :config
   (rata-leader
     :states '(normal visual)
@@ -224,6 +235,9 @@
 (use-package restclient
   :mode ("\\.http\\'" . restclient-mode)
   :after general
+  :commands (restclient-http-send-current restclient-http-send-current-raw
+             restclient-jump-next restclient-jump-prev
+             restclient-copy-curl-command)
   :config
   (rata-leader
     :states '(normal visual)

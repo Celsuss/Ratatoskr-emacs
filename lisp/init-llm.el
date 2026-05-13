@@ -22,6 +22,7 @@
 ;; --- ellama (Ollama local) ---
 (use-package ellama
   :after general
+  :commands (ellama-chat ellama-ask-about ellama-enhance-code)
   :config
   (require 'llm-ollama)
   (setq ellama-provider
@@ -36,6 +37,7 @@
 ;; --- aidermacs (Ollama local) ---
 (use-package aidermacs
   :after general
+  :commands (aidermacs-transient-menu aidermacs-open)
   :config
   (setq aidermacs-default-model "ollama_chat/deepseek-coder:latest")
   (rata-leader
