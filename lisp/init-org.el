@@ -25,7 +25,7 @@
 (use-package org
   :defer t
   :after general
-  :commands (org-capture org-agenda org-todo-list org-deadline)
+  :commands (org-capture org-agenda org-todo-list org-deadline org-latex-preview)
   :hook (org-mode . auto-fill-mode)
   :config
   (setq-default fill-column 80)
@@ -545,6 +545,10 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
              (executable-find "dvisvgm"))
     ;; Crisp, resolution-independent SVG output (scales with font size / HiDPI).
     (setq org-preview-latex-default-process 'dvisvgm)
+    ;; Render all math fragments to images automatically on file open, so you
+    ;; don't have to invoke `SPC o m' manually.  org-fragtog still toggles the
+    ;; fragment around point back to source as you edit.
+    (setq org-startup-with-latex-preview t)
     ;; Slightly larger so rendered math matches body text on HiDPI.
     (setq org-format-latex-options
           (plist-put org-format-latex-options :scale 1.3))
