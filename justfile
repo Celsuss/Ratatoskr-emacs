@@ -84,6 +84,10 @@ install-deps:
         python-black prettier gopls pyright go-tools
         # Dev tools
         rustup python-pytest terraform kubectl docker hugo delve
+        # Org LaTeX math preview (latex + dvisvgm + org preamble packages:
+        # wrapfig/capt-of -> latexextra, ulem -> plaingeneric)
+        texlive-binextra texlive-latex texlive-latexrecommended
+        texlive-latexextra texlive-plaingeneric
     )
 
     aur_pkgs=(claude-code-acp gomodifytags)

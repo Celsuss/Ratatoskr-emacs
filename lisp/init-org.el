@@ -36,6 +36,7 @@
     "oa" '(org-agenda :which-key "org agenda")
     "ot" '(org-todo-list :which-key "list all TODOs")
     "od" '(org-deadline :which-key "deadline")
+    "om" '(org-latex-preview :which-key "toggle math preview")
     "of" '(rata-org-capture-fleeting :which-key "fleeting note"))
 
   ;;;; Org Agenda
@@ -535,6 +536,39 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
   :custom
   (org-appear-autolinks t)
   (org-appear-autosubmarkers t))
+
+;; --- LaTeX math preview ---
+;; Built-in org-latex-preview renders $...$ / $$...$$ fragments to images.
+;; Requires a system LaTeX install + dvisvgm (e.g. Arch: texlive-* packages).
+(with-eval-after-load 'org
+  (when (and (executable-find "latex")
+             (executable-find "dvisvgm"))
+    ;; Crisp, resolution-independent SVG output (scales with font size / HiDPI).
+    (setq org-preview-latex-default-process 'dvisvgm)
+    ;; Slightly larger so rendered math matches body text on HiDPI.
+    (setq org-format-latex-options
+          (plist-put org-format-latex-options :scale 1.3))
+    ;; Derive colors from the `default' face so SVGs are legible on
+    ;; gruvbox-dark-medium instead of black-on-transparent.  Use `default'
+    ;; rather than `auto': `auto' reads `face-at-point', which can be nil and
+    ;; raises "Invalid face" during in-buffer preview.
+    (setq org-format-latex-options
+          (plist-put org-format-latex-options :foreground 'default))
+    (setq org-format-latex-options
+          (plist-put org-format-latex-options :background 'default))
+    ;; The dvisvgm preview process compiles with pdfTeX `latex', but org's
+    ;; default package list includes `fontspec' (lualatex/xetex only), which
+    ;; aborts compilation ("fontspec requires either XeTeX or LuaTeX").  The
+    ;; preview pipeline does not honor the per-package compiler restriction,
+    ;; so strip fontspec from the snippet preamble.
+    (setq org-latex-default-packages-alist
+          (seq-remove (lambda (pkg) (equal (nth 1 pkg) "fontspec"))
+                      org-latex-default-packages-alist))))
+
+;; --- Org Fragtog (auto-toggle LaTeX previews around point) ---
+(use-package org-fragtog
+  :after org
+  :hook (org-mode . org-fragtog-mode))
 
 ;; --- Consult Org Roam ---
 
