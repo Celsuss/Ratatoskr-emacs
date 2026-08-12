@@ -25,13 +25,88 @@ A modular, Evil-based Emacs configuration built for speed and productivity.
 - *Dashboard* start page with agenda, org-roam stats, and git status
 - *Resilient startup* — modules load inside =condition-case=; one broken module won't take down the rest
 
-** Requirements
+** Dependencies
 
-- Emacs 29+ (tree-sitter support)
-- [[https://just.systems][just]] (command runner)
-- =enchant= (system package, for =jinx= spell checking)
-- Nerd-icons fonts (=just install-fonts=)
-- Arch Linux recommended — =just install-deps= uses =pacman= / =yay=
+*** Core
+
+| Dependency | Purpose                                       |
+|------------+-----------------------------------------------|
+| Emacs 29+  | Tree-sitter support (tested with 30.x)        |
+| =git=        | Elpaca clones all packages from source        |
+| [[https://just.systems][just]]       | Command runner for everything in the justfile |
+
+*** Build tools (native modules)
+
+Some packages compile native code on first use and fail at startup if these
+are missing:
+
+| Dependency                   | Needed by                                     |
+|------------------------------+-----------------------------------------------|
+| C compiler (=gcc= or =clang=)    | =jinx=, =vterm=, tree-sitter grammars, native-comp |
+| =pkg-config=                   | =jinx= module compilation                       |
+| =enchant= + development headers | =jinx= spell checking (binary =enchant-2= must be on PATH) |
+| =cmake=, =libtool=               | =vterm= terminal emulator                       |
+| =hunspell-en-us= or =aspell-en=  | Spell-checking dictionaries used by enchant   |
+
+*** CLI tools
+
+| Dependency          | Purpose                              |
+|---------------------+--------------------------------------|
+| =ripgrep=             | Search (consult, projectile)         |
+| =fd=                  | Fast file finding                    |
+| =shfmt=               | Shell script formatting (apheleia)   |
+| =editorconfig-core-c= | EditorConfig support                 |
+
+*** Language servers, formatters & dev tools
+
+| Dependency        | Purpose                                                     |
+|-------------------+-------------------------------------------------------------|
+| =pyright=           | Python LSP                                                  |
+| =python-black=      | Python formatting (apheleia)                                |
+| =python-pytest=     | Python testing                                              |
+| =gopls=, =go-tools=   | Go LSP + tooling                                            |
+| =gomodifytags=      | Go struct tag editing                                       |
+| =delve=             | Go debugging (dap-mode)                                     |
+| =rustup=            | Rust toolchain — nightly + =rust-analyzer=, =clippy=, =rustfmt= |
+| =prettier=          | JS/TS/YAML/Markdown formatting (apheleia)                   |
+| =terraform=         | Terraform tooling                                           |
+| =kubectl=           | Kubernetes cluster management (kubel)                       |
+| =docker=            | Docker integration                                          |
+| =hugo=              | Blog export (ox-hugo)                                       |
+| =claude-code-acp=   | agent-shell AI integration (AUR)                            |
+
+*** Org LaTeX math preview
+
+Requires =latex= and =dvisvgm= on PATH. On Arch these come from:
+=texlive-binextra texlive-latex texlive-latexrecommended texlive-latexextra
+texlive-plaingeneric= (wrapfig/capt-of from latexextra, ulem from plaingeneric).
+
+*** Fonts
+
+Icons (modeline, dirvish, dashboard, corfu) require *Symbols Nerd Font Mono*:
+
+#+begin_src sh
+  just install-fonts
+#+end_src
+
+*** Installing
+
+On Arch Linux everything above is installed by:
+
+#+begin_src sh
+  just install-deps
+#+end_src
+
+On Debian/Ubuntu, install the core and native-build dependencies with:
+
+#+begin_src sh
+  sudo apt install build-essential pkg-config enchant-2 libenchant-2-dev \
+      hunspell-en-us cmake libtool-bin ripgrep fd-find
+#+end_src
+
+Language servers and formatters on non-Arch systems come from their own
+ecosystems (=npm=, =pip=, =go install=, =rustup=) — install the ones you need for
+the languages you use.
 
 ** Getting Started
 
@@ -50,8 +125,11 @@ A modular, Evil-based Emacs configuration built for speed and productivity.
 Or manually:
 
 #+begin_src sh
-  /usr/bin/emacs --init-directory ~/workspace/Ratatoskr-emacs
+  emacs --init-directory ~/workspace/Ratatoskr-emacs
 #+end_src
+
+The justfile auto-detects the Emacs binary (=/usr/bin/emacs=, snap, or PATH);
+set =EMACS_BIN= to override it per machine.
 
 *** First Run
 
