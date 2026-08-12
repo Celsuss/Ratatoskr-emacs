@@ -525,6 +525,10 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 ;; --- Org Modern (visual enhancements) ---
 (use-package org-modern
   :after org
+  :custom
+  ;; Default 'fold style uses ⯈/⯆ (U+2BC8/U+2BC6) for level 3, which no
+  ;; installed font covers — level-3 headings rendered as tofu.
+  (org-modern-star 'replace)
   :config
   (global-org-modern-mode)
   (setq org-modern-agenda t))
