@@ -15,6 +15,10 @@
 ;; Silence native-comp warnings during async compilation
 (setq native-comp-async-report-warnings-errors 'silent)
 
+;; Cap async native-comp workers — each can use >1GB RAM; the default
+;; (half the cores) has exhausted memory on this machine
+(setq native-comp-async-jobs-number 2)
+
 ;; Local Variables:
 ;; no-byte-compile: t
 ;; no-native-compile: t
