@@ -11,6 +11,7 @@
   '(("Blogs"              . "@6-months-ago +unread +blog")
     ("Dev"                . "@6-months-ago +unread +dev")
     ("Machine Learning"   . "@6-months-ago +unread +ml")
+    ("Data & MLOps"       . "@6-months-ago +unread +data")
     ("Emacs"              . "@6-months-ago +unread +emacs")
     ("Linux"              . "@6-months-ago +unread +linux")
     ("Homelab"            . "@6-months-ago +unread +homelab")
@@ -18,6 +19,7 @@
     ("Games"              . "@6-months-ago +unread +games")
     ("Tech Radar"         . "@6-months-ago +unread +tech_radar")
     ("News"               . "@2-weeks-ago +unread +news")
+    ("Security"           . "@6-months-ago +unread +security")
     ("Humor"              . "@6-months-ago +unread +humor")
     ("All Unread"         . "@6-months-ago +unread"))
   "Named elfeed filter views."
@@ -42,6 +44,10 @@
 (defun rata-elfeed-filter-ml ()
   "Filter elfeed to machine learning feeds."
   (interactive) (rata-elfeed--set-filter "@6-months-ago +unread +ml"))
+
+(defun rata-elfeed-filter-data ()
+  "Filter elfeed to data engineering and MLOps feeds."
+  (interactive) (rata-elfeed--set-filter "@6-months-ago +unread +data"))
 
 (defun rata-elfeed-filter-emacs ()
   "Filter elfeed to Emacs feeds."
@@ -70,6 +76,10 @@
 (defun rata-elfeed-filter-news ()
   "Filter elfeed to recent news."
   (interactive) (rata-elfeed--set-filter "@2-weeks-ago +unread +news"))
+
+(defun rata-elfeed-filter-security ()
+  "Filter elfeed to security feeds."
+  (interactive) (rata-elfeed--set-filter "@6-months-ago +unread +security"))
 
 (defun rata-elfeed-filter-all ()
   "Show all unread elfeed entries."
@@ -105,13 +115,15 @@
     "fb" '(rata-elfeed-filter-blogs      :which-key "blogs (dev+ml)")
     "fd" '(rata-elfeed-filter-dev        :which-key "dev")
     "fm" '(rata-elfeed-filter-ml         :which-key "machine learning")
+    "fD" '(rata-elfeed-filter-data       :which-key "data & mlops")
     "fe" '(rata-elfeed-filter-emacs      :which-key "emacs")
     "fl" '(rata-elfeed-filter-linux      :which-key "linux")
     "fh" '(rata-elfeed-filter-homelab    :which-key "homelab")
     "ff" '(rata-elfeed-filter-foss       :which-key "foss (emacs+linux+homelab)")
     "fg" '(rata-elfeed-filter-games      :which-key "games")
     "ft" '(rata-elfeed-filter-tech-radar :which-key "tech radar")
-    "fn" '(rata-elfeed-filter-news       :which-key "news"))
+    "fn" '(rata-elfeed-filter-news       :which-key "news")
+    "fs" '(rata-elfeed-filter-security   :which-key "security"))
 
   (evil-collection-define-key 'normal 'elfeed-show-mode-map
     "e" #'rata-elfeed-capture-link))
