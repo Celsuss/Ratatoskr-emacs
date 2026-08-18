@@ -74,6 +74,8 @@ are missing:
 | =docker=            | Docker integration                                          |
 | =hugo=              | Blog export (ox-hugo)                                       |
 | =claude-code-acp=   | agent-shell AI integration (AUR)                            |
+| =jdk-openjdk=       | Java 11+ runtime for the Snowflake JDBC driver (ejc-sql)    |
+| =leiningen=         | Boots the Clojure nREPL ejc-sql drives JDBC through         |
 
 *** Org LaTeX math preview
 

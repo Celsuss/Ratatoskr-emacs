@@ -81,8 +81,9 @@ init-pkg → init-system → init-ui → init-evil → init-completion →
 init-dev → init-lang → init-rust → init-go → init-python → init-cpp →
 init-cmake → init-terraform → init-just → init-docker → init-markdown →
 init-yaml → init-ansible → init-jupyter → init-helm → init-pkgbuild →
-init-casual → init-k8s → init-gamedev → init-snippets → init-llm →
-init-irc → init-elfeed → init-persp → init-org → init-dashboard
+init-casual → init-sql → init-k8s → init-gamedev → init-snippets →
+init-llm → init-khoj → init-irc → init-elfeed → init-persp → init-org →
+init-dashboard
 ```
 
 **Key modules:**

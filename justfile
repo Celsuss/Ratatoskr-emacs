@@ -88,6 +88,8 @@ install-deps:
         python-black prettier gopls pyright go-tools
         # Dev tools
         rustup python-pytest terraform kubectl docker hugo delve
+        # SQL client (ejc-sql drives JDBC via a Clojure nREPL)
+        jdk-openjdk leiningen
         # Org LaTeX math preview (latex + dvisvgm + org preamble packages:
         # wrapfig/capt-of -> latexextra, ulem -> plaingeneric)
         texlive-binextra texlive-latex texlive-latexrecommended

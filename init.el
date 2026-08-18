@@ -120,6 +120,7 @@ normally for a full backtrace.  Otherwise, catch and log them to
 (rata-load-module 'init-helm)
 (rata-load-module 'init-pkgbuild)
 (rata-load-module 'init-casual)
+(rata-load-module 'init-sql)
 (rata-load-module 'init-k8s)
 (rata-load-module 'init-gamedev)
 (rata-load-module 'init-snippets)
