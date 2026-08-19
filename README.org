@@ -14,7 +14,7 @@ A modular, Evil-based Emacs configuration built for speed and productivity.
 - *Apheleia* format-on-save (lsp formatting disabled — apheleia owns all formatting)
 - *Language support* — Python, Rust, Go, C++, CMake, Terraform, YAML, Ansible, Helm templates, Dockerfile, Markdown, Just, PKGBUILDs, Jupyter notebooks
 - *Godot 4.x / GDExtension* game development (clangd, dap-lldb, CMake)
-- *Org-mode* — org-roam, org-super-agenda, org-kanban, org-download, org-transclusion, ox-hugo (blog export)
+- *Org-mode* — org-roam, org-super-agenda, org-kanban, org-download, org-transclusion, ox-hugo (blog export), org-re-reveal (reveal.js slides)
 - *Kubernetes* — kubel integration for cluster management
 - *Git* — magit, diff-hl (gutter indicators), browse-at-remote
 - *LLM tools* — gptel, ellama, aidermacs (Ollama), agent-shell
@@ -56,6 +56,7 @@ are missing:
 | =fd=                  | Fast file finding                    |
 | =shfmt=               | Shell script formatting (apheleia)   |
 | =editorconfig-core-c= | EditorConfig support                 |
+| =git=                 | Local reveal.js checkout (SPC o p i)  |
 
 *** Language servers, formatters & dev tools
 
@@ -76,6 +77,32 @@ are missing:
 | =claude-code-acp=   | agent-shell AI integration (AUR)                            |
 | =jdk-openjdk=       | Java 11+ runtime for the Snowflake JDBC driver (ejc-sql)    |
 | =leiningen=         | Boots the Clojure nREPL ejc-sql drives JDBC through         |
+
+*** Reveal.js presentations
+
+Slide export runs through =org-re-reveal= (=SPC o p=). reveal.js assets load
+from a CDN by default, so no local install is needed while online.
+
+Decks are ordinary org-roam nodes living in the flat roam root
+(=rata-reveal-deck-dir=), so they get IDs, show up in =org-roam-node-find=, and
+can link to the notes they synthesise. A deck is identified by its
+=#+filetags: :presentation:= tag (=rata-reveal-deck-tag=), not by its location —
+=SPC o p P= exports every tagged note by querying the roam DB, the same
+technique =init-org.el= uses for =:hastodo:= agenda inclusion.
+
+Exported HTML goes to =~/workspace/second-brain/presentations/=
+(=rata-reveal-export-dir=), outside =org-roam-directory=, so generated files never
+enter the note tree — the same split as =hugo/= vs =hugo/public/=.
+
+To start a new deck, use the =presentation= org-roam capture template
+(=SPC o r c= then =r=, or =SPC o p n=). To turn a note you already have into a
+deck, open it and press =SPC o p a= — it adds the tag and the =#+REVEAL_*=
+keywords in place, leaving your content alone.
+
+To present offline, run =SPC o p i= once — it shallow-clones reveal.js to
+=~/.local/share/reveal.js= — then =SPC o p r= to point exports at that copy.
+=SPC o p v= serves the deck over =simple-httpd= on localhost, which speaker
+notes need (they do not work over =file://=).
 
 *** Org LaTeX math preview
 
@@ -194,6 +221,7 @@ To install icon fonts and tree-sitter grammars:
 | =init-llm=        | gptel, ellama, aidermacs                                |
 | =init-persp=      | Workspace management via persp-mode                     |
 | =init-org=        | Org-roam, org-super-agenda, org-kanban, org-transclusion |
+| =init-present=    | Reveal.js slide export from org (org-re-reveal)          |
 | =init-dashboard=  | Start page with agenda, roam stats, git status          |
 
 ** Keybindings

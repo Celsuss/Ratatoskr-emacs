@@ -131,5 +131,6 @@ normally for a full backtrace.  Otherwise, catch and log them to
 ;; (rata-load-module 'init-mcp)      ; experimental — uncomment when stable
 (rata-load-module 'init-persp)
 (rata-load-module 'init-org)
+(rata-load-module 'init-present)   ; org-re-reveal slide export
 (rata-load-module 'init-dashboard)
 (elpaca-wait) ; ensure all packages fully loaded before startup hooks fire

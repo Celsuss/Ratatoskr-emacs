@@ -1,0 +1,14 @@
+# -*- mode: snippet -*-
+# name: reveal deck header
+# key: reveal
+# --
+#+TITLE: ${1:Talk title}
+#+AUTHOR: `user-full-name`
+#+OPTIONS: toc:nil num:nil timestamp:nil
+#+REVEAL_THEME: ${2:night}
+#+REVEAL_TRANS: slide
+#+REVEAL_INIT_OPTIONS: width:1280, height:800, hash:true, slideNumber:"c/t"
+#+REVEAL_PLUGINS: (notes)
+
+* ${3:First slide}
+$0

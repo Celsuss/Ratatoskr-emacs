@@ -294,6 +294,24 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
                                                              "\n"))
                                  :unnarrowed t)
 
+                                ;; NB: the :presentation: filetag must match
+                                ;; `rata-reveal-deck-tag' in init-present.el,
+                                ;; which selects decks by that tag.
+                                ("r" "presentation" plain
+                                 "%?"
+                                 :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
+                                                    ,(concat "#+title: ${title}\n"
+                                                             "#+author: " user-full-name "\n"
+                                                             "#+date: %U\n"
+                                                             "#+filetags: :presentation:\n"
+                                                             "#+OPTIONS: toc:nil num:nil timestamp:nil\n"
+                                                             "#+REVEAL_THEME: night\n"
+                                                             "#+REVEAL_TRANS: slide\n"
+                                                             "#+REVEAL_INIT_OPTIONS: width:1280, height:800, hash:true, slideNumber:\"c/t\"\n"
+                                                             "#+REVEAL_PLUGINS: (notes)\n"
+                                                             "\n\n* ${title}\n"))
+                                 :unnarrowed t)
+
                                 ("m" "meeting" plain
                                  "%?\n\n* Action Items\n** TODO \n"
                                  :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"

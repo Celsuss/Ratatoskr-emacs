@@ -68,8 +68,12 @@
          (json-ts-mode       . combobulate-mode)
          (typescript-ts-mode . combobulate-mode)
          (toml-ts-mode       . combobulate-mode)
-         (css-mode           . combobulate-mode)
-         (html-mode          . combobulate-mode))
+         ;; NB: tree-sitter modes only.  Hooking plain `css-mode'/`html-mode'
+         ;; makes combobulate demand a parser those modes never create, which
+         ;; breaks org's HTML export (its filter runs `set-auto-mode' on the
+         ;; output, and mhtml-mode builds a css-mode submode).
+         (css-ts-mode        . combobulate-mode)
+         (html-ts-mode       . combobulate-mode))
   :config
   (rata-leader
     :states '(normal visual)
