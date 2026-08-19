@@ -219,6 +219,7 @@ To install icon fonts and tree-sitter grammars:
 | =init-gamedev=    | Godot 4.x / GDExtension development                    |
 | =init-snippets=   | Yasnippet + community snippets                          |
 | =init-llm=        | gptel, ellama, aidermacs                                |
+| =init-claude-loop= | Runs Claude Code through a checklist file, task by task |
 | =init-persp=      | Workspace management via persp-mode                     |
 | =init-org=        | Org-roam, org-super-agenda, org-kanban, org-transclusion |
 | =init-present=    | Reveal.js slide export from org (org-re-reveal)          |
@@ -254,6 +255,65 @@ All keybindings use =general.el= with =SPC= as the global leader in Evil normal/
 | =SPC a g= | Gamedev    |
 | =SPC a i= | AI tools   |
 | =SPC a k= | Kubernetes |
+
+** Claude Code Task Loop
+
+Work a checklist file top to bottom with Claude Code, one task per run.
+
+Write the tasks in any =.md= or =.org= file:
+
+#+begin_src markdown
+- [ ] Implement the database schema for the user profiles
+- [ ] Write unit tests for the schema validation
+- [ ] Update the API documentation
+#+end_src
+
+Open that file and hit =SPC a i c l l=. Each task is handed to its own
+=claude -p= process, so every task starts from a *clean context* — no
+=/clear= needed, and nothing leaks between tasks. The box is ticked to
+=[X]= only after the process exits successfully, then the next task starts.
+Org =TODO= headings work too and are moved to =DONE=.
+
+Claude runs in the repository containing the task file — the nearest
+directory above it holding a =.git= (or another marker in
+=rata-claude-loop-root-markers=). If there is no repository, it runs in the
+task file's own directory. A marker sitting in =$HOME= is deliberately
+ignored, so a dotfiles repo or a stray =~/package.json= cannot turn your
+entire home directory into the working directory. =C-u C-u SPC a i c l l=
+prompts for the directory if you need to override it.
+
+Progress is rendered into =*claude-loop*=; the child runs with
+=--output-format stream-json= and its events are decoded into readable prose
+and tool calls rather than raw JSON.
+
+| Key           | Action                     |
+|---------------+----------------------------|
+| =SPC a i c l l= | Start the loop             |
+| =C-u SPC a i c l l= | Start, prompting for the task file |
+| =C-u C-u SPC a i c l l= | ...and for the working directory |
+| =SPC a i c l r= | Run only the task at point |
+| =SPC a i c l s= | Stop                       |
+| =SPC a i c l n= | Skip current task (=[-]=)    |
+| =SPC a i c l c= | Resume after a halt        |
+| =SPC a i c l b= | Show the output buffer     |
+| =SPC a i c l ?= | Status                     |
+
+A non-zero exit halts the loop and leaves the task unchecked, so a broken
+task never cascades into the next one.
+
+Two settings are worth reviewing:
+
+#+begin_src elisp
+;; The real quality gate. `claude -p' exits 0 whenever the *CLI* succeeded,
+;; even if the code it wrote is wrong; this is what actually catches that.
+(setq rata-claude-loop-verify-command "just test")
+
+;; How much autonomy each run gets. In print mode there are no interactive
+;; permission prompts -- anything not permitted is silently denied.
+(setq rata-claude-loop-extra-args '("--permission-mode" "acceptEdits"))
+#+end_src
+
+See =M-x customize-group RET rata-claude-loop= for the rest.
 
 ** Adding a New Module
 
