@@ -14,9 +14,13 @@
 (use-package yasnippet
   :after general
   :config
+  ;; Only this repo's own snippets/ directory. `yas-installed-snippets-dir' is
+  ;; obsolete (yasnippet.el marks it so) and points at a bundled snippets dir
+  ;; upstream no longer ships, which made `yas-reload-all' warn on every start.
+  ;; The community collection needs no entry here: `yasnippet-snippets' adds
+  ;; itself to `yas-snippet-dirs'.  See .are/memory/failures/FAIL-0002.md.
   (setq yas-snippet-dirs
-        (list (expand-file-name "snippets" user-emacs-directory)
-              'yas-installed-snippets-dir))
+        (list (expand-file-name "snippets" user-emacs-directory)))
   (yas-global-mode 1)
   (rata-leader
     :states '(normal visual)

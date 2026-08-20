@@ -168,8 +168,44 @@ test-ert:
         -l ert \
         -l tests/run-tests.el
 
+# Runs real processes and timers, so it is kept out of `test'.
+# Drive the claude-loop state machine against a stub CLI (no API calls).
+# It IS in `are-verify fast': it needs no packages and takes 3s. See FAIL-0004.
+test-claude-loop:
+    RATA_ROOT={{init_dir}} {{emacs_bin}} -Q --batch -l tests/claude-loop-e2e.el
+
 # Run all tests (lint + compile + startup + ERT)
+# Left exactly as it was on purpose — README, AGENTS.md and habit refer to it.
+# The pre-commit gate runs `are-verify full', which is a superset. See DECISIONS D-004.
 test: lint compile batch test-ert
+
+# --- ARE (Autonomous Reliability Engineering) -------------------------------
+# Entry point: .are/INDEX.md   Operating manual: .are/SYSTEM.md
+
+# Generate task context from git state + the ARE path map (.are/generated/CURRENT_CONTEXT.md)
+are-context task="":
+    ./scripts/are-context.sh "{{task}}"
+
+# Repo-wide reliability audit — looks wider than the current diff
+are-audit:
+    ./scripts/are-audit.sh
+
+# Risk-based verification: fast (~4s) | relevant (~1.8min) | full (~3min)
+are-verify level="fast":
+    ./scripts/are-verify.sh {{level}}
+
+# Show the ARE entry point
+are:
+    @echo "ARE entry point:      .are/INDEX.md"
+    @echo "Operating manual:     .are/SYSTEM.md"
+    @echo "Path map:             .are/knowledge/MODULES.md"
+    @echo "Failure index:        .are/memory/FAILURE_INDEX.md"
+    @echo ""
+    @echo "  just are-context ['task']   generate task context before coding"
+    @echo "  just are-verify fast        ~4s   LOW risk / mid-work"
+    @echo "  just are-verify relevant    ~2min MEDIUM risk / any lisp change"
+    @echo "  just are-verify full        ~3min HIGH+CRITICAL / end of session"
+    @echo "  just are-audit              ~1s   repo-wide checks"
 
 # Configure git to use .githooks/ for hooks (one-time setup)
 install-hooks:

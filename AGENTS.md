@@ -2,6 +2,68 @@
 
 This file contains build commands, code style guidelines, and architectural patterns for agentic coding agents working on this Emacs configuration.
 
+## MANDATORY — Autonomous Reliability Engineering (ARE)
+
+**This section is not optional and applies to every session, whether or not the operator mentions ARE.**
+
+This repository runs ARE: a thin reliability layer over the existing `just` targets and test
+suites. Entry point: **`.are/INDEX.md`**. Operating manual: **`.are/SYSTEM.md`**.
+
+### Every session, in order
+
+1. **Read `.are/INDEX.md` before changing anything.** It is short and points at everything else.
+2. **Generate task context before coding:**
+   ```sh
+   just are-context "what you are about to do"
+   ```
+   It reads git state, maps the changed paths through `.are/knowledge/MODULES.md`, and writes
+   `.are/generated/CURRENT_CONTEXT.md` with the risk tier, the affected areas, the specific
+   knowledge pages to open, and the relevant failure records. **Open only what it names.**
+3. **Apply risk-based verification depth** (`.are/rules/RISK_RULES.md`,
+   `.are/rules/VERIFICATION_RULES.md`):
+
+   | Risk | Required |
+   |---|---|
+   | LOW | `just are-verify fast` (~4 s) |
+   | MEDIUM | `just are-verify relevant` (~1.8 min) |
+   | HIGH | `just are-verify full` (~3 min) |
+   | CRITICAL | `full` + a new case in `tests/claude-loop-e2e.el` + operator approval |
+
+4. **Run full verification before ending any session that changed code.** A session that
+   touched a `.el` file may not end below `just are-verify relevant`.
+5. **Report PASS / FAIL / NOT TESTED per area.** Never report PASS for a command you did not
+   run. `just compile` proves syntax only; `just batch` exiting 0 does *not* mean modules
+   loaded. Integrations (Ollama, Khoj, Snowflake, GitHub, IRC, feeds, the real `claude` CLI)
+   are **always NOT TESTED** — nothing in `tests/` contacts a network service.
+6. **Self-improve before closing — on every task, not only on failures.** Work through
+   `.are/SYSTEM.md` §3: a failure record, a lesson, a decision, a missing path-map row, a
+   check that would have caught it sooner, or a stale knowledge line to correct. Apply the
+   cheap ones immediately. Prefer an executable test over prose. The repository must be
+   harder to break than it was when the session started.
+
+### Efficient context use — a requirement, not a preference
+
+- Start from `.are/generated/CURRENT_CONTEXT.md` and the tables in `.are/knowledge/MODULES.md`.
+- Prefer deterministic retrieval (`git diff --name-only`, `grep`, the path map) over scanning.
+- **Do not** load the whole knowledge base, re-derive the architecture, or re-read unchanged
+  files "to confirm".
+- **Do not read `SPEC.md` whole** — 2408 lines, drifted, historical intent only. `grep` it.
+- Prefer running a test over reasoning about whether behaviour changed.
+
+### Before anything destructive
+
+`.are/rules/SAFETY_RULES.md` lists what is never done autonomously here: `just clean` /
+`reset` / `update`, git commits and history, `~/.authinfo.gpg`, anything under
+`~/workspace/second-brain/`, `terraform apply`, mutating `kubectl`, and widening the
+claude-loop's permissions. `lisp/init-claude-loop.el` is the only CRITICAL area — it runs a
+headless agent with `--permission-mode acceptEdits` and an operator-supplied shell command.
+
+### Known open items (do not rediscover these)
+
+`.are/memory/FAILURE_INDEX.md` has the full list. The live ones:
+two checkouts of this repo exist and the docs below point at the stale one (FAIL-0001);
+`core.hooksPath` is unset so the pre-commit gate is off and there is no CI (FAIL-0005).
+
 ## Commands
 
 ### Just Commands (Preferred)
@@ -95,7 +157,14 @@ init-present → init-dashboard
 - `init-dev.el` — lsp-mode, apheleia (formatting), flycheck, magit, projectile, vterm, diff-hl
 - `init-lang.el` — cross-cutting language infrastructure: tree-sitter (treesit-auto + grammar sources), dap-mode core, combobulate. Per-language config lives in dedicated `init-<lang>.el` files that load after this one.
 - `init-<lang>.el` — one file per language: `init-rust`, `init-go`, `init-python`, `init-cpp`, `init-cmake`, `init-terraform`, `init-just`, `init-docker`, `init-markdown`, `init-yaml`, `init-ansible`, `init-jupyter`, `init-helm`, `init-pkgbuild`. Each contains the `use-package` forms, mode-local keybindings, and helper functions for that one language.
-- `init-claude-loop.el` — drives the `claude` CLI through a `- [ ]` checklist file, one headless `claude -p` process per task. Pure Elisp (no external package): `make-process` + a filter that decodes `--output-format stream-json` events into the `*claude-loop*` buffer, with the process exit code advancing the loop. The only module in the config with real async-process plumbing.
+- `init-claude-loop.el` — drives the `claude` CLI through a `- [ ]` checklist file, one headless `claude -p` process per task. Pure Elisp (no external package): `make-process` + a filter that decodes `--output-format stream-json` events into the `*claude-loop*` buffer. The only module in the config with real async-process plumbing, and the only one with its own state machine, so it has conventions of its own:
+  - **Control flow is a trampoline, not a callback chain.** Sentinels and timers only record an outcome and call `rata-claude-loop--later`; every transition then runs from a zero-delay timer at top level. Errors signalled inside a sentinel are demoted to a `*Messages*` line, and marking a checkbox calls `save-buffer` and `org-todo` (arbitrary hook code) — neither belongs in a process callback. `rata-claude-loop--guard` turns any error into a visible halt.
+  - **Staleness is handled by `:epoch`**, an integer bumped on every spawn and every stop. Callbacks and timers capture the epoch they were created under and no-op on mismatch; one check covers the child, the stderr pipe, the timeout timer, the grace-period kill and the pending step timer. `:outcome` is write-once per attempt so a timeout's verdict survives the kill it causes.
+  - **Success is decided from the `result` event, never the exit code alone** (`rata-claude-loop--classify`). `claude -p` exits 0 for a task that gave up and for one whose edits were all silently denied. `:pending` must be flushed at EOF — the CLI does not newline-terminate its last line, and that line carries the result event.
+  - **Failures retry by resuming the session** (`--resume` with the captured `session_id`), bounded by `rata-claude-loop-max-attempts`. `--resume` inherits no configuration, so `rata-claude-loop--common-args` exists to re-pass every flag.
+  - **Checkboxes are matched by text, not line number**, and an ambiguous match halts rather than ticking the wrong box.
+  - Its output buffer derives from `special-mode`, which is in none of evil's state lists — so buffer-local keys go through `evil-define-key*` (the function form; `evil-define-key` is a macro and would compile to a broken function call), not plain `define-key`.
+  - Tests: pure functions in `tests/run-tests.el`; the state machine in `tests/claude-loop-e2e.el` via `just test-claude-loop`, against a stub CLI with no API calls.
 - `init-org.el` — org-agenda with org-super-agenda, org-roam, org-transclusion, ox-hugo
 - `init-present.el` — reveal.js slide export via `org-re-reveal` under `SPC o p`. Decks are org-roam nodes in the flat roam root, identified by the `rata-reveal-deck-tag` (`:presentation:`) filetag rather than by directory. New decks come from the `presentation` org-roam capture template in `init-org.el` (key `r`) rather than a bespoke command; `rata-reveal-add-header` converts an existing note in place, mirroring `rata-toggle-hastodo-filetag`. `rata-reveal-export-all` finds them with an `org-roam-db-query` mirroring `rata-org-roam-agenda-files` in `init-org.el`. HTML output is redirected to `rata-reveal-export-dir` (outside org-roam) by shadowing `org-export-output-file-name`'s PUB-DIR argument, so no generated file lands in the note tree. Two `ox-html` advices make export non-interactive in this config: one suppresses `set-auto-mode` in `org-html-final-function` (it activates `mhtml-mode`, whose submodes trigger treesit-auto), the other binds `treesit-auto-install` to nil around `org-html-fontify-code` (src-block fontification otherwise prompts to install a missing grammar mid-export). Keybindings sit at top level, not in the deferred `use-package :config`, because `:after (ox general)` would leave them dead until the first manual export. reveal.js assets come from a CDN by default; `rata-reveal-install-local` clones a local copy and `rata-reveal-toggle-root` switches between them for offline presenting. Reuses the `simple-httpd` recipe declared in `init-org.el` to serve decks over HTTP.
 

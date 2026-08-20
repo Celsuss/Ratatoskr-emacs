@@ -75,6 +75,7 @@ are missing:
 | =docker=            | Docker integration                                          |
 | =hugo=              | Blog export (ox-hugo)                                       |
 | =claude-code-acp=   | agent-shell AI integration (AUR)                            |
+| =claude=            | Claude Code CLI — required by the task loop (=init-claude-loop=) |
 | =jdk-openjdk=       | Java 11+ runtime for the Snowflake JDBC driver (ejc-sql)    |
 | =leiningen=         | Boots the Clojure nREPL ejc-sql drives JDBC through         |
 
@@ -193,6 +194,31 @@ To install icon fonts and tree-sitter grammars:
 | =just install-grammars= | Install tree-sitter grammars (one-time)      |
 | =just install-deps=     | Install system dependencies (Arch Linux)     |
 | =just install-hooks=    | Install git pre-commit hook (one-time)       |
+| =just are=              | Show the ARE entry point and commands        |
+| =just are-context=      | Generate task context from git + the ARE map |
+| =just are-verify LEVEL= | Risk-based verification: fast/relevant/full  |
+| =just are-audit=        | Repo-wide reliability audit                  |
+
+** Reliability (ARE)
+
+This config carries an [[file:.are/INDEX.md][Autonomous Reliability Engineering]] layer: a small knowledge base,
+a failure log, risk rules, and three bash scripts that compose the =just= targets above
+into risk-based verification levels. It adds no dependency and duplicates nothing —
+=AGENTS.md= still owns conventions, the =justfile= still owns commands, and =tests/=
+still owns the truth.
+
+Start at =.are/INDEX.md=. Before changing a module, run =just are-context "what you are
+doing"=; it prints the risk tier and the exact knowledge worth reading. Verification
+levels, and what each one does *not* prove, are in =.are/knowledge/TESTING_STRATEGY.md=.
+
+#+begin_src sh
+  just are-verify fast       # ~4s   — lint + claude-loop e2e + audit, no packages needed
+  just are-verify relevant   # ~2min — adds byte-compile + the ERT suite
+  just are-verify full       # ~3min — adds batch startup; what the pre-commit hook runs
+#+end_src
+
+Note: the pre-commit hook is not active until you run =just install-hooks=, and there is
+no CI. See =.are/memory/FAILURE_INDEX.md=.
 
 ** Architecture
 
@@ -270,9 +296,8 @@ Write the tasks in any =.md= or =.org= file:
 
 Open that file and hit =SPC a i c l l=. Each task is handed to its own
 =claude -p= process, so every task starts from a *clean context* — no
-=/clear= needed, and nothing leaks between tasks. The box is ticked to
-=[X]= only after the process exits successfully, then the next task starts.
-Org =TODO= headings work too and are moved to =DONE=.
+=/clear= needed, and nothing leaks between tasks. Org =TODO= headings work
+too and are moved to =DONE=.
 
 Claude runs in the repository containing the task file — the nearest
 directory above it holding a =.git= (or another marker in
@@ -286,34 +311,98 @@ Progress is rendered into =*claude-loop*=; the child runs with
 =--output-format stream-json= and its events are decoded into readable prose
 and tool calls rather than raw JSON.
 
+*** When is a task "done"?
+
+Not when =claude -p= exits 0. It exits 0 whenever the *CLI* succeeded, which
+includes a task that looked at the problem and gave up, and a task whose
+every edit was silently denied — print mode denies instead of prompting. A
+box is ticked only when all of these hold:
+
+- the process exited 0, and the final =result= event reports subtype
+  =success= with no error;
+- no tool in =rata-claude-loop-critical-denial-tools= (=Edit=, =Write=,
+  =MultiEdit=, =NotebookEdit=) was denied — a denied =WebFetch= is reported
+  but tolerated, since halting a good run over it would be worse;
+- the task did not report =RATA-TASK-STATUS: blocked=. Every prompt asks for
+  a status line as its last line, which is how a task says "I could not do
+  this" in a way the loop can act on;
+- =rata-claude-loop-verify-command=, if set, exited 0.
+
+The box is also only ticked on a line that *still holds that task*. The text
+is matched, not just the line number, so a checklist that shifted while a
+half-hour task ran cannot get the wrong box ticked; an ambiguous or missing
+task halts and says so instead.
+
+*** Verification and retry
+
+=rata-claude-loop-verify-command= is the strongest gate available, and it now
+runs asynchronously — Emacs stays responsive through your test suite. Set it
+globally or per project via =.dir-locals.el= (it is deliberately *not* a
+=safe-local-variable=: it is a shell command, so Emacs should ask).
+
+When an attempt fails, the loop does not throw the work away. It captures the
+=session_id= from the run and retries with =claude -p --resume=, handing back
+the reason and the tail of the failing output — so the second attempt already
+knows what it did and what broke, rather than starting from a clean context.
+=rata-claude-loop-max-attempts= (default 2, i.e. one retry) bounds it, and
+=rata-claude-loop-retry-on= chooses which failures are worth retrying. A
+timeout and a self-reported =blocked= are excluded on purpose: the first
+leaves unknown partial state, the second is a considered judgement.
+
+If the retry does not help, =SPC a i c l o= opens a vterm running =claude
+--resume= on that same session, so you can take over by hand from exactly
+where it got stuck.
+
+*** Keys
+
 | Key           | Action                     |
 |---------------+----------------------------|
 | =SPC a i c l l= | Start the loop             |
 | =C-u SPC a i c l l= | Start, prompting for the task file |
 | =C-u C-u SPC a i c l l= | ...and for the working directory |
 | =SPC a i c l r= | Run only the task at point |
-| =SPC a i c l s= | Stop                       |
+| =SPC a i c l s= | Stop (SIGINT, then SIGKILL after a grace period) |
 | =SPC a i c l n= | Skip current task (=[-]=)    |
 | =SPC a i c l c= | Resume after a halt        |
+| =SPC a i c l t= | Retry the current task by resuming its session |
+| =SPC a i c l o= | Take over the session in a vterm |
 | =SPC a i c l b= | Show the output buffer     |
 | =SPC a i c l ?= | Status                     |
 
-A non-zero exit halts the loop and leaves the task unchecked, so a broken
-task never cascades into the next one.
+In the =*claude-loop*= buffer itself: =q= quits, =gr= reports status, =gt=
+retries, =go= takes over, =C-c C-k= stops.
 
-Two settings are worth reviewing:
+*** Settings worth reviewing
 
 #+begin_src elisp
-;; The real quality gate. `claude -p' exits 0 whenever the *CLI* succeeded,
-;; even if the code it wrote is wrong; this is what actually catches that.
+;; The strongest quality gate. Runs asynchronously, so a long suite does not
+;; freeze Emacs.
 (setq rata-claude-loop-verify-command "just test")
 
 ;; How much autonomy each run gets. In print mode there are no interactive
 ;; permission prompts -- anything not permitted is silently denied.
 (setq rata-claude-loop-extra-args '("--permission-mode" "acceptEdits"))
+
+;; Guard rails. There is no CLI timeout flag, so that timer lives in Emacs.
+(setq rata-claude-loop-task-timeout 1800)   ; seconds per attempt
+(setq rata-claude-loop-max-turns 60)        ; --max-turns
+(setq rata-claude-loop-task-budget-usd 2.0) ; --max-budget-usd per attempt
+(setq rata-claude-loop-fallback-model "sonnet") ; survive an overload
+
+;; Print a per-task `git diff --stat' into the loop buffer. Read-only: nothing
+;; is committed, stashed or reset.
+(setq rata-claude-loop-git-checkpoint 'record)
 #+end_src
 
 See =M-x customize-group RET rata-claude-loop= for the rest.
+
+*** Testing it
+
+The pure parts (task scanning, checkbox marking, stream decoding, outcome
+classification, argv building) are covered by ERT in =tests/run-tests.el=.
+The state machine itself — spawn, async verify, retry-by-resume, timeout,
+marking — is driven against a stub CLI by =just test-claude-loop=, which
+makes no API calls and spends nothing.
 
 ** Adding a New Module
 

@@ -1681,18 +1681,32 @@ SPC /    consult-ripgrep (project search shortcut)
 SPC 0-9  winum window selection
 
 SPC a    AI
-  SPC a i    (sub-group)
-    SPC a i g  gptel chat
-    SPC a i s  gptel-send
-    SPC a i r  gptel-rewrite
-    SPC a i m  gptel-menu
-    SPC a i c  ellama-chat
-    SPC a i k  ellama-ask-about
-    SPC a i e  ellama-enhance-code
-    SPC a i A  aidermacs-transient-menu
-    SPC a i o  aidermacs-open
-    SPC a i a  agent-shell
-    SPC a i C  claude code
+  SPC a i    AI (sub-group)
+    SPC a i g    gptel (sub-group)
+      SPC a i g g  gptel chat
+      SPC a i g s  gptel-send
+      SPC a i g r  gptel-rewrite
+      SPC a i g m  gptel-menu
+    SPC a i e    ellama (sub-group)
+      SPC a i e e  ellama-chat
+      SPC a i e a  ellama-ask-about
+      SPC a i e c  ellama-enhance-code
+    SPC a i a    aider (sub-group)
+      SPC a i a a  aidermacs-transient-menu
+      SPC a i a o  aidermacs-open
+    SPC a i c    claude (sub-group)
+      SPC a i c s  agent-shell
+      SPC a i c c  agent-shell claude code
+      SPC a i c l  task loop (sub-group)
+        SPC a i c l l  start loop
+        SPC a i c l r  run task at point
+        SPC a i c l s  stop loop
+        SPC a i c l n  skip current task
+        SPC a i c l c  resume after halt
+        SPC a i c l t  retry current task
+        SPC a i c l o  take over session
+        SPC a i c l b  show output
+        SPC a i c l ?  status
   SPC a k    kubernetes
     SPC a k k  kubel
     SPC a k n  kubel-set-namespace
