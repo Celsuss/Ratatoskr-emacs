@@ -142,32 +142,39 @@
 ;; --- Projectile ---
 (use-package projectile
   :after general
-  :commands (projectile-mode projectile-switch-project
+  :commands (projectile-mode projectile-project-root
              projectile-run-project-tests projectile-kill-buffers
              projectile-replace projectile-replace-regexp)
   :config
-  (projectile-mode +1)
+  (projectile-mode +1))
+
+;; --- Consult Projectile ---
+(autoload 'consult-projectile-find-file "consult-projectile" nil t)
+(autoload 'consult-projectile-ripgrep "consult-projectile" nil t)
+(autoload 'consult-projectile-switch-project "consult-projectile" nil t)
+
+(use-package consult-projectile
+  :after (consult projectile)
+  :commands (consult-projectile-find-file consult-projectile-ripgrep
+             consult-projectile-switch-project))
+
+;; Project leader bindings live here at top level, NOT in either :config block above.
+;; Both packages are deferred, so a binding written in :config is not created until
+;; something else happens to load the package -- SPC p f was dead for exactly that
+;; reason, and the projectile bindings only worked because init-dashboard.el sets
+;; `dashboard-projects-backend' to `projectile' and so pulled it in at startup.
+;; The autoloads above (and :commands) keep every command callable from here.
+(with-eval-after-load 'general
   (rata-leader
     :states '(normal visual)
-    "pS"  '(projectile-switch-project :which-key "switch project")
+    "pp"  '(consult-projectile-switch-project :which-key "switch project")
+    "pf"  '(consult-projectile-find-file :which-key "find file")
+    "ps"  '(consult-projectile-ripgrep :which-key "ripgrep project")
     "pb"  '(consult-project-buffer :which-key "project buffer")
     "pt"  '(projectile-run-project-tests :which-key "run tests")
     "pk"  '(projectile-kill-buffers :which-key "kill project buffers")
     "pr"  '(projectile-replace :which-key "replace")
     "pR"  '(projectile-replace-regexp :which-key "replace regexp")))
-
-;; --- Consult Projectile ---
-(autoload 'consult-projectile-find-file "consult-projectile" nil t)
-(autoload 'consult-projectile-ripgrep "consult-projectile" nil t)
-
-(use-package consult-projectile
-  :after (consult projectile)
-  :commands (consult-projectile-find-file consult-projectile-ripgrep)
-  :config
-  (rata-leader
-    :states '(normal visual)
-    "pf"  '(consult-projectile-find-file :which-key "find file")
-    "ps"  '(consult-projectile-ripgrep :which-key "ripgrep project")))
 
 ;; --- Dirvish (enhanced dired) ---
 (use-package dirvish

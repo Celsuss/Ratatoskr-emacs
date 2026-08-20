@@ -193,15 +193,29 @@ init-present → init-dashboard
 - Use `general.el` with the `rata-leader` definer pattern
 - Follow Spacemacs mnemonics: `SPC b` buffers, `SPC f` files, `SPC g` git, `SPC s` search, `SPC w` windows, `SPC o` org, `SPC l` layouts, `SPC L` LSP
 - Always include `:which-key` descriptions
-- All keybindings go in `:config` blocks with `:after general`
+- **Global leader keys go at top level in `(with-eval-after-load 'general …)`, never inside a
+  deferred `use-package`'s `:config`.** `:config` runs when the *package* loads, not when the
+  module loads, so a leader key written there does not exist until something happens to pull
+  the package in — and for a package reached only through its own keybinding, that is never.
+  `:commands` autoloads make the command callable from `M-x`; they do nothing for the key.
+  This cost `SPC p f` entirely and left 86 other leader keys dead at startup — see
+  [`FAIL-0009`](.are/memory/failures/FAIL-0009.md) and L-011 in `.are/memory/LESSONS.md`.
+  The one exception is a binding scoped with `:keymaps` to a mode whose activation loads the
+  package anyway (the local-leader `,`/`m`-prefix bindings in the `init-<lang>.el` files).
+- Regression check: `rata-test-keybindings-live-after-init` in `tests/run-tests.el` resolves a
+  curated set of keys against a fully initialised Emacs. Add a key there when you add an
+  entry point you would notice being dead.
 
 ```elisp
 (general-create-definer rata-leader
                         :prefix "SPC")
-(rata-leader
-  :states '(normal visual)
-  "x"  '(:ignore t :which-key "group name")
-  "xx" '(some-command :which-key "description"))
+
+;; Global leader keys — top level, so they exist from startup.
+(with-eval-after-load 'general
+  (rata-leader
+    :states '(normal visual)
+    "x"  '(:ignore t :which-key "group name")
+    "xx" '(some-command :which-key "description")))
 ```
 
 ### Naming Conventions

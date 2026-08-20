@@ -111,6 +111,26 @@ anchoring with `^\(`. More generally: a check that can only ever report "fine" s
 distrusted until you have watched it report "not fine" at least once. Deliberately break the
 thing, confirm the check fails, then fix it.
 
+## L-011 — "the binding is well-formed" is not "the key works"
+
+**From:** [FAIL-0009](failures/FAIL-0009.md).
+
+Two tests guarded keybindings in this repo. Both parsed the *source* of every `rata-leader`
+form: one rejected anonymous lambdas, one required `(commandp sym t)`. A key bound inside a
+deferred `use-package` `:config` passes both and is still undefined in the running editor,
+because `:config` does not run until the package loads. The `commandp` test even documented
+the autoload tolerance that makes it blind here. Meanwhile the projectile keys worked only
+because an unrelated module set `dashboard-projects-backend` to `projectile` and pulled the
+package in — the config had no idea its keybindings depended on that.
+
+**Apply:** for anything user-facing, assert the *end state in a live process*, not the
+well-formedness of the source that is supposed to produce it. Here that is one line —
+`(lookup-key (evil-get-auxiliary-keymap general-override-mode-map 'normal) (kbd "SPC p f"))`
+— and `tests/run-tests.el` already runs against a fully initialised Emacs, so the capability
+was there all along and unused. Corollary for this codebase: a `rata-leader` call belongs at
+top level in `(with-eval-after-load 'general …)`, never in a deferred `:config`, unless the
+binding is genuinely `:keymaps`-scoped to a mode whose activation loads the package.
+
 ## L-010 — When a target delegates, check the thing that does the work, not the thing that names it
 
 **From:** [FAIL-0008](failures/FAIL-0008.md) §2.

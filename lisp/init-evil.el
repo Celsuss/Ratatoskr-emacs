@@ -131,7 +131,6 @@
    "g"   '(:ignore t :which-key "git")
 
    "p"   '(:ignore t :which-key "project")
-   "pp"  '(consult-project-buffer :which-key "project buffer")
 
    "h"   '(:ignore t :which-key "help")
    "hm"  '(consult-man :which-key "man page")

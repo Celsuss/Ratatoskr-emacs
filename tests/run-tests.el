@@ -174,6 +174,60 @@ so deferred packages (loaded via :commands) pass correctly."
                         (mapconcat #'identity (nreverse failures) "\n"))))))
 
 ;;; ============================================================
+;;; Test 1c — Core leader keys are reachable, not merely `commandp'
+;;; ============================================================
+
+(defvar rata-test--must-be-live-keys
+  '(("SPC p p" . consult-projectile-switch-project)
+    ("SPC p f" . consult-projectile-find-file)
+    ("SPC p s" . consult-projectile-ripgrep)
+    ("SPC p b" . consult-project-buffer)
+    ("SPC p t" . projectile-run-project-tests)
+    ("SPC p k" . projectile-kill-buffers)
+    ("SPC b b" . consult-buffer)
+    ("SPC f f" . find-file))
+  "Leader keys that must resolve immediately after init, with their commands.
+Not exhaustive — a contract for the keys most likely to be broken by the
+failure mode in .are/memory/failures/FAIL-0009.md.  Extend it when a
+binding turns out to have been dead in the running editor.")
+
+(defun rata-test--leader-lookup (keys)
+  "Resolve KEYS (a `kbd' string) the way evil resolves it in normal state.
+`rata-leader' binds through general with :states, which stores the
+binding in the normal-state auxiliary keymap of
+`general-override-mode-map' — not in the global map, so plain
+`key-binding' in batch mode finds nothing."
+  (lookup-key (evil-get-auxiliary-keymap general-override-mode-map 'normal)
+              (kbd keys)))
+
+(ert-deftest rata-test-keybindings-live-after-init ()
+  "Core leader keys must be bound in a fully initialised Emacs.
+
+Regression test for .are/memory/failures/FAIL-0009.md.  A `rata-leader'
+form inside a deferred `use-package' :config block is never evaluated
+until something else loads that package, so the key stays undefined
+while `rata-test-keybindings-all-commandp' still passes — that test
+checks the command symbol, not the key.  `SPC p f' was dead in the
+running editor for exactly this reason."
+  (should (boundp 'general-override-mode-map))
+  (let (failures)
+    (pcase-dolist (`(,keys . ,expected) rata-test--must-be-live-keys)
+      (let ((actual (rata-test--leader-lookup keys)))
+        (unless (eq actual expected)
+          (push (format "%s → %s (expected `%s')"
+                        keys
+                        ;; `lookup-key' returns an integer when the sequence
+                        ;; runs past a prefix that is not fully defined.
+                        (if (and actual (not (numberp actual)))
+                            (format "`%s'" actual)
+                          "UNDEFINED")
+                        expected)
+                failures))))
+    (when failures
+      (ert-fail (concat "Leader keys not live after init:\n"
+                        (mapconcat #'identity (nreverse failures) "\n"))))))
+
+;;; ============================================================
 ;;; Test 2 — Module load health
 ;;; ============================================================
 

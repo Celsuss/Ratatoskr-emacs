@@ -13,10 +13,11 @@ Add a row here whenever you add a record — the record is the detail, this is t
 | [FAIL-0006](failures/FAIL-0006.md) | LOW | verification-gap | `init.el`, `lisp/` | A module could exist in `lisp/` and never be wired into `init.el` | pre-existing, latent | FIXED | `rata-test-init-loads-every-module` |
 | [FAIL-0007](failures/FAIL-0007.md) | LOW | repo-hygiene | repo root | Stray untracked 5-byte file `ɢ`; nothing notices unexpected untracked files | pre-existing | OPEN — reported, not deleted | `are-audit` check `stray-files` (warn) |
 | [FAIL-0008](failures/FAIL-0008.md) | LOW | verification-gap, self-inflicted | `scripts/are-audit.sh`, `scripts/are-context.sh` | ARE's own first audit run produced 3 false results; checks were pointed at the wrong artifact | **introduced by ARE** | FIXED | every check deliberately broken and confirmed to fire |
+| [FAIL-0009](failures/FAIL-0009.md) | MEDIUM | configuration, verification-gap | `init-dev.el`, `init-evil.el`, 20 more modules | Leader keys bound in a deferred `use-package :config` are never created; `SPC p f` was undefined in the live editor while every test passed | pre-existing | FIXED for `SPC p`; 86 further dead keys OPEN | `rata-test-keybindings-live-after-init` |
 
 ## Patterns visible across these records
 
-Six of eight are **verification gaps rather than code defects**, and that is the honest
+Six of nine are **verification gaps rather than code defects**, and that is the honest
 headline of this bootstrap: the Elisp in this repository is in good shape, and what was
 weak was the machinery that would tell you if it stopped being so.
 
@@ -25,8 +26,10 @@ weak was the machinery that would tell you if it stopped being so.
   [LESSONS.md](LESSONS.md) L-003 through L-006 and L-008, L-010.
 - **FAIL-0001 and FAIL-0007** are both "the repository's own state drifted and nothing
   looked". Now audited.
-- **FAIL-0002** is the only behavioural defect in the configuration itself, and it was
-  cosmetic.
+- **FAIL-0002** and **FAIL-0009** are the behavioural defects in the configuration itself.
+  FAIL-0002 was cosmetic; FAIL-0009 is not — it left 86 leader keys dead in the running
+  editor, and it is the first record where the *tests themselves* certified the broken thing
+  as correct (see [LESSONS.md](LESSONS.md) L-011).
 
-**Origin split:** FAIL-0001 through FAIL-0007 are pre-existing. FAIL-0008 was introduced by
+**Origin split:** FAIL-0001 through FAIL-0007 and FAIL-0009 are pre-existing. FAIL-0008 was introduced by
 ARE, found by running the new tooling before trusting it, and fixed in the same session.
