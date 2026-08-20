@@ -164,6 +164,30 @@ init-present → init-dashboard
   - **Failures retry by resuming the session** (`--resume` with the captured `session_id`), bounded by `rata-claude-loop-max-attempts`. `--resume` inherits no configuration, so `rata-claude-loop--common-args` exists to re-pass every flag.
   - **Checkboxes are matched by text, not line number**, and an ambiguous match halts rather than ticking the wrong box.
   - Its output buffer derives from `special-mode`, which is in none of evil's state lists — so buffer-local keys go through `evil-define-key*` (the function form; `evil-define-key` is a macro and would compile to a broken function call), not plain `define-key`.
+  - **A failed task does not have to end the run.** `rata-claude-loop-on-task-failure`
+    is `halt` (default, right when you are watching), `skip` (mark the box `[-]`, record
+    it, continue — right when you are not) or `ask`. A box that cannot be marked
+    unambiguously halts whatever the policy says: an open box is handed straight back as
+    the next task, so skipping without marking would run it forever. A single-task run
+    always halts.
+  - **Spend is accumulated, not merely displayed.** `--max-budget-usd` is per invocation,
+    so with retries and fifty tasks it bounds nothing useful.
+    `rata-claude-loop-run-budget-usd` is the run-level cap, checked in
+    `rata-claude-loop--advance` — between tasks, never mid-task, because the task in
+    flight has already been paid for and cutting it off before its verify and its
+    checkbox wastes that spend rather than saving it.
+  - **The prompt carries the detail written under the task**, not just the checklist
+    line: indented lines under a Markdown checkbox, the entry body of an Org TODO
+    (drawers and planning lines dropped). Read once, when the task starts, so a resumed
+    retry cannot be answering a description that has since been edited.
+  - **Every run is journalled** as JSON lines under `rata-claude-loop-journal-directory`.
+    The state machine lives in memory; the session ids are the one thing a restart cannot
+    recompute and the only way back into a task by hand. A journal write failure disables
+    journalling and reports once — it can never stop a run.
+  - **The verify command is baselined before the first task** (`rata-claude-loop-verify-baseline`).
+    A gate that is already red says nothing about a task, and every task would spend its
+    retries being told to fix a break it inherited. The baseline's output is deliberately
+    discarded rather than kept as retry feedback.
   - Tests: pure functions in `tests/run-tests.el`; the state machine in `tests/claude-loop-e2e.el` via `just test-claude-loop`, against a stub CLI with no API calls.
 - `init-org.el` — org-agenda with org-super-agenda, org-roam, org-transclusion, ox-hugo
 - `init-present.el` — reveal.js slide export via `org-re-reveal` under `SPC o p`. Decks are org-roam nodes in the flat roam root, identified by the `rata-reveal-deck-tag` (`:presentation:`) filetag rather than by directory. New decks come from the `presentation` org-roam capture template in `init-org.el` (key `r`) rather than a bespoke command; `rata-reveal-add-header` converts an existing note in place, mirroring `rata-toggle-hastodo-filetag`. `rata-reveal-export-all` finds them with an `org-roam-db-query` mirroring `rata-org-roam-agenda-files` in `init-org.el`. HTML output is redirected to `rata-reveal-export-dir` (outside org-roam) by shadowing `org-export-output-file-name`'s PUB-DIR argument, so no generated file lands in the note tree. Two `ox-html` advices make export non-interactive in this config: one suppresses `set-auto-mode` in `org-html-final-function` (it activates `mhtml-mode`, whose submodes trigger treesit-auto), the other binds `treesit-auto-install` to nil around `org-html-fontify-code` (src-block fontification otherwise prompts to install a missing grammar mid-export). Keybindings sit at top level, not in the deferred `use-package :config`, because `:after (ox general)` would leave them dead until the first manual export. reveal.js assets come from a CDN by default; `rata-reveal-install-local` clones a local copy and `rata-reveal-toggle-root` switches between them for offline presenting. Reuses the `simple-httpd` recipe declared in `init-org.el` to serve decks over HTTP.

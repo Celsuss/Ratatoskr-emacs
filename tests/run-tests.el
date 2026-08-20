@@ -571,6 +571,108 @@ carries the `result' event the loop makes every decision from."
                    "/elsewhere/b.el"))))
 
 ;;; ============================================================
+;;; Test 7 — claude-loop task detail, budget, failure policy, journal
+;;; ============================================================
+
+(ert-deftest rata-test-claude-loop-body-markdown ()
+  "Detail indented under a checkbox is collected, dedented, and bounded."
+  (with-temp-buffer
+    (insert "- [ ] alpha\n"
+            "    it must handle the empty case\n"
+            "    and keep the old name\n"
+            "- [ ] beta\n"
+            "    beta's own detail\n")
+    (should (equal (rata-claude-loop--body-at 1)
+                   "it must handle the empty case\nand keep the old name"))
+    ;; The next task's line is not this task's detail.
+    (should (equal (rata-claude-loop--body-at 4) "beta's own detail"))))
+
+(ert-deftest rata-test-claude-loop-body-absent ()
+  "A task with nothing under it has no body, rather than an empty one."
+  (with-temp-buffer
+    (insert "- [ ] alpha\n- [ ] beta\n")
+    (should-not (rata-claude-loop--body-at 1))))
+
+(ert-deftest rata-test-claude-loop-body-org ()
+  "An Org entry's body is collected; drawers and planning lines are not.
+A property drawer in a prompt is noise, and SCHEDULED is a fact about the
+operator's calendar rather than about the work."
+  (with-temp-buffer
+    (insert "* TODO org task\n"
+            "SCHEDULED: <2026-08-20 Thu>\n"
+            ":PROPERTIES:\n:ID: 1234\n:END:\n"
+            "the real description\n"
+            "* TODO next task\n"
+            "not part of the first\n")
+    (org-mode)
+    (should (equal (rata-claude-loop--body-at 1) "the real description"))))
+
+(ert-deftest rata-test-claude-loop-head-truncation ()
+  "Task detail is truncated from the end: a description is defined at the top."
+  (should (equal (rata-claude-loop--head "abcdef" 10) "abcdef"))
+  (should (string-prefix-p "abc" (rata-claude-loop--head "abcdef" 3))))
+
+(ert-deftest rata-test-claude-loop-prompt-carries-body ()
+  "Detail under a task reaches the prompt, and nothing is added without it."
+  (let ((with-body (rata-claude-loop--prompt "do a thing" "/tmp/tasks.md"
+                                             "must not break the old name"))
+        (without (rata-claude-loop--prompt "do a thing" "/tmp/tasks.md" nil)))
+    (should (string-match-p "must not break the old name" with-body))
+    (should (string-match-p "do a thing" with-body))
+    ;; The status-line request has to stay last, or it is buried by the detail.
+    (should (string-match-p "RATA-TASK-STATUS.*\\'"
+                            (replace-regexp-in-string "\n" " " with-body)))
+    (should-not (string-match-p "Detail written under" without))))
+
+(ert-deftest rata-test-claude-loop-budget-spent ()
+  "The run budget reports itself spent only once it is reached."
+  (let ((rata-claude-loop--state (list :cost 0.5)))
+    (let ((rata-claude-loop-run-budget-usd nil))
+      (should-not (rata-claude-loop--budget-spent)))
+    (let ((rata-claude-loop-run-budget-usd 1.0))
+      (should-not (rata-claude-loop--budget-spent)))
+    (let ((rata-claude-loop-run-budget-usd 0.5))
+      (should (rata-claude-loop--budget-spent)))))
+
+(ert-deftest rata-test-claude-loop-failure-action ()
+  "The failure policy is honoured, except that one task always halts."
+  (let ((rata-claude-loop--state (list :single nil)))
+    (let ((rata-claude-loop-on-task-failure 'halt))
+      (should (eq (rata-claude-loop--failure-action "boom") 'halt)))
+    (let ((rata-claude-loop-on-task-failure 'skip))
+      (should (eq (rata-claude-loop--failure-action "boom") 'skip))))
+  ;; A single-task run has nothing to continue to, whatever the policy says.
+  (let ((rata-claude-loop--state (list :single t))
+        (rata-claude-loop-on-task-failure 'skip))
+    (should (eq (rata-claude-loop--failure-action "boom") 'halt))))
+
+(ert-deftest rata-test-claude-loop-journal-record ()
+  "A journal line is valid JSON, names its event, and omits absent fields."
+  (let* ((line (rata-claude-loop--journal-record
+                "task-end" (list :index 2 :status 'done :reason nil
+                                 :cost 0.25 :task "alpha")))
+         (parsed (json-parse-string line :object-type 'alist)))
+    (should (string-suffix-p "\n" line))
+    (should (equal (alist-get 'event parsed) "task-end"))
+    (should (equal (alist-get 'status parsed) "done"))
+    (should (equal (alist-get 'index parsed) 2))
+    (should (alist-get 'time parsed))
+    ;; nil is dropped rather than serialised as null: absent keys filter better.
+    (should-not (assq 'reason parsed))))
+
+(ert-deftest rata-test-claude-loop-summary-line ()
+  "A summary line reports the verdict, the attempts, the cost and the reason."
+  (let ((line (rata-claude-loop--summary-line
+               (list :index 3 :task "alpha" :status 'failed :attempts 2
+                     :seconds 65 :cost 0.5 :reason "verify command failed"))))
+    (should (string-match-p "⊘" line))
+    (should (string-match-p "\\[3\\]" line))
+    (should (string-match-p "alpha" line))
+    (should (string-match-p "2 attempts" line))
+    (should (string-match-p "\\$0\\.50" line))
+    (should (string-match-p "verify command failed" line))))
+
+;;; ============================================================
 ;;; Run all tests
 ;;; ============================================================
 

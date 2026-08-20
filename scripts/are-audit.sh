@@ -176,6 +176,28 @@ while IFS= read -r p; do
     warn "unexpected untracked file: '$p' (FAIL-0007)"
 done < <(git ls-files --others --exclude-standard 2>/dev/null || true)
 
+# --- Check: knowledge-line-refs --------------------------------------------------
+# The knowledge pages cite source lines as `symbol`, `:NNN`. Those drift the moment
+# anyone inserts a defun above them, and a citation that points at the wrong line is
+# worse than none: it sends a session to read something else and be confident about it.
+# Every reference found stale on the run that added this check — all fifteen of them.
+# Scoped to CLAUDE_LOOP.md, the only page using the convention; extend the loop below
+# when another page adopts it.
+echo "=== Check: knowledge-line-refs ==="
+knowledge_page=".are/knowledge/CLAUDE_LOOP.md"
+knowledge_source="lisp/init-claude-loop.el"
+if [ -f "$knowledge_page" ] && [ -f "$knowledge_source" ]; then
+    while IFS= read -r match; do
+        [ -n "$match" ] || continue
+        symbol=$(printf '%s' "$match" | sed -n 's/^`\([^`]*\)`.*/\1/p')
+        line=$(printf '%s' "$match" | sed -n 's/.*`:\([0-9]*\)`.*/\1/p')
+        [ -n "$symbol" ] && [ -n "$line" ] || continue
+        if ! sed -n "${line}p" "$knowledge_source" | grep -qF "$symbol"; then
+            fail "$knowledge_page cites $symbol at :$line, which is not there"
+        fi
+    done < <(grep -oP '`(rata-claude-loop[^`]*)`[^`]*?`:(\d+)`' "$knowledge_page" || true)
+fi
+
 # --- Check: no-committed-secrets -------------------------------------------------
 # Not a secret scanner. It asserts the one property that matters here: credentials are
 # referenced, never inlined.

@@ -78,6 +78,16 @@ spending more on the same task is exactly what the cap forbids."
   :type '(choice (const :tag "No cap" nil) number)
   :group 'rata-claude-loop)
 
+(defcustom rata-claude-loop-run-budget-usd nil
+  "Dollar cap for the whole loop, or nil for no cap.
+There is no CLI flag for this: `--max-budget-usd' is per invocation, so
+with the default two attempts a fifty-task run can cost a hundred times
+what that cap suggests.  Checked between tasks, never mid-task — the work
+of the task in flight is already paid for, so abandoning it before its
+verify and its checkbox would waste the spend rather than save it."
+  :type '(choice (const :tag "No cap" nil) number)
+  :group 'rata-claude-loop)
+
 (defcustom rata-claude-loop-partial-messages nil
   "When non-nil, stream assistant text token-by-token.
 Adds --include-partial-messages.  The per-turn assistant and tool-use
@@ -125,6 +135,33 @@ appended to whatever this produces."
   :type 'string
   :group 'rata-claude-loop)
 
+(defcustom rata-claude-loop-include-task-body t
+  "When non-nil, send the detail written underneath a task along with it.
+A checklist line is a title, not a specification.  The lines indented
+beneath a Markdown checkbox, and the body of an Org TODO subtree, are
+where acceptance criteria, file paths and constraints actually get
+written; without this they are read by the operator and thrown away
+before the prompt is built."
+  :type 'boolean
+  :group 'rata-claude-loop)
+
+(defcustom rata-claude-loop-task-body-limit 2000
+  "Maximum characters of task detail to include in a prompt.
+Truncated from the end, the opposite of `rata-claude-loop-feedback-limit':
+the top of a task description is the part that defines it."
+  :type 'integer
+  :group 'rata-claude-loop)
+
+(defcustom rata-claude-loop-body-template
+  "Detail written under that task in %s:
+
+%s"
+  "Template wrapping the task detail appended to a prompt.
+Receives two `format' arguments: the task file name and the detail.
+Only used when there is detail to send."
+  :type 'string
+  :group 'rata-claude-loop)
+
 (defcustom rata-claude-loop-report-instruction
   "End your final message with a status line of its own, exactly one of:
 
@@ -169,6 +206,18 @@ a shell command and Emacs should ask before trusting one."
   :type '(choice (const :tag "None" nil) string)
   :group 'rata-claude-loop)
 
+(defcustom rata-claude-loop-verify-baseline t
+  "When non-nil, run the verify command once before the first task.
+A suite that is already failing would otherwise fail every task, and each
+task would spend its retries being told to fix a break it did not cause.
+Establishing that the gate passes on arrival is the difference between
+verify meaning \"this task broke something\" and verify meaning nothing.
+
+A failing baseline halts before any task starts.  Set this to nil to run
+anyway, knowingly, against a red tree."
+  :type 'boolean
+  :group 'rata-claude-loop)
+
 (defcustom rata-claude-loop-verify-output-lines 40
   "How many trailing lines of failed verify output to show in the buffer.
 The tail, not the head: a test runner's summary is at the end."
@@ -192,6 +241,24 @@ CLI reported an error mid-run, which covers a transient overload),
 unknown partial state, `blocked' is a considered judgement rather than a
 stumble, and `budget' means the cap you set did its job."
   :type '(repeat symbol)
+  :group 'rata-claude-loop)
+
+(defcustom rata-claude-loop-on-task-failure 'halt
+  "What to do with a task that has run out of attempts.
+
+`halt' stops the loop, which is right when you are watching and wrong
+when you are not: one impossible task in a list of twenty means the other
+nineteen never run.  `skip' marks the task with a skipped box, records it
+in the run summary and moves on, so a long unattended run degrades to a
+report of what could not be done rather than to nothing.  `ask' prompts.
+
+A single-task run always halts: there is nothing to continue to.  A task
+whose box cannot be marked unambiguously always halts too, whatever this
+says — continuing past a box that was never ticked would run the same
+task forever."
+  :type '(choice (const :tag "Halt the loop" halt)
+                 (const :tag "Skip the task and continue" skip)
+                 (const :tag "Ask" ask))
   :group 'rata-claude-loop)
 
 (defcustom rata-claude-loop-retry-prompt-template
@@ -256,6 +323,20 @@ Read-only: nothing is committed, stashed or reset.  nil disables it."
   :type 'string
   :group 'rata-claude-loop)
 
+(defcustom rata-claude-loop-journal-directory
+  (locate-user-emacs-file "var/claude-loop/")
+  "Directory holding one JSON-lines journal per run, or nil to disable.
+The loop's state lives only in memory, so an Emacs restart mid-run loses
+the session ids — the one thing that cannot be recomputed and the only
+way back into a task by hand.  The journal is the durable copy: what ran,
+how many attempts it took, what it cost, which session did it.
+
+Written with `write-region', one line appended per event.  A write failure
+is reported and then ignored: journalling must never be able to stop a
+run."
+  :type '(choice (const :tag "Off" nil) directory)
+  :group 'rata-claude-loop)
+
 (defcustom rata-claude-loop-task-file-names
   '("tasks.md" "TASKS.md" "tasks.org" "TASKS.org" "TODO.md" "TODO.org")
   "File names searched for at the project root when no task file is obvious."
@@ -309,14 +390,19 @@ Determines the working directory Claude is launched in."
   "Plist describing the running loop, or nil when idle.
 
 Loop-wide keys: :file :root :started :single :status :phase :epoch :index
-:open-count.  :status is `running', `halted' or `finished'.  :phase is
-`idle', `claude', `verify', `mark', `between' or `done' and is the finer
-grained truth; :status exists so `rata-claude-loop-running-p' stays cheap.
+:open-count :cost :tasks :journal.  :status is `running', `halted' or
+`finished'.  :phase is `idle', `baseline', `claude', `verify', `mark',
+`between' or `done' and is the finer grained truth; :status exists so
+`rata-claude-loop-running-p' stays cheap.  :cost accumulates every
+attempt's reported spend, :tasks holds one record per finished task
+(newest first) and :journal is the run's journal file, or nil.
+
+Per-task keys: :attempt :current-task :current-line :current-body
+:task-started :task-cost :baseline.
 
 Per-attempt keys: :process :stderr :pending :stderr-pending :session-id
-:result :report :report-reason :outcome :attempt :current-task
-:current-line :task-started :baseline :verify-process :verify-buffer
-:verify-output :timer :kill-timer :step-timer.
+:result :report :report-reason :outcome :verify-process :verify-buffer
+:verify-output :verify-purpose :timer :kill-timer :step-timer.
 
 :pending and :stderr-pending accumulate a partial line between filter
 calls.  :outcome is written at most once per attempt.  :epoch invalidates
@@ -367,6 +453,22 @@ overwritten by the kill it caused."
   (unless (rata-claude-loop--get :outcome)
     (rata-claude-loop--put :outcome (cons kind reason))))
 
+(defun rata-claude-loop--add-cost (amount)
+  "Add AMOUNT to this task's spend and to the run's.
+Accumulated where result events are decoded, so a resumed retry adds to
+the task it belongs to instead of replacing its cost."
+  (rata-claude-loop--put :task-cost
+                         (+ (or (rata-claude-loop--get :task-cost) 0) amount))
+  (rata-claude-loop--put :cost
+                         (+ (or (rata-claude-loop--get :cost) 0) amount)))
+
+(defun rata-claude-loop--budget-spent ()
+  "Return the run's spend when it has reached the run budget, else nil."
+  (let ((spent (or (rata-claude-loop--get :cost) 0)))
+    (and rata-claude-loop-run-budget-usd
+         (>= spent rata-claude-loop-run-budget-usd)
+         spent)))
+
 (defun rata-claude-loop--cancel-timer (key)
   "Cancel and clear the timer stored under KEY."
   (let ((timer (rata-claude-loop--get key)))
@@ -402,13 +504,21 @@ instead; a plain keymap loses to evil's state maps.")
   "Return the header line describing the current loop."
   (if (null rata-claude-loop--state)
       "claude-loop: idle"
-    (let ((attempt (or (rata-claude-loop--get :attempt) 1)))
-      (format "claude-loop: %s  ·  task %d  ·  %s%s%s"
+    (let ((attempt (or (rata-claude-loop--get :attempt) 1))
+          (cost (or (rata-claude-loop--get :cost) 0)))
+      (format "claude-loop: %s  ·  task %d  ·  %s%s%s%s"
               (file-name-nondirectory (or (rata-claude-loop--get :file) "?"))
               (or (rata-claude-loop--get :index) 0)
               (or (rata-claude-loop--get :phase)
                   (rata-claude-loop--get :status) 'idle)
               (if (> attempt 1) (format "  ·  attempt %d" attempt) "")
+              ;; Unattended spend is the thing you cannot see happening.
+              (if (> cost 0)
+                  (format "  ·  $%.2f%s" cost
+                          (if rata-claude-loop-run-budget-usd
+                              (format "/%.2f" rata-claude-loop-run-budget-usd)
+                            ""))
+                "")
               (if (rata-claude-loop--wedged-p) "  ·  WEDGED" "")))))
 
 (defun rata-claude-loop--buffer ()
@@ -461,6 +571,65 @@ the top of this file."
                     (when (rata-claude-loop--epoch-current-p epoch)
                       (rata-claude-loop--put :step-timer nil)
                       (rata-claude-loop--guard (funcall function))))))))
+
+
+;;; Journal
+
+(defun rata-claude-loop--journal-file (task-file)
+  "Return the journal path for a run over TASK-FILE, or nil.
+Creating the directory is part of resolving it: a journal that cannot be
+written is the same as no journal, and must never be an error."
+  (when rata-claude-loop-journal-directory
+    (condition-case err
+        (let ((directory (file-name-as-directory
+                          (expand-file-name rata-claude-loop-journal-directory))))
+          (make-directory directory t)
+          (expand-file-name (format "%s-%s.jsonl"
+                                    (format-time-string "%Y%m%dT%H%M%S")
+                                    (file-name-base task-file))
+                            directory))
+      (error
+       (message "claude-loop: journalling disabled (%s)"
+                (error-message-string err))
+       nil))))
+
+(defun rata-claude-loop--journal-value (value)
+  "Return VALUE in a shape `json-serialize' accepts."
+  (cond
+   ((eq value t) t)
+   ((keywordp value) (substring (symbol-name value) 1))
+   ((symbolp value) (symbol-name value))
+   ((or (numberp value) (stringp value)) value)
+   (t (format "%S" value))))
+
+(defun rata-claude-loop--journal-record (event fields)
+  "Return the JSON line recording EVENT with FIELDS, a plist.
+A key whose value is nil is dropped rather than serialised as null: this
+file is read with grep and jq, where an absent key is easier to filter
+than a null one."
+  (let ((plist (list :event (rata-claude-loop--journal-value event)
+                     :time (format-time-string "%FT%T%z"))))
+    (while fields
+      (let ((key (pop fields))
+            (value (pop fields)))
+        (when value
+          (setq plist (nconc plist
+                             (list key (rata-claude-loop--journal-value value)))))))
+    (concat (json-serialize plist) "\n")))
+
+(defun rata-claude-loop--journal (event &rest fields)
+  "Append EVENT with FIELDS to this run's journal, if it has one."
+  (let ((file (rata-claude-loop--get :journal)))
+    (when file
+      (condition-case err
+          (write-region (rata-claude-loop--journal-record event fields)
+                        nil file t 'silent)
+        (error
+         ;; Report once and give up: a journal that cannot be written must
+         ;; not put a line in the buffer for every event of the run.
+         (rata-claude-loop--put :journal nil)
+         (rata-claude-loop--log "  ! journal disabled: %s"
+                                (error-message-string err)))))))
 
 
 ;;; Task file handling
@@ -537,6 +706,87 @@ the project root, then ask."
         (while (re-search-forward regexp nil t)
           (setq count (1+ count))))
       count)))
+
+(defun rata-claude-loop--dedent (lines)
+  "Return LINES with the whitespace common to all of them removed."
+  (let ((common (apply #'min
+                       (or (delq nil
+                                 (mapcar
+                                  (lambda (line)
+                                    (unless (string-blank-p line)
+                                      (- (length line)
+                                         (length (string-trim-left line)))))
+                                  lines))
+                           '(0)))))
+    (mapcar (lambda (line)
+              (if (>= (length line) common) (substring line common) line))
+            lines)))
+
+(defun rata-claude-loop--body-string (lines)
+  "Return LINES as one dedented, trimmed, truncated string, or nil if empty."
+  (let ((text (string-trim
+               (string-join (rata-claude-loop--dedent lines) "\n"))))
+    (unless (string-blank-p text)
+      (rata-claude-loop--head text rata-claude-loop-task-body-limit))))
+
+(defun rata-claude-loop--indented-body-at-point ()
+  "Return the lines indented under the checklist line at point, or nil.
+Stops at the first non-blank line indented no deeper than the task
+itself.  Nested checkboxes are kept: they describe this task, and the loop
+meets them again as tasks of their own only if they are still open then."
+  (let ((indent (current-indentation))
+        (lines nil)
+        (done nil))
+    (forward-line 1)
+    (while (and (not done) (not (eobp)))
+      (let ((line (buffer-substring-no-properties (line-beginning-position)
+                                                  (line-end-position))))
+        (cond
+         ((string-blank-p line) (push line lines))
+         ((> (current-indentation) indent) (push line lines))
+         (t (setq done t))))
+      (unless done (forward-line 1)))
+    (rata-claude-loop--body-string (nreverse lines))))
+
+(defun rata-claude-loop--org-body-at-point ()
+  "Return the body of the Org entry headed by the line at point, or nil.
+Stops at the next heading of any level.  Drawers and planning lines are
+dropped: they are metadata about the task rather than a description of
+it, and a property drawer in a prompt reads as noise."
+  (let ((lines nil)
+        (in-drawer nil)
+        (done nil))
+    (forward-line 1)
+    (while (and (not done) (not (eobp)))
+      (let ((line (buffer-substring-no-properties (line-beginning-position)
+                                                  (line-end-position))))
+        (cond
+         ((string-match-p "\\`\\*+[ \t]" line) (setq done t))
+         (in-drawer
+          (when (string-match-p "\\`[ \t]*:END:[ \t]*\\'" line)
+            (setq in-drawer nil)))
+         ((string-match-p "\\`[ \t]*:[A-Za-z0-9_-]+:[ \t]*\\'" line)
+          (setq in-drawer t))
+         ((string-match-p "\\`[ \t]*\\(SCHEDULED\\|DEADLINE\\|CLOSED\\):" line))
+         (t (push line lines))))
+      (unless done (forward-line 1)))
+    (rata-claude-loop--body-string (nreverse lines))))
+
+(defun rata-claude-loop--body-at (line)
+  "Return the detail written under the task on LINE of this buffer, or nil."
+  (save-excursion
+    (goto-char (point-min))
+    (forward-line (1- line))
+    (if (and (derived-mode-p 'org-mode)
+             (looking-at rata-claude-loop-org-todo-regexp))
+        (rata-claude-loop--org-body-at-point)
+      (rata-claude-loop--indented-body-at-point))))
+
+(defun rata-claude-loop--task-body (file line)
+  "Return the detail written under the task on LINE of FILE, or nil."
+  (when rata-claude-loop-include-task-body
+    (with-current-buffer (rata-claude-loop--file-buffer file)
+      (rata-claude-loop--body-at line))))
 
 (defun rata-claude-loop--task-at-line-p (line text)
   "Return non-nil when LINE of the current buffer is an open task reading TEXT."
@@ -657,6 +907,16 @@ Reading it there rather than globally lets a project set it in
         (concat (substring flat 0 limit) "…")
       flat)))
 
+(defun rata-claude-loop--head (string limit)
+  "Return the first LIMIT characters of STRING, marked when truncated.
+The opposite end from `rata-claude-loop--tail': a task description is
+defined at the top, a failing test run is explained at the bottom."
+  (let ((string (or string "")))
+    (if (<= (length string) limit)
+        string
+      (concat (substring string 0 limit)
+              "\n…(the rest of this description was truncated)…"))))
+
 (defun rata-claude-loop--tail (string limit)
   "Return the last LIMIT characters of STRING, marked when truncated."
   (let ((string (or string "")))
@@ -758,13 +1018,23 @@ at its final word."
         (cost (alist-get 'total_cost_usd event))
         (duration (alist-get 'duration_ms event))
         (turns (alist-get 'num_turns event)))
+    ;; `total_cost_usd' is the cost of this invocation, so summing across
+    ;; attempts gives the task and summing across tasks gives the run.  This
+    ;; is the only number the loop has: nothing here can price a task the CLI
+    ;; did not report on.
+    (when (numberp cost)
+      (rata-claude-loop--add-cost cost))
     (rata-claude-loop--insert
-     (format "\n  %s %s · %.0fs · $%.2f · %s turns\n"
+     (format "\n  %s %s · %.0fs · $%.2f · %s turns%s\n"
              (if error-p "✗" "✓")
              (or (alist-get 'subtype event) "")
              (/ (or duration 0) 1000.0)
              (or cost 0)
-             (or turns 0))
+             (or turns 0)
+             (let ((total (rata-claude-loop--get :cost)))
+               (if (and (numberp total) (> total 0))
+                   (format " · $%.2f this run" total)
+                 "")))
      (if error-p 'rata-claude-loop-error-face 'rata-claude-loop-success-face))))
 
 (defun rata-claude-loop--render-event (event)
@@ -954,6 +1224,93 @@ Read-only: nothing is committed, stashed or reset."
        'rata-claude-loop-meta-face))))
 
 
+;;; Task records and the run summary
+
+(defun rata-claude-loop--task-seconds ()
+  "Return how long the current task has been running, in seconds."
+  (let ((started (rata-claude-loop--get :task-started)))
+    (and started (float-time (time-subtract (current-time) started)))))
+
+(defun rata-claude-loop--record-task (status kind reason)
+  "Record the task that has just ended as STATUS, and journal it.
+STATUS is `done' or `failed'; KIND and REASON explain a failure and are
+nil otherwise.  One record per task rather than per attempt: the attempts
+are in the buffer and the journal, this is what the summary reports."
+  (let ((record (list :index (rata-claude-loop--get :index)
+                      :task (rata-claude-loop--get :current-task)
+                      :status status
+                      :attempts (or (rata-claude-loop--get :attempt) 1)
+                      :seconds (rata-claude-loop--task-seconds)
+                      :cost (or (rata-claude-loop--get :task-cost) 0)
+                      :session (rata-claude-loop--get :session-id)
+                      :kind kind
+                      :reason reason)))
+    (rata-claude-loop--put :tasks (cons record (rata-claude-loop--get :tasks)))
+    (apply #'rata-claude-loop--journal "task-end" record)
+    record))
+
+(defun rata-claude-loop--summary-line (record)
+  "Return the run-summary line describing RECORD."
+  (let ((attempts (or (plist-get record :attempts) 1))
+        (reason (plist-get record :reason)))
+    (format "  %s [%s] %-40s %d attempt%s · %s · $%.2f%s\n"
+            (if (eq (plist-get record :status) 'done) "✓" "⊘")
+            (or (plist-get record :index) "?")
+            (rata-claude-loop--truncate (plist-get record :task) 40)
+            attempts (if (= attempts 1) "" "s")
+            (rata-claude-loop--format-seconds (plist-get record :seconds))
+            (or (plist-get record :cost) 0)
+            (if reason
+                (format " — %s" (rata-claude-loop--truncate reason 60))
+              ""))))
+
+(defun rata-claude-loop--report-summary ()
+  "Render one line per finished task, then the run's totals.
+What a long run leaves behind is otherwise a scrollback you have to read;
+this is the part you can act on."
+  (let ((records (reverse (rata-claude-loop--get :tasks))))
+    (when records
+      (let* ((total (length records))
+             (done (seq-count (lambda (record)
+                                (eq (plist-get record :status) 'done))
+                              records))
+             (elapsed (float-time
+                       (time-subtract (current-time)
+                                      (rata-claude-loop--get :started)))))
+        (rata-claude-loop--insert (format "\n%s\n" (make-string 60 ?─))
+                                  'rata-claude-loop-meta-face)
+        (dolist (record records)
+          (rata-claude-loop--insert
+           (rata-claude-loop--summary-line record)
+           (if (eq (plist-get record :status) 'done)
+               'rata-claude-loop-success-face
+             'rata-claude-loop-error-face)))
+        (rata-claude-loop--insert
+         (format "  %d task%s · %d done · %d failed · %s · $%.2f\n"
+                 total (if (= total 1) "" "s")
+                 done (- total done)
+                 (rata-claude-loop--format-seconds elapsed)
+                 (or (rata-claude-loop--get :cost) 0))
+         'rata-claude-loop-meta-face)))))
+
+(defun rata-claude-loop--journal-run-end (status reason)
+  "Journal the end of the run as STATUS, explained by REASON."
+  (let* ((records (rata-claude-loop--get :tasks))
+         (done (seq-count (lambda (record)
+                            (eq (plist-get record :status) 'done))
+                          records)))
+    (rata-claude-loop--journal
+     "run-end"
+     :status status
+     :reason reason
+     :tasks (length records)
+     :done done
+     :failed (- (length records) done)
+     :cost (or (rata-claude-loop--get :cost) 0)
+     :seconds (float-time (time-subtract (current-time)
+                                         (rata-claude-loop--get :started))))))
+
+
 ;;; Running
 
 (defun rata-claude-loop--common-args ()
@@ -973,18 +1330,25 @@ every one of these has to be passed again on a retry."
            (number-to-string rata-claude-loop-task-budget-usd)))
    rata-claude-loop-extra-args))
 
-(defun rata-claude-loop--prompt (task file)
-  "Return the prompt for TASK from FILE."
+(defun rata-claude-loop--prompt (task file &optional body)
+  "Return the prompt for TASK from FILE, including BODY when there is any.
+BODY is the detail written under the task in the checklist.  It goes in
+after the instructions and before the status-line request, so the
+instructions are not buried under a long description."
   (let ((name (file-name-nondirectory file)))
     (string-trim
      (concat (format rata-claude-loop-prompt-template name task name)
+             (when (and body (not (string-blank-p body)))
+               (concat "\n\n"
+                       (format rata-claude-loop-body-template name body)))
              "\n\n"
              rata-claude-loop-report-instruction))))
 
-(defun rata-claude-loop--build-command (task file)
-  "Return the argv list running TASK from FILE through the Claude CLI."
+(defun rata-claude-loop--build-command (task file &optional body)
+  "Return the argv list running TASK from FILE through the Claude CLI.
+BODY is the detail written under the task, or nil."
   (append (list rata-claude-loop-executable
-                "-p" (rata-claude-loop--prompt task file))
+                "-p" (rata-claude-loop--prompt task file body))
           (rata-claude-loop--common-args)))
 
 (defun rata-claude-loop--build-retry-command (reason feedback)
@@ -1014,8 +1378,10 @@ another process group and survives."
   (rata-claude-loop--put :status 'halted)
   (rata-claude-loop--put :phase 'idle)
   (let ((message-text (apply #'format format-string args)))
+    (rata-claude-loop--report-summary)
     (rata-claude-loop--insert (format "\n■ halted: %s\n\n" message-text)
                               'rata-claude-loop-error-face)
+    (rata-claude-loop--journal-run-end "halted" message-text)
     (message "claude-loop halted: %s" message-text))
   (display-buffer (rata-claude-loop--buffer)))
 
@@ -1024,11 +1390,13 @@ another process group and survives."
   (rata-claude-loop--cancel-timers)
   (rata-claude-loop--put :status 'finished)
   (rata-claude-loop--put :phase 'done)
+  (rata-claude-loop--report-summary)
   (let ((index (or (rata-claude-loop--get :index) 0)))
     (rata-claude-loop--insert
      (format "\n■ %s (%d task%s run).\n\n"
              message-text index (if (= index 1) "" "s"))
      'rata-claude-loop-success-face))
+  (rata-claude-loop--journal-run-end "finished" message-text)
   (message "claude-loop: %s" message-text))
 
 (defun rata-claude-loop--terminate ()
@@ -1136,14 +1504,29 @@ still fires and the recorded outcome is what gets classified."
     (rata-claude-loop--put :attempt 1)
     (rata-claude-loop--put :session-id nil)
     (rata-claude-loop--put :task-started (current-time))
+    (rata-claude-loop--put :task-cost 0)
     (rata-claude-loop--put :open-count remaining)
     (rata-claude-loop--put :baseline (rata-claude-loop--git-baseline))
+    ;; Read the detail once, here: the file can be edited while the task runs,
+    ;; and a retry that resumed the session would then be answering a
+    ;; different description than the one it was given.
+    (rata-claude-loop--put :current-body (rata-claude-loop--task-body file line))
     (rata-claude-loop--insert
      (format "\n%s\n▶ [%d/%d] %s\n\n"
              (make-string 60 ?─) index (+ index remaining -1) task)
      'rata-claude-loop-banner-face)
-    (message "claude-loop [%d]: %s" index task)
-    (rata-claude-loop--spawn (rata-claude-loop--build-command task file))))
+    (let ((body (rata-claude-loop--get :current-body)))
+      (when body
+        (rata-claude-loop--insert
+         (format "  + %d line(s) of detail from the task list\n\n"
+                 (length (split-string body "\n")))
+         'rata-claude-loop-meta-face))
+      (rata-claude-loop--journal "task-start"
+                                 :index index :task task :line line
+                                 :detail (and body (length body)))
+      (message "claude-loop [%d]: %s" index task)
+      (rata-claude-loop--spawn
+       (rata-claude-loop--build-command task file body)))))
 
 (defun rata-claude-loop--feedback (kind)
   "Return captured output to hand back for a failure of KIND."
@@ -1177,28 +1560,85 @@ still fires and the recorded outcome is what gets classified."
                           (rata-claude-loop--guard
                             (rata-claude-loop--spawn command))))))))))
 
+(defun rata-claude-loop--failure-action (reason)
+  "Return `halt' or `skip' for a task that has finally failed with REASON."
+  (cond
+   ;; One task was asked for; there is nothing to continue to.
+   ((rata-claude-loop--get :single) 'halt)
+   ((eq rata-claude-loop-on-task-failure 'skip) 'skip)
+   ((eq rata-claude-loop-on-task-failure 'ask)
+    (if (y-or-n-p (format "claude-loop: %s  Skip it and continue? "
+                          (rata-claude-loop--truncate reason 120)))
+        'skip
+      'halt))
+   (t 'halt)))
+
+(defun rata-claude-loop--skip-failed-task (kind reason)
+  "Mark the current task, which failed as KIND, skipped and go on.
+Marking has to succeed: a box left open is handed straight back as the
+next task, so a box that cannot be located unambiguously halts even here.
+REASON is reported if that happens."
+  (let ((file (rata-claude-loop--get :file))
+        (line (rata-claude-loop--get :current-line))
+        (task (rata-claude-loop--get :current-task)))
+    (if (null (rata-claude-loop--mark-task file line task 'skipped))
+        (rata-claude-loop--halt
+         "%s — and %S is no longer an unambiguous open task, so it cannot be \
+marked skipped"
+         reason (rata-claude-loop--truncate task 50))
+      (rata-claude-loop--insert
+       (format "  ⊘ giving up on this task (%s) and continuing\n" kind)
+       'rata-claude-loop-error-face)
+      (rata-claude-loop--put :phase 'between)
+      (rata-claude-loop--advance))))
+
+(defun rata-claude-loop--give-up (kind reason)
+  "Stop attempting the current task, which failed as KIND with REASON.
+Whether that ends the run is `rata-claude-loop-on-task-failure'."
+  (rata-claude-loop--record-task 'failed kind reason)
+  (if (eq (rata-claude-loop--failure-action reason) 'skip)
+      (rata-claude-loop--skip-failed-task kind reason)
+    (rata-claude-loop--halt "%s" reason)))
+
 (defun rata-claude-loop--fail (kind reason)
   "React to a failed attempt of KIND, explained by REASON."
   (let ((attempt (or (rata-claude-loop--get :attempt) 1)))
     (rata-claude-loop--insert (format "  ✗ %s\n" reason)
                               'rata-claude-loop-error-face)
+    (rata-claude-loop--journal "attempt-failed"
+                               :index (rata-claude-loop--get :index)
+                               :attempt attempt
+                               :kind kind
+                               :reason reason
+                               :session (rata-claude-loop--get :session-id))
     (cond
      ((not (memq kind rata-claude-loop-retry-on))
-      (rata-claude-loop--halt "%s" reason))
+      (rata-claude-loop--give-up kind reason))
      ((>= attempt rata-claude-loop-max-attempts)
-      (rata-claude-loop--halt "%s (gave up after %d attempt%s)"
-                              reason attempt (if (= attempt 1) "" "s")))
+      (rata-claude-loop--give-up
+       kind (format "%s (gave up after %d attempt%s)"
+                    reason attempt (if (= attempt 1) "" "s"))))
      ((null (rata-claude-loop--get :session-id))
-      (rata-claude-loop--halt "%s (no session to resume)" reason))
+      (rata-claude-loop--give-up
+       kind (format "%s (no session to resume)" reason)))
      (t
       (rata-claude-loop--start-retry kind reason)))))
 
-(defun rata-claude-loop--start-verify ()
-  "Run the verify command asynchronously, entering the `verify' phase."
-  (let ((command (rata-claude-loop--verify-command)))
+(defun rata-claude-loop--start-verify (&optional purpose)
+  "Run the verify command asynchronously and wait for it.
+PURPOSE is `task' (the default) to judge the task that just ran, or
+`baseline' to establish that the command passes before any task runs.
+Both use one process and one timeout; only what happens with the exit
+code differs, so `:verify-purpose' rather than a second spawner."
+  (let ((command (rata-claude-loop--verify-command))
+        (purpose (or purpose 'task)))
     (rata-claude-loop--bump-epoch)
-    (rata-claude-loop--put :phase 'verify)
-    (rata-claude-loop--log "  … verifying: %s" command)
+    (rata-claude-loop--put :verify-purpose purpose)
+    (rata-claude-loop--put :phase (if (eq purpose 'baseline) 'baseline 'verify))
+    (rata-claude-loop--log (if (eq purpose 'baseline)
+                               "  … baseline verify: %s"
+                             "  … verifying: %s")
+                           command)
     (let* ((default-directory (rata-claude-loop--get :root))
            (buffer (generate-new-buffer " *claude-loop-verify*"))
            (epoch (rata-claude-loop--get :epoch)))
@@ -1222,7 +1662,10 @@ still fires and the recorded outcome is what gets classified."
                         (rata-claude-loop--put :verify-process nil)
                         (rata-claude-loop--later
                          (lambda ()
-                           (rata-claude-loop--after-verify code)))))))))
+                           (if (eq (rata-claude-loop--get :verify-purpose)
+                                   'baseline)
+                               (rata-claude-loop--after-baseline code)
+                             (rata-claude-loop--after-verify code))))))))))
             (rata-claude-loop--put :verify-process process)
             (rata-claude-loop--arm-timeout
              rata-claude-loop-verify-timeout 'timeout
@@ -1249,6 +1692,38 @@ still fires and the recorded outcome is what gets classified."
       (if (rata-claude-loop--verify-command)
           (rata-claude-loop--start-verify)
         (rata-claude-loop--complete-task))))))
+
+(defun rata-claude-loop--after-baseline (code)
+  "Decide whether the tree is fit to start from, given verify's exit CODE.
+A gate that is already red cannot tell you anything about a task, and
+every task would spend its retries being told to fix a break it did not
+cause, so this halts before the first task instead."
+  (let* ((buffer (rata-claude-loop--get :verify-buffer))
+         (output (and (buffer-live-p buffer)
+                      (with-current-buffer buffer (buffer-string)))))
+    (when (buffer-live-p buffer)
+      (kill-buffer buffer))
+    (rata-claude-loop--put :verify-buffer nil)
+    ;; Deliberately not kept: this output describes the tree as found, and
+    ;; feeding it to a task's retry would blame it for a break it inherited.
+    (rata-claude-loop--put :verify-output nil)
+    (if (and (zerop code) (null (rata-claude-loop--get :outcome)))
+        (progn
+          (rata-claude-loop--insert "  ✓ baseline verify passed\n"
+                                    'rata-claude-loop-success-face)
+          (rata-claude-loop--journal "baseline" :status "passed")
+          (rata-claude-loop--put :phase 'between)
+          (rata-claude-loop--advance))
+      (rata-claude-loop--insert
+       (format "  ✗ baseline verify failed (exit %s):\n%s\n" code
+               (rata-claude-loop--tail-lines
+                output rata-claude-loop-verify-output-lines))
+       'rata-claude-loop-error-face)
+      (rata-claude-loop--journal "baseline" :status "failed" :code code)
+      (rata-claude-loop--halt
+       "the verify command already fails on the tree as it stands, before any \
+task ran; fix that first, or set `rata-claude-loop-verify-baseline' to nil to \
+run against it knowingly"))))
 
 (defun rata-claude-loop--after-verify (code)
   "Decide what a verify run that exited with CODE means, and move on."
@@ -1285,11 +1760,12 @@ still fires and the recorded outcome is what gets classified."
       (rata-claude-loop--halt
        "refusing to tick a box: %S is no longer an unambiguous open task in %s"
        (rata-claude-loop--truncate task 50) (file-name-nondirectory file)))
-     ((rata-claude-loop--get :single)
-      (rata-claude-loop--finish "task done"))
      (t
-      (rata-claude-loop--put :phase 'between)
-      (rata-claude-loop--advance)))))
+      (rata-claude-loop--record-task 'done nil nil)
+      (if (rata-claude-loop--get :single)
+          (rata-claude-loop--finish "task done")
+        (rata-claude-loop--put :phase 'between)
+        (rata-claude-loop--advance))))))
 
 (defun rata-claude-loop--advance ()
   "Run the next open task, or finish the loop when none are left."
@@ -1304,6 +1780,13 @@ still fires and the recorded outcome is what gets classified."
      ((null next)
       (rata-claude-loop--finish
        (format "all tasks in %s are complete" (file-name-nondirectory file))))
+     ;; Checked here rather than the moment the budget is passed: the task in
+     ;; flight has already been paid for, so cutting it off before its verify
+     ;; and its checkbox would waste that spend instead of saving it.
+     ((rata-claude-loop--budget-spent)
+      (rata-claude-loop--halt
+       "spent $%.2f of the $%.2f run budget; stopping before the next task"
+       (rata-claude-loop--budget-spent) rata-claude-loop-run-budget-usd))
      ;; The open count not dropping means the box never got ticked, and running
      ;; the same task again would spin forever.  Counting rather than comparing
      ;; task text keeps two identically-worded checklist items from tripping
@@ -1338,10 +1821,30 @@ SINGLE means run one task only and stop."
         (list :file file :root root :index 0 :epoch 0
               :status 'running :phase 'between
               :started (current-time) :pending "" :stderr-pending ""
+              :cost 0 :tasks nil
+              :journal (rata-claude-loop--journal-file file)
               :single single))
   (with-current-buffer (rata-claude-loop--buffer)
     (let ((inhibit-read-only t)) (erase-buffer)))
+  (rata-claude-loop--journal "run-start"
+                             :file file
+                             :root root
+                             :single single
+                             :open (rata-claude-loop--count-open file)
+                             :budget rata-claude-loop-run-budget-usd
+                             :model rata-claude-loop-model
+                             :verify (rata-claude-loop--verify-command))
+  (when (rata-claude-loop--get :journal)
+    (rata-claude-loop--log "  journal: %s" (rata-claude-loop--get :journal)))
   (display-buffer (rata-claude-loop--buffer)))
+
+(defun rata-claude-loop--start-run ()
+  "Begin a run: prove the verify command passes, then work through the list."
+  (if (and rata-claude-loop-verify-baseline
+           (not (rata-claude-loop--get :single))
+           (rata-claude-loop--verify-command))
+      (rata-claude-loop--start-verify 'baseline)
+    (rata-claude-loop--advance)))
 
 ;;;###autoload
 (defun rata-claude-loop-start (&optional ask)
@@ -1366,7 +1869,7 @@ also prompt for the directory Claude should run in."
                               open (file-name-nondirectory file) root))
       (user-error "Aborted"))
     (rata-claude-loop--begin file root nil)
-    (rata-claude-loop--guard (rata-claude-loop--advance))))
+    (rata-claude-loop--guard (rata-claude-loop--start-run))))
 
 ;;;###autoload
 (defun rata-claude-loop-run-task-at-point ()
@@ -1514,28 +2017,52 @@ instead of re-explaining the problem to a fresh context."
   (interactive)
   (if (null rata-claude-loop--state)
       (message "claude-loop: idle")
-    (message "claude-loop: %s%s · %s · task %d attempt %d (%s) · %d open · %s elapsed"
-             (rata-claude-loop--get :status)
-             (let ((phase (rata-claude-loop--get :phase)))
-               (cond ((rata-claude-loop--wedged-p) " [WEDGED]")
-                     (phase (format "/%s" phase))
-                     (t "")))
-             (file-name-nondirectory (rata-claude-loop--get :file))
-             (or (rata-claude-loop--get :index) 0)
-             (or (rata-claude-loop--get :attempt) 0)
-             (rata-claude-loop--truncate
-              (or (rata-claude-loop--get :current-task) "-") 50)
-             (rata-claude-loop--count-open (rata-claude-loop--get :file))
-             (format-seconds "%mm %ss"
-                             (float-time (time-subtract
-                                          (current-time)
-                                          (rata-claude-loop--get :started)))))))
+    (let* ((records (rata-claude-loop--get :tasks))
+           (failed (seq-count (lambda (record)
+                                (eq (plist-get record :status) 'failed))
+                              records)))
+      (message "claude-loop: %s%s · %s · task %d attempt %d (%s) · %d open · \
+%d failed · $%.2f · %s elapsed"
+               (rata-claude-loop--get :status)
+               (let ((phase (rata-claude-loop--get :phase)))
+                 (cond ((rata-claude-loop--wedged-p) " [WEDGED]")
+                       (phase (format "/%s" phase))
+                       (t "")))
+               (file-name-nondirectory (rata-claude-loop--get :file))
+               (or (rata-claude-loop--get :index) 0)
+               (or (rata-claude-loop--get :attempt) 0)
+               (rata-claude-loop--truncate
+                (or (rata-claude-loop--get :current-task) "-") 50)
+               (rata-claude-loop--count-open (rata-claude-loop--get :file))
+               failed
+               (or (rata-claude-loop--get :cost) 0)
+               (format-seconds "%mm %ss"
+                               (float-time (time-subtract
+                                            (current-time)
+                                            (rata-claude-loop--get :started))))))))
 
 ;;;###autoload
 (defun rata-claude-loop-show-buffer ()
   "Pop to the loop output buffer."
   (interactive)
   (pop-to-buffer (rata-claude-loop--buffer)))
+
+;;;###autoload
+(defun rata-claude-loop-open-journal ()
+  "Open this run's journal, or the most recent one when none is running.
+The buffer is scrollback and dies with Emacs; the journal is the record
+that outlives the session, and it holds the session ids a task can be
+picked up by hand from."
+  (interactive)
+  (let ((file (or (rata-claude-loop--get :journal)
+                  (and rata-claude-loop-journal-directory
+                       (car (last (ignore-errors
+                                    (directory-files
+                                     rata-claude-loop-journal-directory
+                                     t "\\.jsonl\\'"))))))))
+    (unless file
+      (user-error "No claude-loop journal found"))
+    (find-file file)))
 
 
 ;;; Keybindings
@@ -1568,6 +2095,7 @@ instead of re-explaining the problem to a fresh context."
     "aiclt" '(rata-claude-loop-retry-task        :which-key "retry current task")
     "aiclo" '(rata-claude-loop-open-session      :which-key "take over session")
     "aiclb" '(rata-claude-loop-show-buffer       :which-key "show output")
+    "aiclj" '(rata-claude-loop-open-journal      :which-key "open run journal")
     "aicl?" '(rata-claude-loop-status            :which-key "status")))
 
 (provide 'init-claude-loop)

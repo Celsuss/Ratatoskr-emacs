@@ -95,7 +95,11 @@ exit ${FAKE_EXIT:-0}
       rata-claude-loop-task-timeout nil
       rata-claude-loop-verify-timeout nil
       rata-claude-loop-verify-command nil
-      rata-claude-loop-kill-grace 1)
+      rata-claude-loop-kill-grace 1
+      ;; Journals go to the scratch directory, never to the real one: a test
+      ;; run must not leave records in the operator's history.
+      rata-claude-loop-journal-directory (expand-file-name "journal"
+                                                           rata-e2e--dir))
 
 (defun rata-e2e--wait (&optional limit)
   "Pump timers and process output until the loop stops running."
@@ -117,6 +121,19 @@ exit ${FAKE_EXIT:-0}
   (rata-claude-loop--begin file (file-name-directory file) single)
   (rata-claude-loop--advance)
   (rata-e2e--wait))
+
+(defun rata-e2e--run-from-start (file)
+  "Run the loop over FILE through `--start-run', so the baseline applies."
+  (rata-claude-loop--begin file (file-name-directory file) nil)
+  (rata-claude-loop--start-run)
+  (rata-e2e--wait))
+
+(defun rata-e2e--journal ()
+  "Return the current run's journal contents, or an empty string."
+  (let ((file (rata-claude-loop--get :journal)))
+    (if (and file (file-exists-p file))
+        (with-temp-buffer (insert-file-contents file) (buffer-string))
+      "")))
 
 (defun rata-e2e--contents (file)
   "Return FILE's contents, freshly read from disk."
@@ -307,6 +324,137 @@ if [ $n -le 1 ]; then echo 'FAILED: test_thing'; exit 1; fi; echo 'all good'"
 (let ((rata-claude-loop--state (list :status 'finished :epoch 1)))
   (rata-e2e--check "wedged: not for a finished loop"
                    (rata-claude-loop--wedged-p) nil))
+
+;;; ------------------------------------------------------------------
+;;; 9. One impossible task does not have to end the run
+;;; ------------------------------------------------------------------
+
+(setenv "FAKE_MODE" "blocked")
+(setq rata-claude-loop-on-task-failure 'skip)
+(let* ((file (rata-e2e--tasks "- [ ] one\n- [ ] two\n- [ ] three\n"))
+       (status (rata-e2e--run file)))
+  (rata-e2e--check "contain: run finished rather than halting" status 'finished)
+  (rata-e2e--check "contain: every task marked skipped, none ticked"
+                   (rata-e2e--contents file)
+                   "- [-] one\n- [-] two\n- [-] three\n")
+  (rata-e2e--check "contain: all three were attempted"
+                   (rata-claude-loop--get :index) 3)
+  (rata-e2e--check "contain: summary counts the failures"
+                   (rata-e2e--saw "3 tasks · 0 done · 3 failed") t))
+(setq rata-claude-loop-on-task-failure 'halt)
+
+;; The default is still to stop, and a single-task run always stops.
+(setenv "FAKE_MODE" "blocked")
+(let* ((file (rata-e2e--tasks "- [ ] one\n- [ ] two\n"))
+       (status (rata-e2e--run file)))
+  (rata-e2e--check "contain: halt is still the default" status 'halted)
+  (rata-e2e--check "contain: nothing marked when halting"
+                   (rata-e2e--contents file) "- [ ] one\n- [ ] two\n"))
+
+(setq rata-claude-loop-on-task-failure 'skip)
+(let ((file (rata-e2e--tasks "- [ ] only\n")))
+  (rata-e2e--check "contain: a single-task run halts even under `skip'"
+                   (rata-e2e--run file t) 'halted))
+(setq rata-claude-loop-on-task-failure 'halt)
+
+;;; ------------------------------------------------------------------
+;;; 10. The run budget stops the loop between tasks
+;;; ------------------------------------------------------------------
+
+;; The stub reports $0.01 per attempt, so a $0.015 cap must stop after the
+;; second task -- having let the second one finish and tick its box.
+(setenv "FAKE_MODE" "ok")
+(setq rata-claude-loop-run-budget-usd 0.015)
+(let* ((file (rata-e2e--tasks "- [ ] one\n- [ ] two\n- [ ] three\n"))
+       (status (rata-e2e--run file)))
+  (rata-e2e--check "budget: halted" status 'halted)
+  (rata-e2e--check "budget: stopped between tasks, not mid-task"
+                   (rata-e2e--contents file)
+                   "- [X] one\n- [X] two\n- [ ] three\n")
+  (rata-e2e--check "budget: says why" (rata-e2e--saw "run budget") t)
+  (rata-e2e--check "budget: spend accumulated across tasks"
+                   (> (rata-claude-loop--get :cost) 0.015) t))
+(setq rata-claude-loop-run-budget-usd nil)
+
+;;; ------------------------------------------------------------------
+;;; 11. The detail written under a task reaches the prompt
+;;; ------------------------------------------------------------------
+
+(setenv "FAKE_MODE" "ok")
+(setenv "FAKE_PROMPT_FILE" rata-e2e--prompt)
+(ignore-errors (delete-file rata-e2e--prompt))
+(let ((file (rata-e2e--tasks "- [ ] alpha\n    it must handle the empty case\n    and keep the old name\n- [ ] beta\n")))
+  (rata-e2e--run file t)
+  (let ((prompt (with-temp-buffer
+                  (insert-file-contents rata-e2e--prompt)
+                  (buffer-string))))
+    (rata-e2e--check "body: detail reached the prompt"
+                     (and (string-match-p "it must handle the empty case" prompt)
+                          (string-match-p "and keep the old name" prompt)
+                          t)
+                     t)
+    ;; The next task's line is not this task's detail.
+    (rata-e2e--check "body: stops at the next task"
+                     (string-match-p "beta" prompt) nil))
+  (rata-e2e--check "body: announced in the buffer"
+                   (rata-e2e--saw "2 line(s) of detail") t))
+(setenv "FAKE_PROMPT_FILE" nil)
+
+;;; ------------------------------------------------------------------
+;;; 12. A verify command that already fails stops before any task runs
+;;; ------------------------------------------------------------------
+
+(setenv "FAKE_MODE" "ok")
+(setenv "FAKE_COUNT_FILE" rata-e2e--counter)
+(ignore-errors (delete-file rata-e2e--counter))
+(setq rata-claude-loop-verify-command "echo 'pre-existing breakage'; exit 1"
+      rata-claude-loop-verify-baseline t)
+(let* ((file (rata-e2e--tasks "- [ ] alpha\n"))
+       (status (rata-e2e--run-from-start file)))
+  (rata-e2e--check "baseline: halted" status 'halted)
+  (rata-e2e--check "baseline: box untouched" (rata-e2e--contents file)
+                   "- [ ] alpha\n")
+  (rata-e2e--check "baseline: claude was never launched"
+                   (file-exists-p rata-e2e--counter) nil)
+  (rata-e2e--check "baseline: blames the tree, not the task"
+                   (rata-e2e--saw "already fails") t)
+  ;; Nothing of the baseline's output may survive to be fed to a task retry.
+  (rata-e2e--check "baseline: output not kept as task feedback"
+                   (rata-claude-loop--get :verify-output) nil))
+
+;; A passing baseline gets out of the way.
+(setq rata-claude-loop-verify-command "exit 0")
+(let* ((file (rata-e2e--tasks "- [ ] alpha\n"))
+       (status (rata-e2e--run-from-start file)))
+  (rata-e2e--check "baseline: passing baseline runs the tasks" status 'finished)
+  (rata-e2e--check "baseline: box ticked" (rata-e2e--contents file)
+                   "- [X] alpha\n"))
+(setq rata-claude-loop-verify-command nil)
+(setenv "FAKE_COUNT_FILE" nil)
+
+;;; ------------------------------------------------------------------
+;;; 13. The run is journalled durably, session id included
+;;; ------------------------------------------------------------------
+
+(setenv "FAKE_MODE" "ok")
+(let* ((file (rata-e2e--tasks "- [ ] alpha\n"))
+       (_ (rata-e2e--run file))
+       (journal (rata-e2e--journal)))
+  (rata-e2e--check "journal: run start recorded"
+                   (and (string-match-p "\"event\":\"run-start\"" journal) t) t)
+  (rata-e2e--check "journal: task recorded as done"
+                   (and (string-match-p "\"event\":\"task-end\"" journal)
+                        (string-match-p "\"status\":\"done\"" journal)
+                        t)
+                   t)
+  ;; The one fact that cannot be recomputed after an Emacs restart.
+  (rata-e2e--check "journal: session id survives the process"
+                   (and (string-match-p "11111111-2222-3333-4444-555555555555"
+                                        journal)
+                        t)
+                   t)
+  (rata-e2e--check "journal: run end recorded"
+                   (and (string-match-p "\"event\":\"run-end\"" journal) t) t))
 
 ;;; ------------------------------------------------------------------
 

@@ -131,3 +131,33 @@ that belongs to the operator, not a defect:
 
 Each is reported with a concrete recommendation and the exact command. ARE's job was to make
 them visible and keep them visible, which the audit now does on every run.
+
+## D-009 — `rata-claude-loop-on-task-failure` defaults to `halt`, not `skip`
+
+**2026-08-20.**
+
+`skip` is what makes an unattended overnight run useful: one impossible task in a list of
+twenty stops being a reason for the other nineteen not to run. It is still not the default,
+because the failure mode of each choice is asymmetric. A wrong `halt` costs waiting time and
+is obvious the moment you look. A wrong `skip` spends money and edits files across a whole
+list while the reason the first task failed — a bad root, a missing tool, an unusable verify
+command — applies to every one of them, and the run reports "3 done, 17 failed" only at the
+end.
+
+So: `halt` while you are watching, `skip` set deliberately for a run you will not watch.
+`.are/knowledge/CLAUDE_LOOP.md` §4 says this in the operating notes. A single-task run halts
+regardless — there is nothing to continue to.
+
+## D-010 — The run budget assumes `total_cost_usd` is per invocation, and this is untested
+
+**2026-08-20.**
+
+`rata-claude-loop--add-cost` sums the `total_cost_usd` of every `result` event to price a task
+and a run. That is right if the CLI reports the cost of the invocation and wrong if it reports
+a session total, in which case a `--resume` retry double-counts. Nothing in `tests/` can
+settle it: every test uses the stub CLI, which reports whatever the stub says.
+
+The error is in the safe direction — an over-count halts a run early rather than overspending
+— so the assumption ships, recorded here and in `.are/knowledge/CLAUDE_LOOP.md` §3, rather
+than being hidden in a comment. Settle it by reading one real journal file: if a task's
+`cost` is roughly the sum of its attempts' individual costs, the assumption holds.

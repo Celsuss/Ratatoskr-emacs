@@ -156,3 +156,34 @@ dead for `AGENTS.md` but very much alive for anything new with a matching name �
 
 **Apply:** always use `git check-ignore -v --no-index <path>` when asking "will this new file
 be committable?". `are-audit` does this for everything ARE creates.
+
+## L-012 — A per-unit cap does not bound a loop that runs the unit many times
+
+**From:** adding `rata-claude-loop-run-budget-usd`, 2026-08-20.
+
+`init-claude-loop.el` passed `--max-budget-usd` per `claude -p` invocation and called that
+the spend guard. With two attempts per task and a fifty-task runaway limit, an operator who
+set it to $2 had authorised $200. Every individual invocation obeyed the cap; the run had no
+cap at all. The same shape holds for a per-request timeout in a retry loop, a per-file size
+limit in a batch job, and a per-attempt turn limit.
+
+**Apply:** when a limit is expressed per unit of work and the code runs that unit in a loop,
+either add a limit at the loop's scale or write down why the product of the two is
+acceptable. Check the aggregate where the loop decides to continue — `rata-claude-loop--advance`
+checks the budget *between* tasks, never mid-task, because the work in flight is already paid
+for and abandoning it wastes the spend rather than saving it.
+
+## L-013 — A gate that was never green cannot report that something turned it red
+
+**From:** adding `rata-claude-loop-verify-baseline`, 2026-08-20.
+
+The loop ran its verify command after each task and treated a non-zero exit as that task's
+failure. Against a tree whose suite was already failing, every task would have failed, each
+would have burned its retries being told to fix a break it inherited, and the retry prompt
+would have handed it someone else's stack trace as evidence. The check was measuring a state,
+not a change, while being read as a change.
+
+**Apply:** before using a check as evidence *about an action*, establish its value before the
+action. If the baseline is red, say so and stop — do not attribute it. The same applies to
+any before/after comparison this repo grows: a diffstat against a dirty tree, a lint count
+against an unlinted file.
