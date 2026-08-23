@@ -55,6 +55,7 @@
 ** Linux                                                          :linux:foss:
 *** [[https://itsfoss.com/rss/][It's Foss]]
 *** [[https://archlinux.org/feeds/news/][Arch Linux]]                                                           :arch:
+*** [[https://archlinux.org/feeds/planet/][Arch Linux Planet]]                                              :arch:blog:
 *** [[https://lwn.net/headlines/newrss][LWN]]
 *** [[https://www.phoronix.com/rss.php][Phoronix]]
 *** [[https://9to5linux.com/feed/atom][9to5Linux]]

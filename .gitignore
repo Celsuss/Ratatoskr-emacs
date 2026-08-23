@@ -19,10 +19,6 @@ dist/
 # Env vars
 .envrc
 
-# LLMs
-AGENTS.md
-CONVENTIONS.md
-
 # Org
 org-roam.db
 
