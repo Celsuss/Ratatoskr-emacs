@@ -187,3 +187,24 @@ not a change, while being read as a change.
 action. If the baseline is red, say so and stop — do not attribute it. The same applies to
 any before/after comparison this repo grows: a diffstat against a dirty tree, a lint count
 against an unlinted file.
+
+## L-014 — A newly added `use-package :ensure` package is not installed when the next test runs
+
+**From:** adding `flycheck-posframe` to `init-dev.el`, 2026-08-24.
+
+Right after adding the package I ran `just are-verify relevant` and it FAILED two ERT tests
+(`rata-test-keybindings-all-commandp`, `rata-test-claude-loop-body-org`). The change touched
+neither. The real cause: elpaca had not built the new package yet, so loading `init-dev.el`
+during the test errored partway and every leader key defined *after* the new block went
+undefined — a downstream cascade that looks like unrelated breakage. `git stash` of the one
+file made the suite pass again, which wrongly implicated the change itself rather than the
+install state. elpaca's clone is async and `just batch` exits before it finishes; a bare
+`just batch` did not complete the clone either, and left a half-cloned `elpaca/sources/<pkg>`
+(a `.git` with no checked-out files) that then blocked retries.
+
+**Apply:** after adding any `use-package` with `:ensure` (implicit here via
+`use-package-always-ensure t`), install it *before* verifying:
+`emacs --init-directory <dir> --batch -l early-init.el -l init.el --eval "(progn (elpaca-wait) (elpaca-process-queues) (elpaca-wait))"`,
+then confirm `elpaca/builds/<pkg>` exists. If an earlier interrupted run left a source dir
+with only `.git`, `rm -rf elpaca/{sources,builds}/<pkg>` and re-run — this is targeted, not
+`just clean`. Only then does a FAIL in the suite mean anything about the change.

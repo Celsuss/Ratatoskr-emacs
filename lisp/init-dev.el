@@ -86,6 +86,25 @@
                                     "no")
                          :face (if (fboundp 'org-lint) 'success 'warning))))))))
 
+;; --- Flycheck posframe (show diagnostic message at point, GUI popup) ---
+(use-package flycheck-posframe
+  :after flycheck
+  :hook (flycheck-mode . flycheck-posframe-mode)
+  :config
+  ;; Only child frames make sense in a GUI; disable in the terminal so it
+  ;; degrades to the echo area rather than erroring.
+  (unless (display-graphic-p)
+    (remove-hook 'flycheck-mode-hook #'flycheck-posframe-mode))
+  ;; Distinguish severities and add breathing room.
+  (flycheck-posframe-configure-pretty-defaults)
+  (setq flycheck-posframe-border-width 1)
+  ;; Don't fight the corfu completion child-frame: suppress the diagnostic
+  ;; popup while a completion popup is open.
+  (with-eval-after-load 'corfu
+    (add-to-list 'flycheck-posframe-inhibit-functions
+                 (lambda (&rest _) (and (frame-live-p (bound-and-true-p corfu--frame))
+                                        (frame-visible-p corfu--frame))))))
+
 ;; --- Apheleia (format on save) ---
 (use-package apheleia
   :config
