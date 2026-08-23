@@ -51,9 +51,10 @@
 ;; --- agent-shell (Claude Code via web login) ---
 (use-package agent-shell
   :after general
+  :commands (agent-shell agent-shell-anthropic-start-claude-code)
   :custom
   (agent-shell-anthropic-claude-acp-command '("claude-code-acp"))
-  :config
+  :init
   (rata-leader
     :states '(normal visual)
     "aic"   '(:ignore t :which-key "agent shell")
