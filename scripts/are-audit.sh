@@ -161,7 +161,14 @@ done
 echo "=== Check: hooks-installed ==="
 hooks_path="$(git config --get core.hooksPath || true)"
 if [ "$hooks_path" != ".githooks" ]; then
-    warn "core.hooksPath is '${hooks_path:-unset}', so .githooks/pre-commit does not run. There is no CI either. Fix: just install-hooks (FAIL-0005)"
+    # Whether CI exists decides how bad this is, so read it rather than assert it --
+    # the message hardcoded "there is no CI" and went on saying so after CI landed.
+    if compgen -G ".github/workflows/*.y*ml" >/dev/null 2>&1; then
+        backstop="CI gates PRs, so this only costs you pre-commit feedback"
+    else
+        backstop="and there is no CI either, so nothing gates a commit"
+    fi
+    warn "core.hooksPath is '${hooks_path:-unset}', so .githooks/pre-commit does not run; $backstop. Fix: just install-hooks (FAIL-0005)"
 fi
 
 # --- Check: stray-files ----------------------------------------------------------

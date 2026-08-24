@@ -5,30 +5,19 @@ This is a pointer document: open only the knowledge and records it names.
 
 | | |
 |---|---|
-| Generated | 2026-08-24 13:33 UTC |
+| Generated | 2026-08-24 13:45 UTC |
 | Checkout | `/home/jens/.config/emacs` |
-| Branch | `dev` @ `08a557c` |
-| Task | review and commit pending claude-loop unverified-verdict changes |
-| Changed paths | 13 |
-| **Risk tier** | **CRITICAL** |
+| Branch | `dev` @ `1a4ca41` |
+| Task | commit pending changes and refresh ARE docs after rebase |
+| Changed paths | 2 |
+| **Risk tier** | **HIGH** |
 | **Required verification** | **`just are-verify full`** |
 
 ## Changed paths
 
 | Path | Area | Risk | Verify |
 |---|---|---|---|
-| `AGENTS.md` | docs,conventions | MEDIUM | fast |
-| `.are/generated/CURRENT_CONTEXT.md` | are | MEDIUM | fast |
-| `.are/knowledge/CLAUDE_LOOP.md` | are | MEDIUM | fast |
-| `.are/memory/FAILURE_INDEX.md` | are | MEDIUM | fast |
-| `.are/memory/failures/FAIL-0010.md` | are | MEDIUM | fast |
-| `.are/memory/LESSONS.md` | are | MEDIUM | fast |
-| `.claude/settings.json` | verification,tooling | MEDIUM | fast |
-| `justfile` | verification,tooling | HIGH | full |
-| `lisp/init-claude-loop.el` | autonomous-agent | CRITICAL | full |
-| `scripts/are-fix-line-refs.sh` | verification,are | HIGH | fast |
-| `tests/claude-loop-e2e.el` | verification | HIGH | fast |
-| `tests/run-tests.el` | verification | HIGH | relevant |
+| `scripts/are-audit.sh` | verification,are | HIGH | fast |
 
 ### Unmapped — add rows to `.are/knowledge/MODULES.md`
 
@@ -38,12 +27,10 @@ context is incomplete. Adding them is part of finishing the task
 
 - `"\311\242"`
 
-**Affected areas:** are, autonomous-agent, conventions, docs, tooling, verification
+**Affected areas:** are, verification
 
 ## Knowledge to read
 
-- `.are/knowledge/CLAUDE_LOOP.md`
-- `.are/knowledge/TESTING_STRATEGY.md`
 - `.are/SYSTEM.md`
 
 Do not read the whole knowledge base. Conventions and per-module reference live in
@@ -52,23 +39,16 @@ Do not read the whole knowledge base. Conventions and per-module reference live 
 ## Relevant failure history
 
 - [`FAIL-0001`](../memory/failures/FAIL-0001.md)
-- [`FAIL-0002`](../memory/failures/FAIL-0002.md)
-- [`FAIL-0003`](../memory/failures/FAIL-0003.md)
 - [`FAIL-0004`](../memory/failures/FAIL-0004.md)
 - [`FAIL-0005`](../memory/failures/FAIL-0005.md)
-- [`FAIL-0006`](../memory/failures/FAIL-0006.md)
 - [`FAIL-0007`](../memory/failures/FAIL-0007.md)
 - [`FAIL-0008`](../memory/failures/FAIL-0008.md)
-- [`FAIL-0009`](../memory/failures/FAIL-0009.md)
-- [`FAIL-0010`](../memory/failures/FAIL-0010.md)
 
 ## Rules that apply
 
 - Risk classification: `.are/rules/RISK_RULES.md`
 - Required depth and reporting format: `.are/rules/VERIFICATION_RULES.md`
-- **CRITICAL risk — read `.are/rules/SAFETY_RULES.md` before running anything.**
-- **CRITICAL — operator approval required, plus a new case in
-  `tests/claude-loop-e2e.el` covering the changed behaviour.**
+- **HIGH risk — read `.are/rules/SAFETY_RULES.md` before running anything.**
 
 ## Verification for this change
 
