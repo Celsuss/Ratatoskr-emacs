@@ -36,6 +36,14 @@
     "Ls"  '(lsp-workspace-restart :which-key "restart LSP")
     "LL"  '(lsp :which-key "start LSP")))
 
+;; --- Consult + LSP (project-wide symbol search) ---
+;; Declared here, after lsp-mode's explicit recipe, so elpaca does not pull
+;; lsp-mode into an earlier queue with a default recipe as a transitive dep
+;; (which conflicts with the :files recipe above).
+(use-package consult-lsp
+  :after (consult lsp-mode)
+  :commands (consult-lsp-symbols consult-lsp-file-symbols consult-lsp-diagnostics))
+
 ;; --- LSP UI ---
 (use-package lsp-ui
   :after lsp-mode

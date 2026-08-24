@@ -185,7 +185,8 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC p t" . projectile-run-project-tests)
     ("SPC p k" . projectile-kill-buffers)
     ("SPC b b" . consult-buffer)
-    ("SPC f f" . find-file))
+    ("SPC f f" . find-file)
+    ("SPC j d" . xref-find-definitions))
   "Leader keys that must resolve immediately after init, with their commands.
 Not exhaustive — a contract for the keys most likely to be broken by the
 failure mode in .are/memory/failures/FAIL-0009.md.  Extend it when a
@@ -225,7 +226,12 @@ running editor for exactly this reason."
                 failures))))
     (when failures
       (ert-fail (concat "Leader keys not live after init:\n"
-                        (mapconcat #'identity (nreverse failures) "\n"))))))
+                        (mapconcat #'identity (nreverse failures) "\n")))))
+  ;; Vim-idiomatic goto keys are plain normal-state bindings (general-define-key
+  ;; without :keymaps), so they live in `evil-normal-state-map', not the leader
+  ;; override map the curated contract above checks.
+  (should (eq (lookup-key evil-normal-state-map (kbd "gd")) 'xref-find-definitions))
+  (should (eq (lookup-key evil-normal-state-map (kbd "gr")) 'xref-find-references)))
 
 ;;; ============================================================
 ;;; Test 1d — EVERY global leader key is live after init (exhaustive)

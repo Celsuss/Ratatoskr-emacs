@@ -232,3 +232,29 @@ synchronisation a batch run has. Before deleting one, ask what drains the queue 
 (nothing does on its own). Gate on `noninteractive` rather than removing. A green
 `are-verify` *before* such a change and a red one *after*, on files the change never touched,
 is the signature of a lost batch barrier — not a real regression in those files.
+
+## L-016 — Declare a package *after* any dependency that carries a custom elpaca recipe
+
+**From:** the jump-keybindings session, 2026-08-24, adding `consult-lsp` (which depends on
+`lsp-mode`) to `init-completion.el`. `init-completion` loads *before* `init-dev.el`, where
+`lsp-mode` is declared with an explicit recipe (`:files (:defaults "clients/*.*")`). The
+`are-verify relevant` ERT step died with an elpaca *build* error — not a test failure —
+`Elpaca build error: (elpaca lsp-mode ...) "dependent consult-lsp in past queue"`.
+
+Cause: elpaca resolves a package's dependencies when it first *sees* the package. Declaring
+`consult-lsp` first pulled `lsp-mode` into an earlier queue with elpaca's *default* recipe;
+the later explicit recipe in `init-dev.el` then conflicted with the already-queued default.
+The fix was purely ordering: declare `consult-lsp` in `init-dev.el` immediately after the
+`lsp-mode` `use-package`, so the explicit recipe is registered before anything depends on it.
+`:after (consult lsp-mode)` controls *load* order, not *queue/recipe* order — it does not help.
+
+A second, separate symptom on the same run: the very first gate run after adding the package
+failed `rata-test-keybindings-all-commandp` on `consult-lsp-symbols`, because elpaca was
+still fetching/activating the freshly-added package when ERT loaded (cf. L-014). Re-running
+after the build completed passed. Distinguish "not yet installed" (transient, one clean
+re-run fixes it) from "recipe conflict" (deterministic, needs the reorder above).
+
+**Apply:** when a new `:ensure` package depends on another package that has a non-default
+recipe elsewhere in the config, place the new declaration *after* that dependency's
+`use-package`, in load order — not in whichever module feels topical. An elpaca *build*
+error naming a "dependent … in past queue" is this, not a code bug.
