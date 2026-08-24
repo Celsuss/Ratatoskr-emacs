@@ -3,8 +3,10 @@
 
 (use-package ein
   :after general
-  :commands (ein:run ein:login ein:notebooklist-open)
-  :config
+  :commands (ein:run ein:login ein:notebooklist-open))
+
+;; Global leader keys at top level so they are live from startup (FAIL-0009).
+(with-eval-after-load 'general
   (rata-leader
     :states '(normal visual)
     "aj"  '(:ignore t :which-key "jupyter")

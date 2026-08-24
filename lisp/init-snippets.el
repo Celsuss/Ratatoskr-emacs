@@ -21,7 +21,10 @@
   ;; itself to `yas-snippet-dirs'.  See .are/memory/failures/FAIL-0002.md.
   (setq yas-snippet-dirs
         (list (expand-file-name "snippets" user-emacs-directory)))
-  (yas-global-mode 1)
+  (yas-global-mode 1))
+
+;; Global leader keys at top level so they are live from startup (FAIL-0009).
+(with-eval-after-load 'general
   (rata-leader
     :states '(normal visual)
     "i"   '(:ignore t :which-key "insert")

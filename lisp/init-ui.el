@@ -5,11 +5,11 @@
 (setq display-line-numbers-type t)
 (global-display-line-numbers-mode t)
 
-;; Disable UI chrome (belt + suspenders with early-init.el)
-(setq tool-bar-mode     0
-      scroll-bar-mode   0
-      menu-bar-mode     0
-      blink-cursor-mode 0)
+;; Disable UI chrome (belt + suspenders with early-init.el). These are minor
+;; modes, so they must be called as functions -- `setq'ing the mode variable
+;; does not toggle the mode (the cursor kept blinking under the old code).
+;; The bar modes are already off via early-init.el frame params.
+(blink-cursor-mode -1)
 
 ;; --- Theme ---
 (use-package gruvbox-theme
@@ -21,7 +21,10 @@
                       :background (face-attribute 'default :background)))
 
 ;; --- Which-key ---
+;; Built into Emacs 30; :ensure nil uses the bundled copy instead of pulling
+;; the external ELPA package under `use-package-always-ensure'.
 (use-package which-key
+  :ensure nil
   :init
   (setq which-key-idle-delay 0.1
         which-key-idle-secondary-delay 0.05

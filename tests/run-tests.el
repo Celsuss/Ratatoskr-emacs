@@ -228,6 +228,94 @@ running editor for exactly this reason."
                         (mapconcat #'identity (nreverse failures) "\n"))))))
 
 ;;; ============================================================
+;;; Test 1d — EVERY global leader key is live after init (exhaustive)
+;;; ============================================================
+;;
+;; The curated `rata-test--must-be-live-keys' above is a hand-picked contract.
+;; This test is the exhaustive version: it parses every `rata-leader' form in
+;; every active module, drops the `:keymaps'-scoped (mode-local) forms and the
+;; `:ignore' group labels, and asserts that each remaining *global* key resolves
+;; in the running editor.  It absorbs the standalone FAIL-0009 probe
+;; (.are/memory/failures/FAIL-0009-probe.el) into the gate, so the 113 dead keys
+;; that sweep fixed cannot silently come back the next time a binding is written
+;; in a deferred `:config' instead of a top-level `with-eval-after-load'.
+
+(defun rata-test--leader-bodies-in-file (file)
+  "Return the body (cdr) of every `rata-leader' form found in FILE."
+  (let (forms found)
+    (with-temp-buffer
+      (insert-file-contents file)
+      (goto-char (point-min))
+      (condition-case nil
+          (while t (push (read (current-buffer)) forms))
+        (error nil)))
+    (cl-labels ((walk (f)
+                  (when (consp f)
+                    (if (eq (car f) 'rata-leader)
+                        (push (cdr f) found)
+                      (let ((s f))
+                        (while (consp s)
+                          (when (consp (car s)) (walk (car s)))
+                          (setq s (cdr s))))))))
+      (mapc #'walk forms))
+    found))
+
+(defun rata-test--global-leader-keys-in-body (body)
+  "Return the global string keys in a `rata-leader' BODY.
+Returns nil for a `:keymaps'-scoped form (those are mode-local and are
+legitimately dead until the mode loads).  `:ignore' group labels are skipped."
+  (unless (memq :keymaps body)
+    (let (keys (items body) skip)
+      (while items
+        (let ((it (car items)))
+          (cond (skip (setq skip nil))
+                ((keywordp it) (setq skip t))
+                ((stringp it)
+                 (let ((v (cadr items)))
+                   (unless (and (consp v) (eq (car v) 'quote)
+                                (eq (car-safe (cadr v)) :ignore))
+                     (push it keys))
+                   (setq items (cdr items))))))
+        (setq items (cdr items)))
+      keys)))
+
+(defun rata-test--space-leader-key (keys)
+  "Space out KEYS for `kbd', keeping SPC/TAB/RET/ESC/DEL tokens intact."
+  (let (out (i 0) (n (length keys)))
+    (while (< i n)
+      (let ((rest (substring keys i)))
+        (if (eq 0 (string-match "\\`\\(SPC\\|TAB\\|RET\\|ESC\\|DEL\\)" rest))
+            (let ((tok (match-string 1 rest)))
+              (push tok out)
+              (setq i (+ i (length tok))))
+          (push (string (aref keys i)) out)
+          (setq i (1+ i)))))
+    (mapconcat #'identity (nreverse out) " ")))
+
+(ert-deftest rata-test-all-global-leader-keys-live-after-init ()
+  "Every global (non-`:keymaps') leader key must resolve after full init.
+Exhaustive regression for .are/memory/failures/FAIL-0009.md.  A global
+`rata-leader' form written in a deferred `use-package' :config/:init is not
+evaluated until that package loads, leaving the key dead at startup; it must be
+hoisted to a top-level `(with-eval-after-load 'general ...)'."
+  (should (boundp 'general-override-mode-map))
+  (let ((aux (evil-get-auxiliary-keymap general-override-mode-map 'normal))
+        dead)
+    (dolist (file (rata-test--all-init-files))
+      (dolist (body (rata-test--leader-bodies-in-file file))
+        (dolist (k (rata-test--global-leader-keys-in-body body))
+          (let ((res (lookup-key
+                      aux (kbd (concat "SPC " (rata-test--space-leader-key k))))))
+            (unless (and res (not (numberp res)))
+              (push (format "  %-22s SPC %s"
+                            (file-name-nondirectory file) k)
+                    dead))))))
+    (when dead
+      (ert-fail (concat "Dead global leader keys after init "
+                        "(hoist to top-level with-eval-after-load):\n"
+                        (mapconcat #'identity (sort dead #'string<) "\n"))))))
+
+;;; ============================================================
 ;;; Test 2 — Module load health
 ;;; ============================================================
 

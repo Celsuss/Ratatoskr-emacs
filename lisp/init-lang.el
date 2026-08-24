@@ -33,7 +33,11 @@
 (use-package dap-mode
   :after lsp-mode
   :config
-  (dap-auto-configure-mode t)
+  (dap-auto-configure-mode t))
+
+;; Debug leader keys at top level so they are live from startup (FAIL-0009);
+;; commands autoload from dap-mode via the dolist above.
+(with-eval-after-load 'general
   (rata-leader
     :states '(normal visual)
     "d"   '(:ignore t :which-key "debug")

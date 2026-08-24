@@ -2,10 +2,8 @@
 ;;; init-org.el --- Org mode configuration
 
 ;; --- Path customizations (override before use-package org loads) ---
-
-(defgroup rata nil
-  "Ratatoskr Emacs customizations."
-  :group 'convenience)
+;; The `rata' customization group is defined in init-system.el (a core module
+;; loaded well before this one).
 
 (defcustom rata-org-roam-dir (expand-file-name "~/workspace/second-brain/org-roam/")
   "Base directory for org-roam files."
@@ -29,15 +27,6 @@
   :hook (org-mode . auto-fill-mode)
   :config
   (setq-default fill-column 80)
-  (rata-leader
-    :states '(normal visual motion)
-    "o"  '(:ignore t :which-key "org")
-    "oc" '(org-capture :which-key "org capture")
-    "oa" '(org-agenda :which-key "org agenda")
-    "ot" '(org-todo-list :which-key "list all TODOs")
-    "od" '(org-deadline :which-key "deadline")
-    "om" '(org-latex-preview :which-key "toggle math preview")
-    "of" '(rata-org-capture-fleeting :which-key "fleeting note"))
 
   ;;;; Org Agenda
   (setq org-agenda-inhibit-startup t)
@@ -343,21 +332,6 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
                                  :unnarrowed t)))
 
   :config
-  (rata-leader
-    :states '(normal visual)
-    "or"  '(:ignore t :which-key "Org roam")
-    "orl" '(org-roam-buffer-toggle :which-key "toggle buffer")
-    "orf" '(org-roam-node-find :which-key "find node")
-    "org" '(org-roam-graph :which-key "show graph")
-    "ori" '(org-roam-node-insert :which-key "insert node")
-    "orc" '(org-roam-capture :which-key "capture node")
-    "ord"  '(:ignore t :which-key "Org roam dailies")
-    "ordc" '(org-roam-dailies-capture-today :which-key "capture today")
-    "ordt" '(org-roam-dailies-goto-today :which-key "goto today")
-    "ordy" '(org-roam-dailies-goto-yesterday :which-key "goto yesterday")
-    "ordm" '(org-roam-dailies-goto-tomorrow :which-key "goto tomorrow")
-    "ordd" '(org-roam-dailies-goto-date :which-key "goto date"))
-
   ;; Dailies
   (setq org-roam-dailies-directory (expand-file-name "daily" rata-org-roam-dir))
   (setq org-roam-dailies-capture-templates
@@ -410,10 +384,6 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
            :empty-lines-before 1
            :empty-lines-after 1)))
 
-  (rata-leader
-    :states '(normal visual)
-    "oh" '(rata-toggle-hastodo-filetag :which-key "toggle agenda inclusion"))
-
   (org-roam-db-autosync-mode))
 
 ;; --- Org Roam QL ---
@@ -448,15 +418,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 
 (use-package org-roam-ql
   :after (org-roam general)
-  :commands (org-roam-ql-search)
-  :config
-  (rata-leader
-    :states '(normal visual)
-    "orq"  '(:ignore t :which-key "roam queries")
-    "orqo" '(rata-roam-orphan-notes  :which-key "orphan notes")
-    "orqr" '(rata-roam-recent-notes  :which-key "recent notes")
-    "orqw" '(rata-roam-work-notes    :which-key "work notes")
-    "orqt" '(rata-roam-stale-todos   :which-key "stale TODOs")))
+  :commands (org-roam-ql-search))
 
 ;; --- Org Super Agenda ---
 (use-package org-super-agenda
@@ -613,14 +575,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
   :commands (consult-org-roam-search consult-org-roam-backlinks
 				     consult-org-roam-file-find)
   :config
-  (consult-org-roam-mode 1)
-  (rata-leader
-    :states '(normal visual)
-    "ors" '(consult-org-roam-search      :which-key "search roam")
-    "orb" '(consult-org-roam-backlinks   :which-key "backlinks consult")
-    "orF" '(consult-org-roam-file-find   :which-key "find file consult")
-    "orw" '(rata-roam-search-work        :which-key "search work notes")
-    "orP" '(rata-roam-search-personal    :which-key "search personal notes")))
+  (consult-org-roam-mode 1))
 
 ;; --- simple-httpd (explicit recipe to disambiguate from eschulte/emacs-web-server) ---
 (use-package simple-httpd
@@ -637,10 +592,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 ;; --- Org Roam UI (graph visualization) ---
 (use-package org-roam-ui
   :after (org-roam general)
-  :config
-  (rata-leader
-    :states '(normal visual)
-    "oru" '(org-roam-ui-mode :which-key "roam graph UI")))
+  :commands (org-roam-ui-mode))
 
 ;; --- Org Download (paste/drag images) ---
 (use-package org-download
@@ -658,17 +610,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
   (autoload cmd "org-transclusion" nil t))
 
 (use-package org-transclusion
-  :after (org general)
-  :config
-  (rata-leader
-    :states '(normal visual)
-    "ort"  '(:ignore t :which-key "transclusion")
-    "orta" '(org-transclusion-add            :which-key "add transclusion")
-    "ortA" '(org-transclusion-add-all        :which-key "add all transclusions")
-    "ortr" '(org-transclusion-remove         :which-key "remove transclusion")
-    "ortR" '(org-transclusion-remove-all     :which-key "remove all")
-    "orte" '(org-transclusion-live-sync-start :which-key "edit source")
-    "ortm" '(org-transclusion-mode           :which-key "toggle mode")))
+  :after (org general))
 
 ;; --- ox-hugo (org to Hugo markdown export) ---
 
@@ -683,21 +625,63 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 
 (use-package ox-hugo
   :after (ox general)
-  :commands (org-hugo-export-wim-to-md)
-  :config
-  (rata-leader
-    :states '(normal visual)
-    "ob"  '(:ignore t :which-key "blog/hugo")
-    "obe" '(org-hugo-export-wim-to-md :which-key "export to hugo")
-    "obp" '(rata-hugo-preview         :which-key "preview post")))
+  :commands (org-hugo-export-wim-to-md))
 
 ;; --- Writegood Mode ---
 (use-package writegood-mode
   :hook ((org-mode      . writegood-mode)
          (markdown-mode . writegood-mode))
-  :config
+  :commands (writegood-mode))
+
+;; --- All org/roam/hugo leader keys, hoisted to top level so they are live
+;; from startup rather than only after each package's :config runs (FAIL-0009 /
+;; L-011). Every command autoloads from its package via :commands / autoload. ---
+(with-eval-after-load 'general
+  (rata-leader
+    :states '(normal visual motion)
+    "o"  '(:ignore t :which-key "org")
+    "oc" '(org-capture :which-key "org capture")
+    "oa" '(org-agenda :which-key "org agenda")
+    "ot" '(org-todo-list :which-key "list all TODOs")
+    "od" '(org-deadline :which-key "deadline")
+    "om" '(org-latex-preview :which-key "toggle math preview")
+    "of" '(rata-org-capture-fleeting :which-key "fleeting note")
+    "oh" '(rata-toggle-hastodo-filetag :which-key "toggle agenda inclusion"))
   (rata-leader
     :states '(normal visual)
+    "or"  '(:ignore t :which-key "Org roam")
+    "orl" '(org-roam-buffer-toggle :which-key "toggle buffer")
+    "orf" '(org-roam-node-find :which-key "find node")
+    "org" '(org-roam-graph :which-key "show graph")
+    "ori" '(org-roam-node-insert :which-key "insert node")
+    "orc" '(org-roam-capture :which-key "capture node")
+    "oru" '(org-roam-ui-mode :which-key "roam graph UI")
+    "ors" '(consult-org-roam-search      :which-key "search roam")
+    "orb" '(consult-org-roam-backlinks   :which-key "backlinks consult")
+    "orF" '(consult-org-roam-file-find   :which-key "find file consult")
+    "orw" '(rata-roam-search-work        :which-key "search work notes")
+    "orP" '(rata-roam-search-personal    :which-key "search personal notes")
+    "ord"  '(:ignore t :which-key "Org roam dailies")
+    "ordc" '(org-roam-dailies-capture-today :which-key "capture today")
+    "ordt" '(org-roam-dailies-goto-today :which-key "goto today")
+    "ordy" '(org-roam-dailies-goto-yesterday :which-key "goto yesterday")
+    "ordm" '(org-roam-dailies-goto-tomorrow :which-key "goto tomorrow")
+    "ordd" '(org-roam-dailies-goto-date :which-key "goto date")
+    "orq"  '(:ignore t :which-key "roam queries")
+    "orqo" '(rata-roam-orphan-notes  :which-key "orphan notes")
+    "orqr" '(rata-roam-recent-notes  :which-key "recent notes")
+    "orqw" '(rata-roam-work-notes    :which-key "work notes")
+    "orqt" '(rata-roam-stale-todos   :which-key "stale TODOs")
+    "ort"  '(:ignore t :which-key "transclusion")
+    "orta" '(org-transclusion-add            :which-key "add transclusion")
+    "ortA" '(org-transclusion-add-all        :which-key "add all transclusions")
+    "ortr" '(org-transclusion-remove         :which-key "remove transclusion")
+    "ortR" '(org-transclusion-remove-all     :which-key "remove all")
+    "orte" '(org-transclusion-live-sync-start :which-key "edit source")
+    "ortm" '(org-transclusion-mode           :which-key "toggle mode")
+    "ob"  '(:ignore t :which-key "blog/hugo")
+    "obe" '(org-hugo-export-wim-to-md :which-key "export to hugo")
+    "obp" '(rata-hugo-preview         :which-key "preview post")
     "tw"  '(writegood-mode :which-key "writegood")))
 
 (provide 'init-org)

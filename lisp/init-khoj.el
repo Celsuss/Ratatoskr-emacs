@@ -10,8 +10,10 @@
   (khoj-server-url "http://khoj.homelab.local")
   (khoj-server-is-local t)
   (khoj-results-count 8)
-  (khoj-index-directories (list (expand-file-name "~/workspace/second-brain/org-roam/")))
-  :config
+  (khoj-index-directories (list (expand-file-name "~/workspace/second-brain/org-roam/"))))
+
+;; Global leader keys at top level so they are live from startup (FAIL-0009).
+(with-eval-after-load 'general
   (rata-leader
     :states '(normal visual)
     "aik"   '(:ignore t :which-key "khoj")

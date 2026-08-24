@@ -84,8 +84,11 @@ Active layout is shown as [Name]; others as Name; empty slots as -."
      :class transient-row
      ("s" "save"    persp-save-state-to-file)
      ("R" "restore" persp-load-state-from-file)]
-    [("q" "quit" transient-quit-one :transient nil)])
+    [("q" "quit" transient-quit-one :transient nil)]))
 
+;; Global leader keys at top level so they are live from startup (FAIL-0009),
+;; not only once persp-mode's :config runs. Command symbols autoload from persp.
+(with-eval-after-load 'general
   (rata-leader
     :states '(normal visual)
     "l"   '(:ignore t :which-key "layouts")
