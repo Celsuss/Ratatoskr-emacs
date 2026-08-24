@@ -311,15 +311,16 @@ Result is cached per session; reset by `dashboard-after-initialize-hook'."
   ;; Evil navigation
   (evil-set-initial-state 'dashboard-mode 'normal)
 
-  ;; Keybinding to open dashboard
-  (rata-leader
-    :states '(normal visual)
-    "bh" '(dashboard-open :which-key "home (dashboard)"))
-
   ;; Make dashboard the initial buffer (works for both regular and daemon mode)
   (setq initial-buffer-choice (lambda () (get-buffer-create dashboard-buffer-name)))
   (add-hook 'server-after-make-frame-hook #'dashboard-open)
 
   (dashboard-setup-startup-hook))
+
+;; Global leader key at top level so it is live from startup (FAIL-0009).
+(with-eval-after-load 'general
+  (rata-leader
+    :states '(normal visual)
+    "bh" '(dashboard-open :which-key "home (dashboard)")))
 
 (provide 'init-dashboard)

@@ -31,7 +31,10 @@
   (evil-define-key 'normal reb-mode-map (kbd "C-o") #'casual-re-builder-tmenu)
 
   ;; --- Bookmarks ---
-  (evil-define-key 'normal bookmark-bmenu-mode-map (kbd "C-o") #'casual-bookmarks-tmenu)
+  (evil-define-key 'normal bookmark-bmenu-mode-map (kbd "C-o") #'casual-bookmarks-tmenu))
+
+;; Global leader key at top level so it is live from startup (FAIL-0009).
+(with-eval-after-load 'general
   (rata-leader
     :states '(normal visual)
     "ab" '(bookmark-bmenu-list :which-key "bookmarks")))
