@@ -60,9 +60,10 @@ headless agent with `--permission-mode acceptEdits` and an operator-supplied she
 
 ### Known open items (do not rediscover these)
 
-`.are/memory/FAILURE_INDEX.md` has the full list. The live ones:
-two checkouts of this repo exist and the docs below point at the stale one (FAIL-0001);
-`core.hooksPath` is unset so the pre-commit gate is off and there is no CI (FAIL-0005).
+`.are/memory/FAILURE_INDEX.md` has the full list. The live one:
+two checkouts of this repo exist and the docs below point at the stale one (FAIL-0001).
+(FAIL-0005 is resolved: `core.hooksPath` is now installable via `just install-hooks` and
+GitHub Actions CI runs on PRs and pushes to `master` — `.github/workflows/ci.yml`.)
 
 ## Commands
 
@@ -266,7 +267,6 @@ init-present → init-dashboard
 ### Documentation
 - Use `:which-key` descriptions for all keybindings
 - Comment complex logic or non-obvious configurations
-- Maintain `CONVENTIONS.md` for architectural decisions
 
 ## Adding New Modules
 1. Create `lisp/init-{category}.el` with lexical-binding header

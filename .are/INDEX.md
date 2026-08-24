@@ -18,11 +18,11 @@ A personal GNU Emacs configuration, written entirely in Emacs Lisp, loaded from
 | Question | Answer | Source |
 |---|---|---|
 | Language | Emacs Lisp (+ bash for tooling) | repo contents |
-| Size | 36 modules under `lisp/`, ~5.2k lines of Elisp | `wc -l lisp/*.el init.el early-init.el` |
+| Size | 36 modules under `lisp/`, ~5.8k lines of Elisp | `wc -l lisp/*.el init.el early-init.el` |
 | Package manager | `elpaca`, bootstrapped in `init.el`; `package.el` disabled in `early-init.el` | `init.el`, `early-init.el` |
 | Task runner | `just` (`justfile`) | `justfile` |
 | Tests | ERT (`tests/run-tests.el`), bespoke e2e harness (`tests/claude-loop-e2e.el`) | `tests/` |
-| CI/CD | **none** — no `.github/`, no `.gitlab-ci.yml` | verified absent |
+| CI/CD | GitHub Actions on PR + push to `master` (fast-gate + full-load jobs) | `.github/workflows/ci.yml` |
 | Deployment | **none** — it *is* the deployed artifact; `git pull` is the deploy | repo structure |
 | Server / backend / HTTP API | **none** | verified absent |
 | Database | **none owned.** A SQL *client* (ejc-sql → Snowflake) is configured | `lisp/init-sql.el` |
@@ -98,8 +98,9 @@ Ranked. Full detail in the linked records.
 3. **The `claude-loop` e2e suite is excluded from `just test`,** so the largest and only
    stateful module (1573 lines) is outside the pre-commit gate.
    → [FAIL-0004](memory/failures/FAIL-0004.md)
-4. **`.githooks/pre-commit` is not installed** (`core.hooksPath` unset), so nothing gates
-   commits today. Fix is one command: `just install-hooks`. → [FAIL-0005](memory/failures/FAIL-0005.md)
+4. ~~**`.githooks/pre-commit` is not installed**~~ RESOLVED — `core.hooksPath` is set to
+   `.githooks` and the pre-commit gate is active; CI (`.github/workflows/ci.yml`) also runs.
+   → [FAIL-0005](memory/failures/FAIL-0005.md)
 5. **Corporate identifiers are committed** in `lisp/init-sql.el` (work email, Snowflake
    account/role/warehouse/database/schema) in a repo with a public GitHub remote. No
    secret is exposed; SSO is used. → [knowledge/SECRETS_AND_SENSITIVE_DATA.md](knowledge/SECRETS_AND_SENSITIVE_DATA.md)

@@ -25,7 +25,7 @@ project:
   test_framework: ert              # plus a bespoke harness for the claude-loop state machine
   remote: git@github.com:Celsuss/Ratatoskr-emacs.git   # public
   live_checkout: /home/jens/.config/emacs
-  ci: none                         # verified absent
+  ci: github-actions               # .github/workflows/ci.yml — PRs + pushes to master (fast-gate + full-load jobs)
   deployment: none                 # git pull is the deploy
 
 # Categories from the generic ARE template that do not exist in this project. Listed so
