@@ -28,9 +28,10 @@ installed. First-ever run is minutes longer because elpaca builds everything.
 `.githooks/pre-commit` runs `just test` before every commit. It is opt-in via
 `just install-hooks`, which sets `core.hooksPath`.
 
-**At ARE bootstrap `core.hooksPath` was unset — the gate was not active.** See
-[FAIL-0005](../memory/failures/FAIL-0005.md). There is no CI, so the hook is the only
-automated gate that exists.
+At ARE bootstrap `core.hooksPath` was unset — the gate was not active. It is **now
+installed** (`core.hooksPath` = `.githooks`) and, since 2026-08-24, GitHub Actions
+(`.github/workflows/ci.yml`) runs the same checks on PR + push to `master`. See
+[FAIL-0005](../memory/failures/FAIL-0005.md).
 
 ## 3. ARE's risk-based levels
 

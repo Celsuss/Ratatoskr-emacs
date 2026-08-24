@@ -208,3 +208,27 @@ install state. elpaca's clone is async and `just batch` exits before it finishes
 then confirm `elpaca/builds/<pkg>` exists. If an earlier interrupted run left a source dir
 with only `.git`, `rm -rf elpaca/{sources,builds}/<pkg>` and re-run — this is targeted, not
 `just clean`. Only then does a FAIL in the suite mean anything about the change.
+
+## L-015 — The trailing `elpaca-wait` in init.el is load-bearing for batch/headless runs
+
+**From:** the config-audit session, 2026-08-24, removing the final `(elpaca-wait)` at the
+end of `init.el` as a startup-perf win (it forced every package to finish loading before
+`emacs-startup-hook`, negating the module `:defer`/`:after` deferral).
+
+Removing it outright made `just test-ert` fail `rata-test-keybindings-all-commandp` with a
+huge list of "not a command" symbols spanning modules the change never touched
+(`init-python`, `init-rust`, `init-sql`, ...). The cause was not the keybinding sweep also
+in flight: interactively, elpaca's queue drains on the idle loop via `after-init-hook`, but
+in `emacs --batch` there is no idle loop, so nothing gets installed or autoloaded before the
+process inspects the environment and exits. The trailing `elpaca-wait` was the only thing
+draining the queue in headless mode; without it, every deferred-package command symbol is
+unbound at test time.
+
+The fix keeps both properties: `(when noninteractive (elpaca-wait))` — interactive startup
+stays deferred (fast), batch/CI still gets a fully-drained queue.
+
+**Apply:** an `elpaca-wait` that looks like pure interactive-startup cost may be the only
+synchronisation a batch run has. Before deleting one, ask what drains the queue in `--batch`
+(nothing does on its own). Gate on `noninteractive` rather than removing. A green
+`are-verify` *before* such a change and a red one *after*, on files the change never touched,
+is the signature of a lost batch barrier — not a real regression in those files.
