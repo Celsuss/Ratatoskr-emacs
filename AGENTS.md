@@ -62,7 +62,8 @@ headless agent with `--permission-mode acceptEdits` and an operator-supplied she
 
 `.are/memory/FAILURE_INDEX.md` has the full list. The live ones:
 two checkouts of this repo exist and the docs below point at the stale one (FAIL-0001);
-`core.hooksPath` is unset so the pre-commit gate is off and there is no CI (FAIL-0005).
+`core.hooksPath` is unset so the local pre-commit gate is off, though `.github/workflows/ci.yml`
+now gates PRs to master (FAIL-0005).
 
 ## Commands
 
