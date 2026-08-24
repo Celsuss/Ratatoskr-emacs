@@ -68,6 +68,16 @@ case \"${FAKE_MODE:-ok}\" in
   denied)
     printf '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"permission_denials\":[{\"tool_name\":\"Edit\"}],\"total_cost_usd\":0.01,\"duration_ms\":500,\"num_turns\":1}\\n'
     ;;
+  unrun)
+    # The shape that shipped a green tick over untested work: edits allowed,
+    # every command refused, exit 0, and a cheerful `done'.
+    printf '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"wrote it\\\\n\\\\nRATA-TASK-STATUS: done\"}]}}\\n'
+    printf '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"python3 hello.py\"}}],\"total_cost_usd\":0.01,\"duration_ms\":500,\"num_turns\":4}\\n'
+    ;;
+  unverified)
+    printf '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"looks right\\\\n\\\\nRATA-TASK-STATUS: unverified -- could not run pytest\"}]}}\\n'
+    printf '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"total_cost_usd\":0.01,\"duration_ms\":500,\"num_turns\":2}\\n'
+    ;;
   noise)
     echo \"some warning on stdout that is not JSON\"
     echo \"a warning on stderr, split\" 1>&2
@@ -455,6 +465,83 @@ if [ $n -le 1 ]; then echo 'FAILED: test_thing'; exit 1; fi; echo 'all good'"
                    t)
   (rata-e2e--check "journal: run end recorded"
                    (and (string-match-p "\"event\":\"run-end\"" journal) t) t))
+
+;;; ------------------------------------------------------------------
+;;; 14. Unverified work is not done work
+;;; ------------------------------------------------------------------
+
+;; A task whose every command was denied reported `done' and was recorded as a
+;; success, because the edits landed and `claude -p' exits 0.  The box must
+;; stay open and the output must name the pattern that would have let it run.
+
+(setq rata-claude-loop-max-attempts 1)
+(setenv "FAKE_MODE" "unrun")
+(let* ((file (rata-e2e--tasks "- [ ] write hello.py\n"))
+       (status (rata-e2e--run file)))
+  (rata-e2e--check "unrun: halted" status 'halted)
+  (rata-e2e--check "unrun: box still open" (rata-e2e--contents file)
+                   "- [ ] write hello.py\n")
+  (rata-e2e--check "unrun: says the work was never run"
+                   (rata-e2e--saw "never run") t)
+  (rata-e2e--check "unrun: suggests the allowedTools pattern"
+                   (rata-e2e--saw "Bash(python3:\\*)") t)
+  ;; `done' in the transcript must not survive into the record.  Asserted on
+  ;; this run's own record, not on the journal file: the journal name has
+  ;; one-second granularity, so a suite this fast shares one file across runs
+  ;; and an absence check there would read an earlier run's success.
+  (rata-e2e--check "unrun: not recorded as done"
+                   (plist-get (car (rata-claude-loop--get :tasks)) :status)
+                   'failed)
+  (rata-e2e--check "unrun: recorded as unverified"
+                   (plist-get (car (rata-claude-loop--get :tasks)) :kind)
+                   'unverified)
+  (rata-e2e--check "unrun: journalled as failed"
+                   (and (string-match-p "\"status\":\"failed\"" (rata-e2e--journal))
+                        t)
+                   t))
+
+;; The same verdict, self-reported. An honest model gets its own wording.
+(setenv "FAKE_MODE" "unverified")
+(let* ((file (rata-e2e--tasks "- [ ] port the parser\n"))
+       (status (rata-e2e--run file)))
+  (rata-e2e--check "unverified: halted" status 'halted)
+  (rata-e2e--check "unverified: box still open" (rata-e2e--contents file)
+                   "- [ ] port the parser\n")
+  (rata-e2e--check "unverified: reason surfaced"
+                   (rata-e2e--saw "could not run pytest") t))
+
+;; Tolerating it again is one variable away, for a project with nothing to run.
+(let ((rata-claude-loop-verification-denial-tools nil))
+  (setenv "FAKE_MODE" "unrun")
+  (let* ((file (rata-e2e--tasks "- [ ] write hello.py\n"))
+         (status (rata-e2e--run file)))
+    (rata-e2e--check "unrun: opt-out finishes" status 'finished)
+    (rata-e2e--check "unrun: opt-out ticks the box" (rata-e2e--contents file)
+                     "- [X] write hello.py\n")))
+
+;; Retryable by default, and the retry is told what to do about it.
+(setq rata-claude-loop-max-attempts 2)
+(setenv "FAKE_MODE" "unverified")
+(setenv "FAKE_COUNT_FILE" rata-e2e--counter)
+(setenv "FAKE_PROMPT_FILE" rata-e2e--prompt)
+(ignore-errors (delete-file rata-e2e--counter))
+(ignore-errors (delete-file rata-e2e--prompt))
+(let* ((file (rata-e2e--tasks "- [ ] port the parser\n"))
+       (status (rata-e2e--run file)))
+  (rata-e2e--check "unverified: retried then gave up" status 'halted)
+  (rata-e2e--check "unverified: claude ran twice"
+                   (string-trim (with-temp-buffer
+                                  (insert-file-contents rata-e2e--counter)
+                                  (buffer-string)))
+                   "2")
+  (let ((prompt (with-temp-buffer
+                  (insert-file-contents rata-e2e--prompt)
+                  (buffer-string))))
+    (rata-e2e--check "unverified: retry told what was wrong"
+                     (and (string-match-p "could not run pytest" prompt) t) t)))
+(setenv "FAKE_COUNT_FILE" nil)
+(setenv "FAKE_PROMPT_FILE" nil)
+(setenv "FAKE_MODE" "ok")
 
 ;;; ------------------------------------------------------------------
 

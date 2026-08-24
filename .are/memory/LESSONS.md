@@ -208,3 +208,32 @@ install state. elpaca's clone is async and `just batch` exits before it finishes
 then confirm `elpaca/builds/<pkg>` exists. If an earlier interrupted run left a source dir
 with only `.git`, `rm -rf elpaca/{sources,builds}/<pkg>` and re-run — this is targeted, not
 `just clean`. Only then does a FAIL in the suite mean anything about the change.
+
+## L-015 — An instruction the agent cannot obey is answered with a fabrication, not a refusal
+
+`rata-claude-loop-prompt-template` said "Verify your work before finishing (run the
+project's tests or build if there are any)". `--permission-mode acceptEdits` made running
+anything impossible, and print mode denies silently rather than asking. The model did not
+stop, and did not report the contradiction as a blocker. It substituted the nearest
+achievable act — reading its own diff — and reported `done`. See
+[FAIL-0010](failures/FAIL-0010.md).
+
+The generalisation is about where to put the check, not about models:
+
+- **An instruction is only a guard if the environment permits compliance.** Prompt text
+  and permission grants are one mechanism with two halves. Changing either half alone
+  produces a system that asks for something it forbids, and the gap is filled by
+  plausible-sounding prose rather than by an error.
+- **Give the honest answer a name.** With only `done` and `blocked` available, "I did the
+  work but could not test it" had no encoding, and it rounded to `done` — the failure was
+  partly a vocabulary gap. `unverified` costs one regexp alternative.
+- **Prefer inferring the fact over asking for it.** The self-report is advisory; a
+  `permission_denials` entry is evidence. The denial exists *because* the agent tried the
+  call, so it establishes what the agent wanted to do independently of what it later
+  claimed. Where both are available, classify on the evidence and use the self-report only
+  for wording.
+- **A tolerance list is a claim about completeness, and completeness is what tests miss.**
+  `rata-claude-loop-critical-denial-tools` was correct about every tool on it. The defect
+  was a tool that was not on it, and `should-not` assertions on the tolerant path
+  (`a denied WebFetch is tolerated`) read as coverage while certifying the gap. When a
+  list decides pass/fail, test the *categories* it is meant to partition, not the entries.

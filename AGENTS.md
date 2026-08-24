@@ -184,6 +184,22 @@ init-present → init-dashboard
     The state machine lives in memory; the session ids are the one thing a restart cannot
     recompute and the only way back into a task by hand. A journal write failure disables
     journalling and reports once — it can never stop a run.
+  - **An instruction the agent cannot obey is answered with a fabrication.**
+    `acceptEdits` auto-approves file edits and nothing else, so until
+    `rata-claude-loop-allowed-tools` is set the agent cannot run a command at all —
+    print mode denies silently rather than prompting. A task told to verify its work
+    and structurally prevented from doing so reads its own diff, calls that
+    verification and reports `done`. Hence three things that only work together:
+    `--allowedTools` patterns (narrow — `Bash(just:*)`, never `Bash`), a prompt that
+    says re-reading the diff is not verification, and a third verdict
+    `RATA-TASK-STATUS: unverified` so the honest answer has an encoding. A denied
+    `Bash` now fails the attempt as kind `unverified`
+    (`rata-claude-loop-verification-denial-tools`) rather than being tolerated: the
+    denial exists *because* the agent tried the call, so it is evidence about what
+    happened, where the status line is only a claim. The buffer prints the
+    `--allowedTools` pattern that would have let it through, because the run has
+    already paid to discover it. See [`FAIL-0010`](.are/memory/failures/FAIL-0010.md)
+    and L-015.
   - **The verify command is baselined before the first task** (`rata-claude-loop-verify-baseline`).
     A gate that is already red says nothing about a task, and every task would spend its
     retries being told to fix a break it inherited. The baseline's output is deliberately

@@ -51,6 +51,36 @@ not permitted is silently denied, so this is where autonomy is set."
   :type '(repeat string)
   :group 'rata-claude-loop)
 
+(defcustom rata-claude-loop-allowed-tools nil
+  "Tool patterns auto-approved for every attempt, or nil for none.
+Passed as --allowedTools.  `acceptEdits' covers file edits and nothing
+else, so with this at nil the agent cannot run a single command: print
+mode does not prompt, it silently refuses.  A task instructed to verify
+its work and structurally prevented from doing so is the worst of both --
+it writes the code and then guesses about it, and the guess arrives as a
+green tick.
+
+Narrow patterns, not bare tool names.  \"Bash(just:*)\" permits `just
+test' and nothing else; \"Bash\" permits `rm -rf'.  Together with the
+project root this is the loop's whole permission boundary, so widen it
+per project and deliberately.  See `rata-claude-loop-verification-denial-tools'
+for what happens when it is too narrow."
+  :type '(repeat string)
+  :group 'rata-claude-loop)
+
+(defcustom rata-claude-loop-append-system-prompt nil
+  "Text appended to the CLI's system prompt, or nil for none.
+Passed as --append-system-prompt.  Everything this module sends otherwise
+goes through -p as a user message; standing instructions that should hold
+for every task in every run belong here instead of being restated in
+`rata-claude-loop-prompt-template' per task.
+
+Note that the agent also reads the CLAUDE.md of whatever project it runs
+in, which is usually the better place for project-specific rules.  Reserve
+this for rules about being driven by this loop."
+  :type '(choice (const :tag "None" nil) string)
+  :group 'rata-claude-loop)
+
 (defcustom rata-claude-loop-model nil
   "Model alias passed via --model, or nil to use the CLI default."
   :type '(choice (const :tag "CLI default" nil) string)
@@ -126,12 +156,31 @@ Your task -- the only task -- is:
 
 Complete it fully. Do not start any other task from that list.
 Do not edit %s; the checkbox is managed by the caller.
-Verify your work before finishing (run the project's tests or build if there are any).
-If the task cannot be completed, stop and explain why instead of leaving partial changes."
+
+Before reporting done, verify the change actually works. Prefer the project's
+own gate -- its test suite, build or linter -- and run it. If the project has
+none, exercise what you changed directly: run the script, import the module,
+call the function. Do not weaken, skip, disable or delete a test to make it
+pass.
+
+Re-reading your own diff is not verification. If you could not run anything --
+a command was denied, a tool is missing, the environment refused -- then report
+`unverified' and name the exact command you were blocked on, so the caller can
+permit it. Do not report done on work you were never able to execute.
+
+If the task cannot be completed at all, stop and explain why instead of leaving
+partial changes."
   "Template for the prompt handed to Claude.
 Receives three `format' arguments: the task file name, the task text,
 and the task file name again.  `rata-claude-loop-report-instruction' is
-appended to whatever this produces."
+appended to whatever this produces.
+
+The verification paragraph is load-bearing rather than decorative.  `claude
+-p' exits 0 for a task whose every command was silently denied, so a model
+that counts \"I read the diff\" as verification turns a run into a column of
+green ticks over untested work.  It is only half the fix, though: see
+`rata-claude-loop-allowed-tools' for the other half, because an agent told to
+run the tests and not permitted to is worse off than one never asked."
   :type 'string
   :group 'rata-claude-loop)
 
@@ -166,9 +215,12 @@ Only used when there is detail to send."
   "End your final message with a status line of its own, exactly one of:
 
 RATA-TASK-STATUS: done
+RATA-TASK-STATUS: unverified -- <the command you could not run>
 RATA-TASK-STATUS: blocked -- <one-line reason>
 
-Report `blocked' if you could not finish. `claude -p' exits 0 whenever the
+Report `done' only if you ran something that demonstrates the work behaves.
+Report `unverified' if you believe the change is correct but could not execute
+it. Report `blocked' if you could not finish. `claude -p' exits 0 whenever the
 CLI itself succeeded, so this line is how the caller tells a completed task
 from an abandoned one; without it an abandoned task is recorded as done."
   "Instruction appended to every prompt asking for a machine-readable verdict.
@@ -191,6 +243,24 @@ Print mode denies silently rather than prompting, so a task whose every
 edit was refused still exits 0 with a `success' subtype.  A denial of one
 of these fails the attempt; a denied WebFetch is reported but tolerated,
 because halting a good run over it would be worse."
+  :type '(repeat string)
+  :group 'rata-claude-loop)
+
+(defcustom rata-claude-loop-verification-denial-tools '("Bash")
+  "Tools whose denial means the work was never actually run.
+Weaker than `rata-claude-loop-critical-denial-tools': the edits landed, so
+the task may well be correct -- but nothing executed it, so nobody knows.
+Such an attempt fails as kind `unverified' rather than being reported and
+tolerated.
+
+A denial exists only because the agent attempted the call, which makes it
+positive evidence: it wanted to run something -- the suite, or the script
+it had just written -- and was refused.  Whatever it concluded next, it
+concluded without running that.  This is the check that catches a task
+reporting `done' in the same breath as admitting it could not test.
+
+The fix for a run full of these is `rata-claude-loop-allowed-tools', not a
+shorter list here.  Set this to nil to go back to tolerating them."
   :type '(repeat string)
   :group 'rata-claude-loop)
 
@@ -232,14 +302,21 @@ is how an agent talks itself into deleting the failing test."
   :type 'integer
   :group 'rata-claude-loop)
 
-(defcustom rata-claude-loop-retry-on '(verify execution max-turns)
+(defcustom rata-claude-loop-retry-on '(verify execution max-turns unverified)
   "Failure kinds worth retrying by resuming the task's session.
-Recognised kinds: `verify' (the verify command failed), `execution' (the
-CLI reported an error mid-run, which covers a transient overload),
-`max-turns', `budget', `denied', `blocked', `timeout', `crash',
-`no-result'.  The excluded ones are excluded on purpose: a timeout leaves
-unknown partial state, `blocked' is a considered judgement rather than a
-stumble, and `budget' means the cap you set did its job."
+Recognised kinds: `verify' (the verify command failed), `unverified' (the
+work was never executed), `execution' (the CLI reported an error mid-run,
+which covers a transient overload), `max-turns', `budget', `denied',
+`blocked', `timeout', `crash', `no-result'.  The excluded ones are excluded
+on purpose: a timeout leaves unknown partial state, `blocked' is a
+considered judgement rather than a stumble, and `budget' means the cap you
+set did its job.
+
+`unverified' is retried because the common cause is a model that stopped
+one step early, and being told so is usually enough.  When the cause is a
+denied tool instead, the retry hits the same wall and the attempt is spent
+for nothing -- the reason line names the pattern to add to
+`rata-claude-loop-allowed-tools' so the next run does not repeat it."
   :type '(repeat symbol)
   :group 'rata-claude-loop)
 
@@ -897,7 +974,7 @@ Reading it there rather than globally lets a project set it in
 ;;; Stream rendering
 
 (defconst rata-claude-loop--status-regexp
-  "^[ \t]*RATA-TASK-STATUS:[ \t]*\\(done\\|blocked\\)\\(?:[ \t]*\\(?:--\\|—\\|:\\)?[ \t]*\\(.*\\)\\)?$"
+  "^[ \t]*RATA-TASK-STATUS:[ \t]*\\(done\\|unverified\\|blocked\\)\\(?:[ \t]*\\(?:--\\|—\\|:\\)?[ \t]*\\(.*\\)\\)?$"
   "Regexp matching the status line asked for by the prompt.")
 
 (defun rata-claude-loop--truncate (string limit)
@@ -1013,7 +1090,18 @@ at its final word."
                (mapconcat (lambda (denial)
                             (or (alist-get 'tool_name denial) "?"))
                           denials ", "))
-       'rata-claude-loop-error-face)))
+       'rata-claude-loop-error-face)
+      ;; The denial is only half the news.  What the operator needs is the
+      ;; pattern that would have let it through, because the run has just
+      ;; spent a task's worth of tokens discovering it and the next run will
+      ;; rediscover it otherwise.
+      (let ((patterns (delete-dups
+                       (delq nil (mapcar #'rata-claude-loop--denial-pattern
+                                         denials)))))
+        (when patterns
+          (rata-claude-loop--insert
+           (format "    allow with: %s\n" (string-join patterns " "))
+           'rata-claude-loop-meta-face)))))
   (let ((error-p (alist-get 'is_error event))
         (cost (alist-get 'total_cost_usd event))
         (duration (alist-get 'duration_ms event))
@@ -1143,16 +1231,70 @@ each chunk would split one message across several marker lines."
     ("error_during_execution" 'execution)
     (_ 'crash)))
 
+(defun rata-claude-loop--denials ()
+  "Return the permission denials recorded in this attempt's result event."
+  (alist-get 'permission_denials (rata-claude-loop--get :result)))
+
+(defun rata-claude-loop--denied-names (tools)
+  "Return the names of denied tools that appear in TOOLS, without duplicates."
+  (delete-dups
+   (delq nil
+         (mapcar (lambda (denial)
+                   (let ((name (alist-get 'tool_name denial)))
+                     (and (member name tools) name)))
+                 (rata-claude-loop--denials)))))
+
 (defun rata-claude-loop--critical-denials ()
   "Return the names of denied tools that mean the task cannot have worked."
-  (let ((denials (alist-get 'permission_denials (rata-claude-loop--get :result))))
-    (delete-dups
-     (delq nil
-           (mapcar (lambda (denial)
-                     (let ((name (alist-get 'tool_name denial)))
-                       (and (member name rata-claude-loop-critical-denial-tools)
-                            name)))
-                   denials)))))
+  (rata-claude-loop--denied-names rata-claude-loop-critical-denial-tools))
+
+(defun rata-claude-loop--verification-denials ()
+  "Return the names of denied tools that mean the work was never executed."
+  (rata-claude-loop--denied-names rata-claude-loop-verification-denial-tools))
+
+(defun rata-claude-loop--denial-pattern (denial)
+  "Return an `--allowedTools' pattern that would have permitted DENIAL.
+Only Bash is worth guessing at, because the pattern language keys on the
+command name: a denied \"python3 hello.py\" suggests \"Bash(python3:*)\".
+Anything unexpected in the command falls back to the bare tool name, which
+is a wider grant than the operator may want -- but it is the honest
+suggestion, and it is a suggestion, not something this module applies."
+  (let ((name (alist-get 'tool_name denial)))
+    (when (stringp name)
+      (if (not (equal name "Bash"))
+          name
+        (let* ((input (or (alist-get 'tool_input denial)
+                          (alist-get 'input denial)))
+               (command (and (consp input) (alist-get 'command input)))
+               (program (and (stringp command)
+                             (car (split-string (string-trim command))))))
+          (if (and program (string-match-p "\\`[A-Za-z0-9_.+/-]+\\'" program))
+              (format "Bash(%s:*)" (file-name-nondirectory program))
+            name))))))
+
+(defun rata-claude-loop--denial-patterns (tools)
+  "Return suggested `--allowedTools' patterns for denials of TOOLS."
+  (delete-dups
+   (delq nil
+         (mapcar (lambda (denial)
+                   (and (member (alist-get 'tool_name denial) tools)
+                        (rata-claude-loop--denial-pattern denial)))
+                 (rata-claude-loop--denials)))))
+
+(defun rata-claude-loop--unverified-reason (names)
+  "Return the failure reason for an attempt blocked from running anything.
+NAMES are the denied tools.  The reason names the patterns that would have
+let it through, because on this failure the operator has something to fix
+and a retry that changes nothing else will fail identically."
+  (let ((patterns (rata-claude-loop--denial-patterns
+                   rata-claude-loop-verification-denial-tools)))
+    (format "%s denied, so the work was never run: %s%s"
+            (if (cdr names) "tools were" "a tool was")
+            (string-join names ", ")
+            (if patterns
+                (format " (allow %s via rata-claude-loop-allowed-tools)"
+                        (string-join patterns ", "))
+              ""))))
 
 (defun rata-claude-loop--classify (code)
   "Return (KIND . REASON) for an attempt that exited with CODE, or nil.
@@ -1161,6 +1303,7 @@ task being done; that is what the verify command is for."
   (let* ((result (rata-claude-loop--get :result))
          (subtype (alist-get 'subtype result))
          (denials (rata-claude-loop--critical-denials))
+         (unrun (rata-claude-loop--verification-denials))
          (report (rata-claude-loop--get :report))
          (reason (rata-claude-loop--get :report-reason)))
     (cond
@@ -1184,6 +1327,14 @@ task being done; that is what the verify command is for."
                     (string-join denials ", "))))
      ((eq report 'blocked)
       (cons 'blocked (or reason "the task reported itself blocked")))
+     ((eq report 'unverified)
+      (cons 'unverified
+            (or reason "the task reported its work unverified")))
+     ;; Inferred, and checked after the self-report so an honest one wins the
+     ;; wording.  A task that claims `done' while its every command was
+     ;; refused is exactly the case this exists for: the edits are on disk,
+     ;; nothing ran them, and the exit code is 0.
+     (unrun (cons 'unverified (rata-claude-loop--unverified-reason unrun)))
      ((and rata-claude-loop-require-status (null report))
       (cons 'blocked "the task reported no status line"))
      (t nil))))
@@ -1328,6 +1479,16 @@ every one of these has to be passed again on a retry."
    (when rata-claude-loop-task-budget-usd
      (list "--max-budget-usd"
            (number-to-string rata-claude-loop-task-budget-usd)))
+   (when rata-claude-loop-append-system-prompt
+     (list "--append-system-prompt" rata-claude-loop-append-system-prompt))
+   ;; --allowedTools is variadic: it consumes every following argument until
+   ;; one starting with a dash.  So it goes last but one, and what follows is
+   ;; `rata-claude-loop-extra-args', whose every element is a flag or a
+   ;; flag's value -- the default's leading "--permission-mode" terminates
+   ;; the list.  Anything appended after this that is not a flag would be
+   ;; read as a tool pattern instead.
+   (when rata-claude-loop-allowed-tools
+     (cons "--allowedTools" rata-claude-loop-allowed-tools))
    rata-claude-loop-extra-args))
 
 (defun rata-claude-loop--prompt (task file &optional body)

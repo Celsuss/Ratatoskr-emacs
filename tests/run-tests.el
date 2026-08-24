@@ -493,6 +493,67 @@ carries the `result' event the loop makes every decision from."
     (should (equal '(timeout . "took too long")
                    (classify '(:outcome (timeout . "took too long")) 9)))))
 
+(ert-deftest rata-test-claude-loop-classify-unverified ()
+  "Work that was never executed fails, however cheerfully it reports."
+  (cl-flet ((classify (state code)
+              (let ((rata-claude-loop--state state))
+                (rata-claude-loop--classify code))))
+    ;; The run this check was written for: three denied Bash calls, the edits
+    ;; on disk, exit 0, and `done' in the final message.
+    (let ((verdict (classify '(:result ((subtype . "success")
+                                        (permission_denials
+                                         . (((tool_name . "Bash")
+                                             (tool_input
+                                              . ((command . "python3 hello.py")))))))
+                               :report done)
+                             0)))
+      (should (eq 'unverified (car verdict)))
+      (should (string-match-p "never run" (cdr verdict)))
+      ;; It must name the fix: retrying alone hits the same wall.
+      (should (string-match-p "Bash(python3:\\*)" (cdr verdict))))
+    ;; Self-reported, and it wins the wording over the inferred version.
+    (should (equal '(unverified . "could not run pytest")
+                   (classify '(:result ((subtype . "success"))
+                               :report unverified
+                               :report-reason "could not run pytest")
+                             0)))
+    ;; Opting out restores the old tolerance.
+    (let ((rata-claude-loop-verification-denial-tools nil))
+      (should-not (classify '(:result ((subtype . "success")
+                                       (permission_denials
+                                        . (((tool_name . "Bash")))))
+                              :report done)
+                            0)))
+    ;; A denied Edit is the stronger finding and keeps its own kind.
+    (should (eq 'denied
+                (car (classify '(:result ((subtype . "success")
+                                          (permission_denials
+                                           . (((tool_name . "Edit"))
+                                              ((tool_name . "Bash"))))))
+                               0))))))
+
+(ert-deftest rata-test-claude-loop-denial-pattern ()
+  "A denial suggests the narrowest --allowedTools pattern that would fit it."
+  (cl-flet ((pattern (denial) (rata-claude-loop--denial-pattern denial)))
+    (should (equal "Bash(python3:*)"
+                   (pattern '((tool_name . "Bash")
+                              (tool_input . ((command . "python3 hello.py")))))))
+    ;; An absolute path names the program, not the path.
+    (should (equal "Bash(python3:*)"
+                   (pattern '((tool_name . "Bash")
+                              (tool_input
+                               . ((command . "/usr/bin/python3 hello.py")))))))
+    ;; Some events carry `input' rather than `tool_input'.
+    (should (equal "Bash(just:*)"
+                   (pattern '((tool_name . "Bash")
+                              (input . ((command . "just test")))))))
+    ;; Nothing parseable: the bare tool name is wider than ideal, and honest.
+    (should (equal "Bash" (pattern '((tool_name . "Bash")))))
+    (should (equal "Bash" (pattern '((tool_name . "Bash")
+                                     (tool_input . ((command . "FOO=1 make")))))))
+    (should (equal "WebFetch" (pattern '((tool_name . "WebFetch")))))
+    (should-not (pattern '((tool_use_id . "x"))))))
+
 (ert-deftest rata-test-claude-loop-note-status ()
   "The self-reported status line is parsed, last occurrence winning."
   (cl-flet ((note (text)
@@ -505,6 +566,8 @@ carries the `result' event the loop makes every decision from."
                    (note "RATA-TASK-STATUS: blocked -- the API does not exist")))
     (should (equal '(blocked . "em dash reason")
                    (note "RATA-TASK-STATUS: blocked — em dash reason")))
+    (should (equal '(unverified . "could not run pytest")
+                   (note "RATA-TASK-STATUS: unverified -- could not run pytest")))
     (should (equal '(nil) (note "no status here")))
     (should (eq 'done (car (note "RATA-TASK-STATUS: blocked -- x\nRATA-TASK-STATUS: done"))))))
 
@@ -532,6 +595,34 @@ carries the `result' event the loop makes every decision from."
       (should (member "stream-json" argv))
       (should (string-match-p "do a thing" (nth 2 argv)))
       (should (string-match-p "RATA-TASK-STATUS" (nth 2 argv))))))
+
+(ert-deftest rata-test-claude-loop-prompt-demands-verification ()
+  "The prompt asks for a run, not a reading, and offers a way to say so."
+  (let ((prompt (rata-claude-loop--prompt "do a thing" "/tmp/tasks.md")))
+    (should (string-match-p "verify" prompt))
+    (should (string-match-p "not verification" prompt))
+    (should (string-match-p "RATA-TASK-STATUS: unverified" prompt))
+    (should (string-match-p "never able to execute" prompt))))
+
+(ert-deftest rata-test-claude-loop-allowed-tools-reach-argv ()
+  "Allowed tools and the appended system prompt survive into both commands.
+`--allowedTools' is variadic, so whatever follows its patterns has to be a
+flag; anything else would be swallowed as one more tool pattern."
+  (let ((rata-claude-loop--state (list :root "/tmp/" :session-id "abc-123"))
+        (rata-claude-loop-executable "claude")
+        (rata-claude-loop-allowed-tools '("Bash(just:*)" "Bash(python3:*)"))
+        (rata-claude-loop-append-system-prompt "be terse")
+        (rata-claude-loop-extra-args '("--permission-mode" "acceptEdits")))
+    (dolist (argv (list (rata-claude-loop--build-command "do a thing" "/tmp/t.md")
+                        (rata-claude-loop--build-retry-command "verify failed" "x")))
+      (should (member "--allowedTools" argv))
+      (should (member "--append-system-prompt" argv))
+      (should (member "be terse" argv))
+      (let* ((tail (cdr (member "--allowedTools" argv)))
+             (after (nthcdr 2 tail)))
+        (should (equal (seq-take tail 2) '("Bash(just:*)" "Bash(python3:*)")))
+        ;; Nothing, or a flag -- never a bare word.
+        (should (or (null after) (string-prefix-p "-" (car after))))))))
 
 (ert-deftest rata-test-claude-loop-retry-command-repasses-flags ()
   "A retry re-passes every flag: `--resume' inherits none of them."
