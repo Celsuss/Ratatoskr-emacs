@@ -47,3 +47,5 @@ transient/history.el
 /.agent-shell/
 
 docs/*
+# Claude Code local overrides (personal permissions, not shared)
+.claude/settings.local.json

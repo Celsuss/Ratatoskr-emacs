@@ -190,6 +190,11 @@ are-context task="":
 are-audit:
     ./scripts/are-audit.sh
 
+# Renumber the knowledge pages' source-line citations after moving code around.
+# The audit reports them stale; this fixes them. Run it before `are-audit', not instead.
+are-fix-refs:
+    ./scripts/are-fix-line-refs.sh
+
 # Risk-based verification: fast (~4s) | relevant (~1.8min) | full (~3min)
 are-verify level="fast":
     ./scripts/are-verify.sh {{level}}
@@ -206,6 +211,7 @@ are:
     @echo "  just are-verify relevant    ~2min MEDIUM risk / any lisp change"
     @echo "  just are-verify full        ~3min HIGH+CRITICAL / end of session"
     @echo "  just are-audit              ~1s   repo-wide checks"
+    @echo "  just are-fix-refs           renumber knowledge source-line citations"
 
 # Configure git to use .githooks/ for hooks (one-time setup)
 install-hooks:
