@@ -1,0 +1,72 @@
+name: CI
+
+# Verify PRs before they land on master, and keep the mainline badge honest.
+# Composes the repo's existing `just` targets — if a check is wrong, fix it in
+# the justfile, not here (mirrors scripts/are-verify.sh).
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+# Cancel superseded runs on the same ref (a new push to a PR kills the old run).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Force the justfile's emacs_bin probe onto the PATH Emacs from setup-emacs,
+  # dodging any apt/snap Emacs the runner might carry (justfile honors this).
+  EMACS_BIN: emacs
+
+jobs:
+  # Fast tier: no elpaca download, no network. ~2 min. Catches most regressions.
+  fast-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Emacs 30.2
+        uses: purcell/setup-emacs@master
+        with:
+          version: '30.2'
+      - name: Install just
+        uses: extractions/setup-just@v2
+      - name: Lint (conventions)
+        run: just lint
+      - name: Byte-compile (syntax only)
+        run: just compile
+      - name: claude-loop e2e (CRITICAL module, stub CLI)
+        run: just test-claude-loop
+      - name: ARE audit (repo-wide invariants)
+        run: just are-audit
+
+  # Heavy tier: bootstraps elpaca (133 packages) and loads the full config.
+  # Cached between runs so only a changed package set pays the download cost.
+  full-load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Emacs 30.2
+        uses: purcell/setup-emacs@master
+        with:
+          version: '30.2'
+      - name: Install just
+        uses: extractions/setup-just@v2
+      - name: Cache elpaca / native-comp / grammars
+        uses: actions/cache@v4
+        with:
+          path: |
+            elpaca
+            eln-cache
+            tree-sitter
+          # No committed lockfile: elpaca floats to latest, so key on the config
+          # files. Cache is reused until a package declaration changes; the prefix
+          # restore-key warm-starts a changed config instead of a cold clone.
+          key: elpaca-emacs30.2-${{ hashFiles('init.el', 'early-init.el', 'lisp/**/*.el') }}
+          restore-keys: |
+            elpaca-emacs30.2-
+      - name: ERT suite (full config loaded)
+        run: just test-ert
+      - name: Batch startup (init runs to completion)
+        run: just batch

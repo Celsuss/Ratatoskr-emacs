@@ -1,10 +1,20 @@
 #!/usr/bin/env bash
-# Pre-commit hook: run the full test suite before allowing a commit.
+# Pre-commit hook: run full ARE verification before allowing a commit.
 # Install with: just install-hooks
+#
+# `just are-verify full` is a superset of `just test`: it adds the claude-loop e2e suite
+# (3 s, covers the only CRITICAL module, previously ungated — see
+# .are/memory/failures/FAIL-0004.md) and the ARE audit. Roughly 3 minutes total.
+#
+# `just test` itself is deliberately unchanged, so existing docs and habits stay correct
+# (.are/memory/DECISIONS.md D-004).
+#
+# If 3 minutes per commit is too slow, switch this to `just are-verify fast` (~4 s) and run
+# `just are-verify full` deliberately before pushing.
 
 set -euo pipefail
 
-echo "Running pre-commit checks..."
-just test
+echo "Running pre-commit checks (ARE full verification)..."
+just are-verify full
 
 echo "All checks passed."

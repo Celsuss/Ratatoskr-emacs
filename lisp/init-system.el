@@ -76,6 +76,8 @@
           ("*grep*"            :align below :size 0.3 :popup t)
           ("*Flycheck errors*" :align below :size 0.25 :popup t)
           ("*lsp-help*"        :align right :size 0.4 :popup t :select t)
+          ("*ejc-sql-output*"  :align below :size 0.4 :popup t)
+          ("*claude-loop*"     :align right :size 0.45 :popup t :select nil)
           ("*Messages*"        :align below :size 0.25 :popup t))))
 
 ;; --- Popper (popup management) ---
@@ -98,6 +100,7 @@
           "\\*cargo-.*\\*"
           "\\*pytest.*\\*"
           "\\*restclient.*\\*"
+          "\\*ejc-sql-output\\*"
           vterm-mode))
   (popper-mode 1)
   (global-set-key (kbd "M-`") #'popper-toggle)

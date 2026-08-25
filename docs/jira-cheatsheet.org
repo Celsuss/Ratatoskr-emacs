@@ -1,0 +1,186 @@
+#+title: jira.el cheat sheet (Ratatoskr-emacs)
+#+options: toc:2 num:nil
+
+Keys below are what jira.el itself binds (v2.21.1), not this config. This config only
+adds the ~SPC J~ leader keys and puts the three Jira buffers in *emacs state*, so every
+key works as upstream documents it. ~C-z~ toggles back to evil normal state.
+
+Config: [[file:../lisp/init-jira.el][lisp/init-jira.el]] · package source:
+=elpaca/sources/jira/= · upstream: https://github.com/unmonoqueteclea/jira.el
+
+* Getting in
+
+| Key     | Command      | Does                                        |
+|---------+--------------+---------------------------------------------|
+| ~SPC J j~ | =jira-issues= | Open the issue list (=*Jira Issues*=)        |
+| ~SPC J t~ | =jira-tempo=  | Open Tempo worklogs (=*Jira Tempo*=)         |
+
+Both are the only autoloaded entry points; everything else is reached from inside
+those buffers.
+
+* Issue list — =*Jira Issues*= (=jira-issues-mode=)
+
+Acts on the *marked* issue, falling back to the issue on the current line when nothing
+is marked (dired semantics, via tablist).
+
+| Key   | Does                                                              |
+|-------+-------------------------------------------------------------------|
+| ~?~ / ~h~ | *Actions menu* (transient) — the discoverable index of everything  |
+| ~l~     | *Query menu* (transient) — build the filter, then ~l~ to run it     |
+| ~RET~ / ~I~ | Show issue detail                                                 |
+| ~f~     | Find an issue by key or URL (prompts, completing-read)             |
+| ~O~     | Open the issue in the browser                                      |
+| ~C~     | Change issue — status / resolution / remaining estimate            |
+| ~W~     | Add a worklog to the issue                                          |
+| ~c~     | Copy the issue key to the clipboard                                 |
+| ~e~     | Export menu → Markdown / Org-mode / CSV of what is on screen        |
+| ~T~     | Jump to Tempo worklogs (kills this buffer)                          |
+| ~H~     | Switch Jira host (needs =jira-secondary-urls=)                       |
+| ~M-n~ / ~M-p~ | Next / previous page of results                               |
+| ~n~ / ~p~ | Next / previous issue (~j~/~k~ do *not* move — see the last section)   |
+| ~{~ / ~}~ | Narrow / widen the current column                                   |
+| ~G~     | Refresh the list                                                    |
+| ~q~     | Quit the buffer                                                     |
+
+** Query menu (~l~) — arguments
+
+Each argument prompts with completion from live instance data (statuses, projects,
+users, versions, types). Set what you want, then press ~l~ to run the query.
+
+| Key     | Argument           | Notes                                          |
+|---------+--------------------+------------------------------------------------|
+| ~m~       | =--myself=          | Only issues assigned to you (on by default)     |
+| ~a~       | =--assignee=        | Inapt while =--myself= is on; ~[EMPTY]~ = unassigned |
+| ~c~       | =--current-sprint=  | Only the active sprint                          |
+| ~s~       | =--status=          | From the instance's statuses                     |
+| ~p~       | =--project=         |                                                 |
+| ~t~       | =--type=            | ~Any~ clears it                                   |
+| ~R~       | =--reporter=        |                                                 |
+| ~r~       | =--resolution=      |                                                 |
+| ~v~       | =--version=         | Fix version                                     |
+| ~j~       | =--jql=             | Raw JQL — escape hatch for anything above        |
+| ~l~       | —                  | *Run the query*                                  |
+| ~F~       | —                  | Apply a saved Jira filter (ignores the args above) |
+| ~C-x s~   | —                  | Remember these args for this Emacs session       |
+| ~C-x C-s~ | —                  | Persist these args across sessions               |
+| ~C-x C-k~ | —                  | Reset args to the defaults                       |
+
+** Marking, filtering, sorting (from =tablist=, shared with other tablist buffers)
+
+| Key   | Does                                            |
+|-------+-------------------------------------------------|
+| ~m~     | Mark issue, move down                            |
+| ~u~ / ~DEL~ | Unmark forward / backward                       |
+| ~U~     | Unmark all                                       |
+| ~t~     | Toggle all marks                                 |
+| ~*~     | Mark prefix map (mark by regexp, numeric, …)     |
+| ~/~     | Filter prefix map — narrow the displayed rows    |
+| ~%~     | Regexp prefix map                                |
+| ~s~     | Sort by a column                                 |
+| ~k~     | Kill (hide) the lines at point                   |
+| ~TAB~ / ~S-TAB~ | Next / previous column                    |
+| ~<~ / ~>~ | Shrink / enlarge the current column              |
+
+* Issue detail — =*Jira Issue*= (=jira-detail-mode=)
+
+A =magit-section= buffer, so the usual magit section keys work: ~TAB~ folds the section at
+point, ~n~ / ~p~ move between sections, ~M-n~ / ~M-p~ between siblings, ~^~ goes to the parent,
+~1~–~4~ set the global fold level and ~q~ quits.
+
+| Key | Does                                                     |
+|-----+----------------------------------------------------------|
+| ~?~ / ~h~ | *Actions menu* (transient), context-aware                |
+| ~+~   | Add a comment                                             |
+| ~e~   | Edit the comment at point                                 |
+| ~-~   | Remove the comment at point                               |
+| ~C~   | Change issue status / resolution / estimate               |
+| ~U~   | Update an arbitrary issue field                            |
+| ~w~   | Watchers submenu — ~+~ add, ~-~ remove                       |
+| ~S~   | Add a subtask (asks for the subtask type if several)       |
+| ~P~   | Show the parent issue                                      |
+| ~O~   | Open in the browser                                        |
+| ~f~   | Find another issue by key or URL                           |
+| ~c~   | Copy the issue key to the clipboard                        |
+| ~g~   | Refresh                                                    |
+
+With point on a subtask or a linked-issue section, the actions menu grows two entries:
+~RET~ opens it in Emacs, ~o~ opens it in the browser.
+
+* Comment / description editor (=jira-edit-mode=)
+
+Opened by the comment and field-update actions above.
+
+| Key       | Does                                    |
+|-----------+-----------------------------------------|
+| ~C-c C-c~   | Send the buffer to Jira                  |
+| ~C-c C-k~   | Abandon (kill the buffer)                |
+| ~C-c m~     | Insert an @mention                       |
+| ~C-c d~     | Insert a date (via =org-read-date=)       |
+| ~C-c c~     | Insert a colour mark                     |
+
+* Tempo worklogs — =*Jira Tempo*= (=jira-tempo-mode=)
+
+Also a tablist buffer, so the marking/filtering table above applies.
+
+| Key | Does                              |
+|-----+-----------------------------------|
+| ~?~   | Actions menu                       |
+| ~g~ / ~G~ | Refresh the list                   |
+| ~D~   | Delete the marked worklog          |
+| ~I~   | Jump back to the issue list        |
+
+Tempo needs its own token: a =machine tempo.io= line in =~/.authinfo.gpg=, separate from
+the Jira credential.
+
+* Setup this config expects
+
+Credentials are never in the repo. =jira-username= and =jira-token= are deliberately
+left unset, which is what makes jira.el fall through to =auth-source=:
+
+#+begin_src authinfo
+machine YOUR-INSTANCE.atlassian.net login you@example.com port https password TOKEN
+machine tempo.io password TEMPO_TOKEN
+#+end_src
+
+The hostname lives in the gitignored =local.el= (it is corporate identity on a public
+remote) — see =local.el.example=:
+
+#+begin_src elisp
+(setq rata-jira-base-url "https://your-instance.atlassian.net") ; no trailing slash
+(setq rata-jira-api-version 3)          ; 2 for older on-premise
+(setq jira-token-is-personal-access-token nil) ; t for an on-prem PAT
+#+end_src
+
+A trailing slash on the URL silently breaks auth: jira.el derives the auth-source host
+by stripping only ="https://"=, so the =machine= line never matches and the request 401s
+as though the token were wrong. =init-jira.el= runs the value through
+=directory-file-name= to defend against this.
+
+* Useful variables
+
+| Variable                         | Default | Notes                                       |
+|----------------------------------+---------+---------------------------------------------|
+| =jira-issues-max-results=         | 30      | Page size; ~M-n~ / ~M-p~ page through          |
+| =jira-issues-table-fields=        | —       | Which columns the list shows                 |
+| =jira-issues-default-type=        | nil     | Pre-set =--type= in the query menu            |
+| =jira-issues-sort-key=            | Status  | Initial sort column                          |
+| =jira-detail-reuse-buffer=        | t here  | One detail buffer instead of one per issue    |
+| =jira-comments-display-recent-first= | —    | Comment order in the detail view              |
+| =jira-secondary-urls=             | nil     | Extra instances, switched with ~H~             |
+| =jira-tempo-max-results=          | 50      |                                             |
+| =jira-status-faces=               | nil     | Colour statuses in the list                  |
+| =jira-datetime-format=            | =%c=     |                                             |
+| =jira-debug=                      | nil     | Log API responses — first thing to set when a request misbehaves |
+
+* Things worth knowing
+
+- *Nothing here writes into org-roam.* This is a second view onto work, not a sync
+  (D-011). ~e~ → Org-mode in the issue list is the one-off bridge when you want the
+  rows as text.
+- *The two transients are the documentation.* ~?~ in any Jira buffer and ~l~ in the issue
+  list list every available action with its key; nothing needs to be memorised.
+- *These buffers are in emacs state*, not normal state, because jira.el has no evil
+  support and its keymaps sit in =tabulated-list-mode= / =magit-section-mode= children
+  that evil shadows (L-017). So ~j~/~k~ are *not* motion here: ~j~ is unbound and ~k~ kills
+  (hides) the line in the issue list. Move with ~n~ / ~p~, ~C-n~ / ~C-p~ or the arrows, and
+  press ~C-z~ when you want evil back.

@@ -1,0 +1,137 @@
+# ARE configuration — Ratatoskr-emacs
+#
+# Declarative description of this project's ARE setup. Deliberately thin: the
+# authoritative path -> area/risk/tests map lives in knowledge/MODULES.md, as a markdown
+# table that is both human-readable and parsed by scripts/are-*.sh. Duplicating it here
+# would create a second source of truth that drifts.
+#
+# No YAML parser is required to use ARE. Nothing reads this file programmatically; it is
+# here so a human or an agent can see the whole shape of the system on one screen.
+
+are:
+  version: 1
+  bootstrapped: 2026-08-19
+  bootstrapped_at_commit: 1d38bd8
+  entry_point: .are/INDEX.md
+  operating_manual: .are/SYSTEM.md
+
+project:
+  name: Ratatoskr-emacs
+  kind: emacs-configuration        # not a service: no server, no database, no deployment
+  language: emacs-lisp
+  tooling_language: bash
+  task_runner: just
+  package_manager: elpaca
+  test_framework: ert              # plus a bespoke harness for the claude-loop state machine
+  remote: git@github.com:Celsuss/Ratatoskr-emacs.git   # public
+  live_checkout: /home/jens/.config/emacs
+  ci: none                         # verified absent
+  deployment: none                 # git pull is the deploy
+
+# Categories from the generic ARE template that do not exist in this project. Listed so
+# nobody creates a speculative knowledge file for them. See INDEX.md section 1.
+not_applicable:
+  - user_roles                     # single operator; nearest analogue is the claude-loop trust boundary
+  - authentication                 # no app auth; credentials are consumed via auth-source
+  - authorization
+  - http_api
+  - database                       # a SQL *client* is configured; no owned database
+  - database_migrations
+  - background_job_queue           # emacs timers only
+  - webhooks
+  - payments_financial             # nearest analogue is metered LLM API spend
+  - infrastructure
+  - environments_ladder            # no dev/staging/prod; launch modes instead
+
+knowledge:
+  path_map: .are/knowledge/MODULES.md        # AUTHORITATIVE, machine-read
+  pages:
+    - .are/knowledge/ARCHITECTURE.md
+    - .are/knowledge/MODULES.md
+    - .are/knowledge/ENVIRONMENTS.md
+    - .are/knowledge/CLAUDE_LOOP.md
+    - .are/knowledge/INTEGRATIONS.md
+    - .are/knowledge/SECRETS_AND_SENSITIVE_DATA.md
+    - .are/knowledge/TESTING_STRATEGY.md
+  # Owned elsewhere on purpose. ARE links, never copies. See memory/DECISIONS.md D-002.
+  external_sources_of_truth:
+    conventions_and_module_reference: AGENTS.md
+    commands: justfile
+    convention_enforcement: scripts/lint.sh
+    unit_truth: [tests/run-tests.el, tests/claude-loop-e2e.el]
+    user_docs: README.org
+    historical_intent: SPEC.md        # drifted; see memory/DECISIONS.md D-003
+
+memory:
+  index: .are/memory/FAILURE_INDEX.md
+  records: .are/memory/failures/
+  lessons: .are/memory/LESSONS.md
+  decisions: .are/memory/DECISIONS.md
+
+rules:
+  risk: .are/rules/RISK_RULES.md
+  verification: .are/rules/VERIFICATION_RULES.md
+  safety: .are/rules/SAFETY_RULES.md
+
+generated:
+  current_context: .are/generated/CURRENT_CONTEXT.md
+  committed: true                  # see memory/DECISIONS.md D-007
+
+# Wall-clock measured 2026-08-19 on Ubuntu 22.04 / snap Emacs, packages already installed.
+# A first-ever run is minutes longer: elpaca builds ~197 packages.
+verification:
+  levels:
+    fast:
+      command: just are-verify fast
+      seconds: 4
+      needs_packages: false
+      steps: [lint, test-claude-loop, are-audit]
+      use_for: [LOW, mid-work, docs, session-start-hook]
+    relevant:
+      command: just are-verify relevant
+      seconds: 106
+      needs_packages: true
+      steps: [lint, test-claude-loop, are-audit, compile, test-ert]
+      use_for: [MEDIUM, any-lisp-change]
+    full:
+      command: just are-verify full
+      seconds: 180
+      needs_packages: true
+      steps: [lint, test-claude-loop, are-audit, compile, test-ert, batch]
+      use_for: [HIGH, CRITICAL, startup-path, end-of-session]
+  underlying_targets:              # seconds, and what each one actually proves
+    lint:              {seconds: 0.5, proves: "3 textual conventions"}
+    test-claude-loop:  {seconds: 3,   proves: "claude-loop state machine vs a stub CLI"}
+    compile:           {seconds: 24,  proves: "syntax and macro expansion only"}
+    batch:             {seconds: 70,  proves: "init runs to completion; NOT that modules loaded"}
+    test-ert:          {seconds: 78,  proves: "the ERT suite against the fully loaded config"}
+  gate:
+    hook: .githooks/pre-commit
+    runs: just are-verify full
+    installed: false               # core.hooksPath unset; see memory/failures/FAIL-0005.md
+    install_with: just install-hooks
+
+risk_tiers: [LOW, MEDIUM, HIGH, CRITICAL]
+
+critical_areas:
+  - path: lisp/init-claude-loop.el
+    why: launches a headless agent with --permission-mode acceptEdits and runs an
+         operator-supplied shell command unattended
+    knowledge: .are/knowledge/CLAUDE_LOOP.md
+
+# Never performed autonomously. Full list and reasoning in rules/SAFETY_RULES.md.
+requires_operator_approval:
+  - just clean
+  - just reset
+  - just update
+  - git commit / push / history rewriting
+  - reading or writing ~/.authinfo.gpg or ~/.ansible-vault-pass
+  - writing under ~/workspace/second-brain/
+  - deleting or moving var/ or etc/
+  - terraform apply / destroy, mutating kubectl, docker prune
+  - widening claude-loop permissions or removing its guards
+
+scripts:
+  context: scripts/are-context.sh    # git-aware task context generator
+  audit:   scripts/are-audit.sh      # repo-wide checks, wider than the diff
+  verify:  scripts/are-verify.sh     # risk-based verification driver

@@ -131,7 +131,6 @@
    "g"   '(:ignore t :which-key "git")
 
    "p"   '(:ignore t :which-key "project")
-   "pp"  '(consult-project-buffer :which-key "project buffer")
 
    "h"   '(:ignore t :which-key "help")
    "hm"  '(consult-man :which-key "man page")
@@ -227,11 +226,8 @@
   (push '(("0" . "winum-select-window-0-or-10") . ("0..9" . "window 0..9"))
         which-key-replacement-alist))
 
-;; --- Undo-fu (better undo for evil) ---
-(use-package undo-fu
-  :after evil
-  :config
-  (setq evil-undo-system 'undo-fu))
+;; --- Undo System (built-in undo-redo) ---
+(setq evil-undo-system 'undo-redo)
 
 ;; --- Evil-surround (cs, ys, ds) ---
 (use-package evil-surround

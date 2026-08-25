@@ -14,7 +14,7 @@ A modular, Evil-based Emacs configuration built for speed and productivity.
 - *Apheleia* format-on-save (lsp formatting disabled — apheleia owns all formatting)
 - *Language support* — Python, Rust, Go, C++, CMake, Terraform, YAML, Ansible, Helm templates, Dockerfile, Markdown, Just, PKGBUILDs, Jupyter notebooks
 - *Godot 4.x / GDExtension* game development (clangd, dap-lldb, CMake)
-- *Org-mode* — org-roam, org-super-agenda, org-kanban, org-download, org-transclusion, ox-hugo (blog export)
+- *Org-mode* — org-roam, org-super-agenda, org-kanban, org-download, org-transclusion, ox-hugo (blog export), org-re-reveal (reveal.js slides)
 - *Kubernetes* — kubel integration for cluster management
 - *Git* — magit, diff-hl (gutter indicators), browse-at-remote
 - *LLM tools* — gptel, ellama, aidermacs (Ollama), agent-shell
@@ -25,13 +25,118 @@ A modular, Evil-based Emacs configuration built for speed and productivity.
 - *Dashboard* start page with agenda, org-roam stats, and git status
 - *Resilient startup* — modules load inside =condition-case=; one broken module won't take down the rest
 
-** Requirements
+** Dependencies
 
-- Emacs 29+ (tree-sitter support)
-- [[https://just.systems][just]] (command runner)
-- =enchant= (system package, for =jinx= spell checking)
-- Nerd-icons fonts (=just install-fonts=)
-- Arch Linux recommended — =just install-deps= uses =pacman= / =yay=
+*** Core
+
+| Dependency | Purpose                                       |
+|------------+-----------------------------------------------|
+| Emacs 29+  | Tree-sitter support (tested with 30.x)        |
+| =git=        | Elpaca clones all packages from source        |
+| [[https://just.systems][just]]       | Command runner for everything in the justfile |
+
+*** Build tools (native modules)
+
+Some packages compile native code on first use and fail at startup if these
+are missing:
+
+| Dependency                   | Needed by                                     |
+|------------------------------+-----------------------------------------------|
+| C compiler (=gcc= or =clang=)    | =jinx=, =vterm=, tree-sitter grammars, native-comp |
+| =pkg-config=                   | =jinx= module compilation                       |
+| =enchant= + development headers | =jinx= spell checking (binary =enchant-2= must be on PATH) |
+| =cmake=, =libtool=               | =vterm= terminal emulator                       |
+| =hunspell-en-us= or =aspell-en=  | Spell-checking dictionaries used by enchant   |
+
+*** CLI tools
+
+| Dependency          | Purpose                              |
+|---------------------+--------------------------------------|
+| =ripgrep=             | Search (consult, projectile)         |
+| =fd=                  | Fast file finding                    |
+| =shfmt=               | Shell script formatting (apheleia)   |
+| =editorconfig-core-c= | EditorConfig support                 |
+| =git=                 | Local reveal.js checkout (SPC o p i)  |
+
+*** Language servers, formatters & dev tools
+
+| Dependency        | Purpose                                                     |
+|-------------------+-------------------------------------------------------------|
+| =pyright=           | Python LSP                                                  |
+| =python-black=      | Python formatting (apheleia)                                |
+| =python-pytest=     | Python testing                                              |
+| =gopls=, =go-tools=   | Go LSP + tooling                                            |
+| =gomodifytags=      | Go struct tag editing                                       |
+| =delve=             | Go debugging (dap-mode)                                     |
+| =rustup=            | Rust toolchain — nightly + =rust-analyzer=, =clippy=, =rustfmt= |
+| =prettier=          | JS/TS/YAML/Markdown formatting (apheleia)                   |
+| =terraform=         | Terraform tooling                                           |
+| =kubectl=           | Kubernetes cluster management (kubel)                       |
+| =docker=            | Docker integration                                          |
+| =hugo=              | Blog export (ox-hugo)                                       |
+| =claude-code-acp=   | agent-shell AI integration (AUR)                            |
+| =claude=            | Claude Code CLI — required by the task loop (=init-claude-loop=) |
+| =jdk-openjdk=       | Java 11+ runtime for the Snowflake JDBC driver (ejc-sql)    |
+| =leiningen=         | Boots the Clojure nREPL ejc-sql drives JDBC through         |
+
+*** Reveal.js presentations
+
+Slide export runs through =org-re-reveal= (=SPC o p=). reveal.js assets load
+from a CDN by default, so no local install is needed while online.
+
+Decks are ordinary org-roam nodes living in the flat roam root
+(=rata-reveal-deck-dir=), so they get IDs, show up in =org-roam-node-find=, and
+can link to the notes they synthesise. A deck is identified by its
+=#+filetags: :presentation:= tag (=rata-reveal-deck-tag=), not by its location —
+=SPC o p P= exports every tagged note by querying the roam DB, the same
+technique =init-org.el= uses for =:hastodo:= agenda inclusion.
+
+Exported HTML goes to =~/workspace/second-brain/presentations/=
+(=rata-reveal-export-dir=), outside =org-roam-directory=, so generated files never
+enter the note tree — the same split as =hugo/= vs =hugo/public/=.
+
+To start a new deck, use the =presentation= org-roam capture template
+(=SPC o r c= then =r=, or =SPC o p n=). To turn a note you already have into a
+deck, open it and press =SPC o p a= — it adds the tag and the =#+REVEAL_*=
+keywords in place, leaving your content alone.
+
+To present offline, run =SPC o p i= once — it shallow-clones reveal.js to
+=~/.local/share/reveal.js= — then =SPC o p r= to point exports at that copy.
+=SPC o p v= serves the deck over =simple-httpd= on localhost, which speaker
+notes need (they do not work over =file://=).
+
+*** Org LaTeX math preview
+
+Requires =latex= and =dvisvgm= on PATH. On Arch these come from:
+=texlive-binextra texlive-latex texlive-latexrecommended texlive-latexextra
+texlive-plaingeneric= (wrapfig/capt-of from latexextra, ulem from plaingeneric).
+
+*** Fonts
+
+Icons (modeline, dirvish, dashboard, corfu) require *Symbols Nerd Font Mono*:
+
+#+begin_src sh
+  just install-fonts
+#+end_src
+
+*** Installing
+
+On Arch Linux everything above is installed by:
+
+#+begin_src sh
+  just install-deps
+#+end_src
+
+On Debian/Ubuntu, install the core and native-build dependencies with:
+
+#+begin_src sh
+  sudo apt install build-essential pkg-config enchant-2 libenchant-2-dev \
+      hunspell-en-us cmake libtool-bin ripgrep fd-find
+#+end_src
+
+Language servers and formatters on non-Arch systems come from their own
+ecosystems (=npm=, =pip=, =go install=, =rustup=) — install the ones you need for
+the languages you use.
 
 ** Getting Started
 
@@ -50,8 +155,11 @@ A modular, Evil-based Emacs configuration built for speed and productivity.
 Or manually:
 
 #+begin_src sh
-  /usr/bin/emacs --init-directory ~/workspace/Ratatoskr-emacs
+  emacs --init-directory ~/workspace/Ratatoskr-emacs
 #+end_src
+
+The justfile auto-detects the Emacs binary (=/usr/bin/emacs=, snap, or PATH);
+set =EMACS_BIN= to override it per machine.
 
 *** First Run
 
@@ -86,6 +194,31 @@ To install icon fonts and tree-sitter grammars:
 | =just install-grammars= | Install tree-sitter grammars (one-time)      |
 | =just install-deps=     | Install system dependencies (Arch Linux)     |
 | =just install-hooks=    | Install git pre-commit hook (one-time)       |
+| =just are=              | Show the ARE entry point and commands        |
+| =just are-context=      | Generate task context from git + the ARE map |
+| =just are-verify LEVEL= | Risk-based verification: fast/relevant/full  |
+| =just are-audit=        | Repo-wide reliability audit                  |
+
+** Reliability (ARE)
+
+This config carries an [[file:.are/INDEX.md][Autonomous Reliability Engineering]] layer: a small knowledge base,
+a failure log, risk rules, and three bash scripts that compose the =just= targets above
+into risk-based verification levels. It adds no dependency and duplicates nothing —
+=AGENTS.md= still owns conventions, the =justfile= still owns commands, and =tests/=
+still owns the truth.
+
+Start at =.are/INDEX.md=. Before changing a module, run =just are-context "what you are
+doing"=; it prints the risk tier and the exact knowledge worth reading. Verification
+levels, and what each one does *not* prove, are in =.are/knowledge/TESTING_STRATEGY.md=.
+
+#+begin_src sh
+  just are-verify fast       # ~4s   — lint + claude-loop e2e + audit, no packages needed
+  just are-verify relevant   # ~2min — adds byte-compile + the ERT suite
+  just are-verify full       # ~3min — adds batch startup; what the pre-commit hook runs
+#+end_src
+
+Note: the pre-commit hook is not active until you run =just install-hooks=, and there is
+no CI. See =.are/memory/FAILURE_INDEX.md=.
 
 ** Architecture
 
@@ -112,8 +245,10 @@ To install icon fonts and tree-sitter grammars:
 | =init-gamedev=    | Godot 4.x / GDExtension development                    |
 | =init-snippets=   | Yasnippet + community snippets                          |
 | =init-llm=        | gptel, ellama, aidermacs                                |
+| =init-claude-loop= | Runs Claude Code through a checklist file, task by task |
 | =init-persp=      | Workspace management via persp-mode                     |
 | =init-org=        | Org-roam, org-super-agenda, org-kanban, org-transclusion |
+| =init-present=    | Reveal.js slide export from org (org-re-reveal)          |
 | =init-dashboard=  | Start page with agenda, roam stats, git status          |
 
 ** Keybindings
@@ -146,6 +281,128 @@ All keybindings use =general.el= with =SPC= as the global leader in Evil normal/
 | =SPC a g= | Gamedev    |
 | =SPC a i= | AI tools   |
 | =SPC a k= | Kubernetes |
+
+** Claude Code Task Loop
+
+Work a checklist file top to bottom with Claude Code, one task per run.
+
+Write the tasks in any =.md= or =.org= file:
+
+#+begin_src markdown
+- [ ] Implement the database schema for the user profiles
+- [ ] Write unit tests for the schema validation
+- [ ] Update the API documentation
+#+end_src
+
+Open that file and hit =SPC a i c l l=. Each task is handed to its own
+=claude -p= process, so every task starts from a *clean context* — no
+=/clear= needed, and nothing leaks between tasks. Org =TODO= headings work
+too and are moved to =DONE=.
+
+Claude runs in the repository containing the task file — the nearest
+directory above it holding a =.git= (or another marker in
+=rata-claude-loop-root-markers=). If there is no repository, it runs in the
+task file's own directory. A marker sitting in =$HOME= is deliberately
+ignored, so a dotfiles repo or a stray =~/package.json= cannot turn your
+entire home directory into the working directory. =C-u C-u SPC a i c l l=
+prompts for the directory if you need to override it.
+
+Progress is rendered into =*claude-loop*=; the child runs with
+=--output-format stream-json= and its events are decoded into readable prose
+and tool calls rather than raw JSON.
+
+*** When is a task "done"?
+
+Not when =claude -p= exits 0. It exits 0 whenever the *CLI* succeeded, which
+includes a task that looked at the problem and gave up, and a task whose
+every edit was silently denied — print mode denies instead of prompting. A
+box is ticked only when all of these hold:
+
+- the process exited 0, and the final =result= event reports subtype
+  =success= with no error;
+- no tool in =rata-claude-loop-critical-denial-tools= (=Edit=, =Write=,
+  =MultiEdit=, =NotebookEdit=) was denied — a denied =WebFetch= is reported
+  but tolerated, since halting a good run over it would be worse;
+- the task did not report =RATA-TASK-STATUS: blocked=. Every prompt asks for
+  a status line as its last line, which is how a task says "I could not do
+  this" in a way the loop can act on;
+- =rata-claude-loop-verify-command=, if set, exited 0.
+
+The box is also only ticked on a line that *still holds that task*. The text
+is matched, not just the line number, so a checklist that shifted while a
+half-hour task ran cannot get the wrong box ticked; an ambiguous or missing
+task halts and says so instead.
+
+*** Verification and retry
+
+=rata-claude-loop-verify-command= is the strongest gate available, and it now
+runs asynchronously — Emacs stays responsive through your test suite. Set it
+globally or per project via =.dir-locals.el= (it is deliberately *not* a
+=safe-local-variable=: it is a shell command, so Emacs should ask).
+
+When an attempt fails, the loop does not throw the work away. It captures the
+=session_id= from the run and retries with =claude -p --resume=, handing back
+the reason and the tail of the failing output — so the second attempt already
+knows what it did and what broke, rather than starting from a clean context.
+=rata-claude-loop-max-attempts= (default 2, i.e. one retry) bounds it, and
+=rata-claude-loop-retry-on= chooses which failures are worth retrying. A
+timeout and a self-reported =blocked= are excluded on purpose: the first
+leaves unknown partial state, the second is a considered judgement.
+
+If the retry does not help, =SPC a i c l o= opens a vterm running =claude
+--resume= on that same session, so you can take over by hand from exactly
+where it got stuck.
+
+*** Keys
+
+| Key           | Action                     |
+|---------------+----------------------------|
+| =SPC a i c l l= | Start the loop             |
+| =C-u SPC a i c l l= | Start, prompting for the task file |
+| =C-u C-u SPC a i c l l= | ...and for the working directory |
+| =SPC a i c l r= | Run only the task at point |
+| =SPC a i c l s= | Stop (SIGINT, then SIGKILL after a grace period) |
+| =SPC a i c l n= | Skip current task (=[-]=)    |
+| =SPC a i c l c= | Resume after a halt        |
+| =SPC a i c l t= | Retry the current task by resuming its session |
+| =SPC a i c l o= | Take over the session in a vterm |
+| =SPC a i c l b= | Show the output buffer     |
+| =SPC a i c l ?= | Status                     |
+
+In the =*claude-loop*= buffer itself: =q= quits, =gr= reports status, =gt=
+retries, =go= takes over, =C-c C-k= stops.
+
+*** Settings worth reviewing
+
+#+begin_src elisp
+;; The strongest quality gate. Runs asynchronously, so a long suite does not
+;; freeze Emacs.
+(setq rata-claude-loop-verify-command "just test")
+
+;; How much autonomy each run gets. In print mode there are no interactive
+;; permission prompts -- anything not permitted is silently denied.
+(setq rata-claude-loop-extra-args '("--permission-mode" "acceptEdits"))
+
+;; Guard rails. There is no CLI timeout flag, so that timer lives in Emacs.
+(setq rata-claude-loop-task-timeout 1800)   ; seconds per attempt
+(setq rata-claude-loop-max-turns 60)        ; --max-turns
+(setq rata-claude-loop-task-budget-usd 2.0) ; --max-budget-usd per attempt
+(setq rata-claude-loop-fallback-model "sonnet") ; survive an overload
+
+;; Print a per-task `git diff --stat' into the loop buffer. Read-only: nothing
+;; is committed, stashed or reset.
+(setq rata-claude-loop-git-checkpoint 'record)
+#+end_src
+
+See =M-x customize-group RET rata-claude-loop= for the rest.
+
+*** Testing it
+
+The pure parts (task scanning, checkbox marking, stream decoding, outcome
+classification, argv building) are covered by ERT in =tests/run-tests.el=.
+The state machine itself — spawn, async verify, retry-by-resume, timeout,
+marking — is driven against a stub CLI by =just test-claude-loop=, which
+makes no API calls and spends nothing.
 
 ** Adding a New Module
 

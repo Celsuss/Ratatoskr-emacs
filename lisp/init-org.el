@@ -25,18 +25,19 @@
 (use-package org
   :defer t
   :after general
-  :commands (org-capture org-agenda org-todo-list org-deadline)
+  :commands (org-capture org-agenda org-todo-list org-deadline org-latex-preview)
   :hook (org-mode . auto-fill-mode)
   :config
   (setq-default fill-column 80)
   (rata-leader
-   :states '(normal visual motion)
-   "o"  '(:ignore t :which-key "org")
-   "oc" '(org-capture :which-key "org capture")
-   "oa" '(org-agenda :which-key "org agenda")
-   "ot" '(org-todo-list :which-key "list all TODOs")
-   "od" '(org-deadline :which-key "deadline")
-   "of" '(rata-org-capture-fleeting :which-key "fleeting note"))
+    :states '(normal visual motion)
+    "o"  '(:ignore t :which-key "org")
+    "oc" '(org-capture :which-key "org capture")
+    "oa" '(org-agenda :which-key "org agenda")
+    "ot" '(org-todo-list :which-key "list all TODOs")
+    "od" '(org-deadline :which-key "deadline")
+    "om" '(org-latex-preview :which-key "toggle math preview")
+    "of" '(rata-org-capture-fleeting :which-key "fleeting note"))
 
   ;;;; Org Agenda
   (setq org-agenda-inhibit-startup t)
@@ -118,20 +119,20 @@
 
   ;; Capture templates
   (setq org-capture-templates
-        `(("t" "TODO" entry (file ,(expand-file-name "todo.org" rata-org-roam-dir))
+        `(("t" "TODO" entry (file ,(expand-file-name "todo.org" rata-org-roam-dir) "TODOs")
            "** TODO %?\n  :PROPERTIES:\n  :CREATED: %U\n  :END:")
 
-          ("w" "Work Task" entry (file ,(expand-file-name "work_tasks.org" rata-org-roam-dir))
+          ("w" "Work Task" entry (file ,(expand-file-name "work_tasks.org" rata-org-roam-dir) "Tasks" )
            "** TODO %? :work:\n  :PROPERTIES:\n  :CREATED: %U\n  :END:")
 
           ("h" "Home Lab Task" entry
            (file+headline ,(expand-file-name "homelab_tasks.org" rata-org-roam-dir) "Tasks")
            "** TODO %? :homelab:\n  :PROPERTIES:\n  :CREATED: %U\n  :END:")
 
-          ("e" "Emacs Tweak" entry (file ,(expand-file-name "emacs_tweak_tasks.org" rata-org-roam-dir))
+          ("e" "Emacs Tweak" entry (file ,(expand-file-name "emacs_tweak_tasks.org" rata-org-roam-dir) "Tasks")
            "** TODO %? :emacs:\n  :PROPERTIES:\n  :CREATED: %U\n  :END:")
 
-          ("d" "Dotfiles Tweak" entry (file ,(expand-file-name "dotfiles_tweak_tasks.org" rata-org-roam-dir))
+          ("d" "Dotfiles Tweak" entry (file ,(expand-file-name "dotfiles_tweak_tasks.org" rata-org-roam-dir) "Tasks")
            "** TODO %? :dotfiles:\n  :PROPERTIES:\n  :CREATED: %U\n  :END:")
 
           ("c" "Curriculum Task" entry (file ,(expand-file-name "curriculum_tasks.org" rata-org-roam-dir))
@@ -192,10 +193,10 @@
 
 ;; --- Org Roam ---
 (dolist (cmd '(org-roam-buffer-toggle org-roam-node-find org-roam-graph
-               org-roam-node-insert org-roam-capture
-               org-roam-dailies-capture-today org-roam-dailies-goto-today
-               org-roam-dailies-goto-yesterday org-roam-dailies-goto-tomorrow
-               org-roam-dailies-goto-date))
+				      org-roam-node-insert org-roam-capture
+				      org-roam-dailies-capture-today org-roam-dailies-goto-today
+				      org-roam-dailies-goto-yesterday org-roam-dailies-goto-tomorrow
+				      org-roam-dailies-goto-date))
   (autoload cmd "org-roam" nil t))
 
 (defun rata-toggle-hastodo-filetag ()
@@ -250,8 +251,7 @@ When present the file is included in org-agenda via the :hastodo: query."
                                  :unnarrowed t)
 
                                 ("p" "project" plain
-                                 "\n* TODO ${title}
-One of [[id:1ae70a1c-485e-43fb-acc2-4c364510d632][my projects]].
+                                 "One of [[id:1ae70a1c-485e-43fb-acc2-4c364510d632][my projects]].
 
 ** Goal
 Describe the outcome of this project.
@@ -272,7 +272,7 @@ Describe the outcome of this project.
                                                              "#+filetags: :project:${slug}:hastodo:\n"
                                                              "#+SEQ_TODO: TODO STRT WAIT | DONE\n"
                                                              "#+startup: content\n"
-                                                             "\n"))
+                                                             "\n\n* TODO ${title}\n"))
                                  :unnarrowed t)
 
 
@@ -294,48 +294,69 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
                                                              "\n"))
                                  :unnarrowed t)
 
-                                ("m" "meeting" plain
-                                 "\n* Meeting Notes\n%?\n\n* Action Items\n** TODO \n"
+                                ;; NB: the :presentation: filetag must match
+                                ;; `rata-reveal-deck-tag' in init-present.el,
+                                ;; which selects decks by that tag.
+                                ("r" "presentation" plain
+                                 "%?"
                                  :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
                                                     ,(concat "#+title: ${title}\n"
                                                              "#+author: " user-full-name "\n"
                                                              "#+date: %U\n"
-                                                             "#+filetags: :work:hastodo:\n"))
+                                                             "#+filetags: :presentation:\n"
+                                                             "#+OPTIONS: toc:nil num:nil timestamp:nil\n"
+                                                             "#+REVEAL_THEME: night\n"
+                                                             "#+REVEAL_TRANS: slide\n"
+                                                             "#+REVEAL_INIT_OPTIONS: width:1280, height:800, hash:true, slideNumber:\"c/t\"\n"
+                                                             "#+REVEAL_PLUGINS: (notes)\n"
+                                                             "\n\n* ${title}\n"))
+                                 :unnarrowed t)
+
+                                ("m" "meeting" plain
+                                 "%?\n\n* Action Items\n** TODO \n"
+                                 :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
+                                                    ,(concat "#+title: ${title}\n"
+                                                             "#+author: " user-full-name "\n"
+                                                             "#+date: %U\n"
+                                                             "#+filetags: :work:hastodo:\n"
+                                                             "\n\n* Meeting Notes\n"))
                                  :unnarrowed t)
 
                                 ("e" "tool evaluation" plain
-                                 "\n* ${title}\n\n** What it does\n%?\n\n** Pros\n- \n\n** Cons\n- \n\n** Alternatives & Comparison\n| Tool | Pros | Cons | Verdict |\n|------+------+------+---------|\n| ${title} | | | |\n| | | | |\n\n** Verdict\n/adopt · trial · reject · revisit/\n"
+                                 "\n** What it does\n%?\n\n** Pros\n- \n\n** Cons\n- \n\n** Alternatives & Comparison\n| Tool | Pros | Cons | Verdict |\n|------+------+------+---------|\n| ${title} | | | |\n| | | | |\n\n** Verdict\n/adopt · trial · reject · revisit/\n"
                                  :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
                                                     ,(concat "#+title: ${title}\n"
                                                              "#+author: " user-full-name "\n"
                                                              "#+date: %U\n"
-                                                             "#+filetags: :tool-eval:\n"))
+                                                             "#+filetags: :tool-eval:\n"
+                                                             "\n\n* ${title}\n"))
                                  :unnarrowed t)
 
                                 ("T" "troubleshooting" plain
-                                 "\n* Problem\n%?\n\n* Environment\n- OS: \n- Tool version: \n\n* Steps Tried\n1. \n\n* Root Cause\n\n* Solution\n"
+                                 "%?\n\n* Environment\n- OS: \n- Tool version: \n\n* Steps Tried\n1. \n\n* Root Cause\n\n* Solution\n"
                                  :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
                                                     ,(concat "#+title: ${title}\n"
                                                              "#+author: " user-full-name "\n"
                                                              "#+date: %U\n"
-                                                             "#+filetags: :troubleshooting:\n"))
+                                                             "#+filetags: :troubleshooting:\n"
+                                                             "\n\n* Problem\n"))
                                  :unnarrowed t)))
 
   :config
   (rata-leader
-   :states '(normal visual)
-   "or"  '(:ignore t :which-key "Org roam")
-   "orl" '(org-roam-buffer-toggle :which-key "toggle buffer")
-   "orf" '(org-roam-node-find :which-key "find node")
-   "org" '(org-roam-graph :which-key "show graph")
-   "ori" '(org-roam-node-insert :which-key "insert node")
-   "orc" '(org-roam-capture :which-key "capture node")
-   "ord"  '(:ignore t :which-key "Org roam dailies")
-   "ordc" '(org-roam-dailies-capture-today :which-key "capture today")
-   "ordt" '(org-roam-dailies-goto-today :which-key "goto today")
-   "ordy" '(org-roam-dailies-goto-yesterday :which-key "goto yesterday")
-   "ordm" '(org-roam-dailies-goto-tomorrow :which-key "goto tomorrow")
-   "ordd" '(org-roam-dailies-goto-date :which-key "goto date"))
+    :states '(normal visual)
+    "or"  '(:ignore t :which-key "Org roam")
+    "orl" '(org-roam-buffer-toggle :which-key "toggle buffer")
+    "orf" '(org-roam-node-find :which-key "find node")
+    "org" '(org-roam-graph :which-key "show graph")
+    "ori" '(org-roam-node-insert :which-key "insert node")
+    "orc" '(org-roam-capture :which-key "capture node")
+    "ord"  '(:ignore t :which-key "Org roam dailies")
+    "ordc" '(org-roam-dailies-capture-today :which-key "capture today")
+    "ordt" '(org-roam-dailies-goto-today :which-key "goto today")
+    "ordy" '(org-roam-dailies-goto-yesterday :which-key "goto yesterday")
+    "ordm" '(org-roam-dailies-goto-tomorrow :which-key "goto tomorrow")
+    "ordd" '(org-roam-dailies-goto-date :which-key "goto date"))
 
   ;; Dailies
   (setq org-roam-dailies-directory (expand-file-name "daily" rata-org-roam-dir))
@@ -390,8 +411,8 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
            :empty-lines-after 1)))
 
   (rata-leader
-   :states '(normal visual)
-   "oh" '(rata-toggle-hastodo-filetag :which-key "toggle agenda inclusion"))
+    :states '(normal visual)
+    "oh" '(rata-toggle-hastodo-filetag :which-key "toggle agenda inclusion"))
 
   (org-roam-db-autosync-mode))
 
@@ -430,12 +451,12 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
   :commands (org-roam-ql-search)
   :config
   (rata-leader
-   :states '(normal visual)
-   "orq"  '(:ignore t :which-key "roam queries")
-   "orqo" '(rata-roam-orphan-notes  :which-key "orphan notes")
-   "orqr" '(rata-roam-recent-notes  :which-key "recent notes")
-   "orqw" '(rata-roam-work-notes    :which-key "work notes")
-   "orqt" '(rata-roam-stale-todos   :which-key "stale TODOs")))
+    :states '(normal visual)
+    "orq"  '(:ignore t :which-key "roam queries")
+    "orqo" '(rata-roam-orphan-notes  :which-key "orphan notes")
+    "orqr" '(rata-roam-recent-notes  :which-key "recent notes")
+    "orqw" '(rata-roam-work-notes    :which-key "work notes")
+    "orqt" '(rata-roam-stale-todos   :which-key "stale TODOs")))
 
 ;; --- Org Super Agenda ---
 (use-package org-super-agenda
@@ -522,6 +543,10 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 ;; --- Org Modern (visual enhancements) ---
 (use-package org-modern
   :after org
+  :custom
+  ;; Default 'fold style uses ⯈/⯆ (U+2BC8/U+2BC6) for level 3, which no
+  ;; installed font covers — level-3 headings rendered as tofu.
+  (org-modern-star 'replace)
   :config
   (global-org-modern-mode)
   (setq org-modern-agenda t))
@@ -533,6 +558,43 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
   :custom
   (org-appear-autolinks t)
   (org-appear-autosubmarkers t))
+
+;; --- LaTeX math preview ---
+;; Built-in org-latex-preview renders $...$ / $$...$$ fragments to images.
+;; Requires a system LaTeX install + dvisvgm (e.g. Arch: texlive-* packages).
+(with-eval-after-load 'org
+  (when (and (executable-find "latex")
+             (executable-find "dvisvgm"))
+    ;; Crisp, resolution-independent SVG output (scales with font size / HiDPI).
+    (setq org-preview-latex-default-process 'dvisvgm)
+    ;; Render all math fragments to images automatically on file open, so you
+    ;; don't have to invoke `SPC o m' manually.  org-fragtog still toggles the
+    ;; fragment around point back to source as you edit.
+    (setq org-startup-with-latex-preview t)
+    ;; Slightly larger so rendered math matches body text on HiDPI.
+    (setq org-format-latex-options
+          (plist-put org-format-latex-options :scale 1.3))
+    ;; Derive colors from the `default' face so SVGs are legible on
+    ;; gruvbox-dark-medium instead of black-on-transparent.  Use `default'
+    ;; rather than `auto': `auto' reads `face-at-point', which can be nil and
+    ;; raises "Invalid face" during in-buffer preview.
+    (setq org-format-latex-options
+          (plist-put org-format-latex-options :foreground 'default))
+    (setq org-format-latex-options
+          (plist-put org-format-latex-options :background 'default))
+    ;; The dvisvgm preview process compiles with pdfTeX `latex', but org's
+    ;; default package list includes `fontspec' (lualatex/xetex only), which
+    ;; aborts compilation ("fontspec requires either XeTeX or LuaTeX").  The
+    ;; preview pipeline does not honor the per-package compiler restriction,
+    ;; so strip fontspec from the snippet preamble.
+    (setq org-latex-default-packages-alist
+          (seq-remove (lambda (pkg) (equal (nth 1 pkg) "fontspec"))
+                      org-latex-default-packages-alist))))
+
+;; --- Org Fragtog (auto-toggle LaTeX previews around point) ---
+(use-package org-fragtog
+  :after org
+  :hook (org-mode . org-fragtog-mode))
 
 ;; --- Consult Org Roam ---
 
@@ -549,16 +611,16 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 (use-package consult-org-roam
   :after (org-roam consult general)
   :commands (consult-org-roam-search consult-org-roam-backlinks
-             consult-org-roam-file-find)
+				     consult-org-roam-file-find)
   :config
   (consult-org-roam-mode 1)
   (rata-leader
-   :states '(normal visual)
-   "ors" '(consult-org-roam-search      :which-key "search roam")
-   "orb" '(consult-org-roam-backlinks   :which-key "backlinks consult")
-   "orF" '(consult-org-roam-file-find   :which-key "find file consult")
-   "orw" '(rata-roam-search-work        :which-key "search work notes")
-   "orP" '(rata-roam-search-personal    :which-key "search personal notes")))
+    :states '(normal visual)
+    "ors" '(consult-org-roam-search      :which-key "search roam")
+    "orb" '(consult-org-roam-backlinks   :which-key "backlinks consult")
+    "orF" '(consult-org-roam-file-find   :which-key "find file consult")
+    "orw" '(rata-roam-search-work        :which-key "search work notes")
+    "orP" '(rata-roam-search-personal    :which-key "search personal notes")))
 
 ;; --- simple-httpd (explicit recipe to disambiguate from eschulte/emacs-web-server) ---
 (use-package simple-httpd
@@ -577,8 +639,8 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
   :after (org-roam general)
   :config
   (rata-leader
-   :states '(normal visual)
-   "oru" '(org-roam-ui-mode :which-key "roam graph UI")))
+    :states '(normal visual)
+    "oru" '(org-roam-ui-mode :which-key "roam graph UI")))
 
 ;; --- Org Download (paste/drag images) ---
 (use-package org-download
@@ -591,22 +653,22 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 
 ;; --- Org Transclusion (live embedding of content) ---
 (dolist (cmd '(org-transclusion-add org-transclusion-add-all
-               org-transclusion-remove org-transclusion-remove-all
-               org-transclusion-live-sync-start org-transclusion-mode))
+				    org-transclusion-remove org-transclusion-remove-all
+				    org-transclusion-live-sync-start org-transclusion-mode))
   (autoload cmd "org-transclusion" nil t))
 
 (use-package org-transclusion
   :after (org general)
   :config
   (rata-leader
-   :states '(normal visual)
-   "ort"  '(:ignore t :which-key "transclusion")
-   "orta" '(org-transclusion-add            :which-key "add transclusion")
-   "ortA" '(org-transclusion-add-all        :which-key "add all transclusions")
-   "ortr" '(org-transclusion-remove         :which-key "remove transclusion")
-   "ortR" '(org-transclusion-remove-all     :which-key "remove all")
-   "orte" '(org-transclusion-live-sync-start :which-key "edit source")
-   "ortm" '(org-transclusion-mode           :which-key "toggle mode")))
+    :states '(normal visual)
+    "ort"  '(:ignore t :which-key "transclusion")
+    "orta" '(org-transclusion-add            :which-key "add transclusion")
+    "ortA" '(org-transclusion-add-all        :which-key "add all transclusions")
+    "ortr" '(org-transclusion-remove         :which-key "remove transclusion")
+    "ortR" '(org-transclusion-remove-all     :which-key "remove all")
+    "orte" '(org-transclusion-live-sync-start :which-key "edit source")
+    "ortm" '(org-transclusion-mode           :which-key "toggle mode")))
 
 ;; --- ox-hugo (org to Hugo markdown export) ---
 
@@ -624,10 +686,10 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
   :commands (org-hugo-export-wim-to-md)
   :config
   (rata-leader
-   :states '(normal visual)
-   "ob"  '(:ignore t :which-key "blog/hugo")
-   "obe" '(org-hugo-export-wim-to-md :which-key "export to hugo")
-   "obp" '(rata-hugo-preview         :which-key "preview post")))
+    :states '(normal visual)
+    "ob"  '(:ignore t :which-key "blog/hugo")
+    "obe" '(org-hugo-export-wim-to-md :which-key "export to hugo")
+    "obp" '(rata-hugo-preview         :which-key "preview post")))
 
 ;; --- Writegood Mode ---
 (use-package writegood-mode
@@ -635,7 +697,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
          (markdown-mode . writegood-mode))
   :config
   (rata-leader
-   :states '(normal visual)
-   "tw"  '(writegood-mode :which-key "writegood")))
+    :states '(normal visual)
+    "tw"  '(writegood-mode :which-key "writegood")))
 
 (provide 'init-org)

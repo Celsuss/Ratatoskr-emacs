@@ -2,39 +2,97 @@
 
 ** Software Development                                             :dev:blog:
 *** [[https://log.schemescape.com/feed.xml][Schemescape]]                                                   :schemescape:
-*** [[https://ntietz.com/atom.xml][Ntietz]]                                                               :gwen:
+*** [[https://ntietz.com/atom.xml][Ntietz]]                                                               :Ntietz:
 *** [[https://xeiaso.net/blog.rss][Xe Iaso]]                                                           :xe_iaso:
-*** [[https://gwern.substack.com/feed][Qwern]]
+*** [[https://gwern.substack.com/feed][Qwern]]                                                                :gwen:
+*** [[https://cleberg.net/feed.xml][cleberg]]                                                           :cleberg:
+*** [[https://jvns.ca/atom.xml][Julia Evans]]
+*** [[https://rachelbythebay.com/w/atom.xml][Rachel by the Bay]]
+*** [[https://danluu.com/atom.xml][Dan Luu]]
+*** [[https://simonwillison.net/atom/everything/][Simon Willison]]
+*** [[https://www.hillelwayne.com/index.xml][Hillel Wayne]]
+*** [[https://blog.nelhage.com/atom.xml][Made of Bugs]]
+*** [[https://eli.thegreenplace.net/feeds/all.atom.xml][Eli Bendersky]]
+*** [[https://fasterthanli.me/index.xml][fasterthanlime]]
+*** [[https://drewdevault.com/blog/index.xml][Drew DeVault]]
+*** [[https://brandur.org/articles.atom][Brandur]]
+*** [[http://antirez.com/rss][antirez]]
+*** [[https://antonz.org/index.xml][Anton Zhiyanov]]
+*** [[https://registerspill.thorstenball.com/feed][Registerspill]]
+*** [[https://ludic.mataroa.blog/rss/][Ludic]]
 
 ** Machine Learning                                                  :ml:blog:
 *** [[https://jalammar.github.io/feed.xml][Jay Alammar]]                                                    :jayalammar:
-*** [[https://lilianweng.github.io/lil-log/feed.xml][Lil'Log]]                                                            :lillog:
+*** [[https://lilianweng.github.io/index.xml][Lil'Log]]                                                            :lillog:
 *** [[https://huyenchip.com/feed.xml][Huyen Chip]]                                                     :huyen_chip:
-*** [[https://sebastianraschka.com/blog/rss_feed.xml][Sebastian Raschka]]
+*** [[https://sebastianraschka.com/rss_feed.xml][Sebastian Raschka]]
+*** [[https://magazine.sebastianraschka.com/feed][Ahead of AI]]
+*** [[https://www.interconnects.ai/feed][Interconnects]]
+*** [[https://importai.substack.com/feed][Import AI]]
+*** [[https://eugeneyan.com/rss/][Eugene Yan]]
+*** [[https://www.answer.ai/index.xml][Answer.AI]]
+*** [[https://huggingface.co/blog/feed.xml][Hugging Face]]
+*** [[https://research.google/blog/rss/][Google Research]]
+*** [[https://bair.berkeley.edu/blog/feed.xml][BAIR Berkeley]]
+*** [[https://openai.com/news/rss.xml][OpenAI News]]
+
+** Data & MLOps                                                   :data:mlops:
+*** [[https://airflow.apache.org/blog/index.xml][Apache Airflow]]
+*** [[https://www.dataengineeringweekly.com/feed][Data Engineering Weekly]]
+*** [[https://duckdb.org/feed.xml][DuckDB]]
+*** [[https://netflixtechblog.com/feed][Netflix Tech Blog]]
+*** [[https://medium.com/feed/airbnb-engineering][Airbnb Engineering]]
+*** [[https://www.databricks.com/blog/feed][Databricks]]
+*** [[https://www.uber.com/blog/rss/][Uber Engineering]]
 
 ** Emacs                                                          :emacs:foss:
 *** [[https://planet.emacslife.com/atom.xml][Planet Emacslife]]
 *** [[https://systemcrafters.net/rss/news.xml][System Crafters]]
 *** [[https://www.masteringemacs.org/feed][Mastering Emacs]]
+*** [[https://protesilaos.com/master.xml][Protesilaos]]
+*** [[https://lobste.rs/t/emacs.rss][Lobsters Emacs]]
 
 ** Linux                                                          :linux:foss:
 *** [[https://itsfoss.com/rss/][It's Foss]]
 *** [[https://archlinux.org/feeds/news/][Arch Linux]]                                                           :arch:
+*** [[https://archlinux.org/feeds/planet/][Arch Linux Planet]]                                              :arch:blog:
+*** [[https://lwn.net/headlines/newrss][LWN]]
+*** [[https://www.phoronix.com/rss.php][Phoronix]]
+*** [[https://9to5linux.com/feed/atom][9to5Linux]]
+*** [[https://fedoramagazine.org/feed/][Fedora Magazine]]
 
 ** Homelab                                                      :homelab:foss:
 *** [[https://noted.lol/rss][Noted Homelab]]
 *** [[https://selfh.st/rss/][selfh.st]]
+*** [[https://tailscale.com/blog/index.xml][Tailscale]]
+*** [[https://www.jeffgeerling.com/blog.xml][Jeff Geerling]]
+*** [[https://technotim.live/feed.xml][Techno Tim]]
+*** [[https://www.servethehome.com/feed/][ServeTheHome]]
 
 ** News                                                                 :news:
 *** [[https://feber.se/rss/][Feber]]                                                               :feber:
 *** [[https://www.sweclockers.com/feeds/nyheter][SweClockers]]
 *** [[https://news.ycombinator.com/rss][Hacker News]]
+*** [[https://hnrss.org/best][Hacker News Best]]
+*** [[https://hnrss.org/frontpage?points=250][Hacker News 250+ Points]]
 *** [[https://lobste.rs/rss][lobster]]
 *** [[https://hackaday.com/blog/feed/][Hackaday]]
+*** [[https://www.theregister.com/headlines.atom][The Register]]
+*** [[https://feeds.arstechnica.com/arstechnica/index][Ars Technica]]
+*** [[https://www.svt.se/nyheter/rss.xml][SVT Nyheter]]
+*** [[https://api.sr.se/api/rss/program/83][Sveriges Radio Ekot]]
+*** [[https://computersweden.idg.se/feed][Computer Sweden]]
+
+** Security                                                         :security:
+*** [[https://krebsonsecurity.com/feed/][Krebs on Security]]
+*** [[https://www.schneier.com/feed/atom/][Schneier on Security]]
+*** [[https://googleprojectzero.blogspot.com/feeds/posts/default][Google Project Zero]]
 
 ** Games                                                               :games:
 *** [[https://www.fz.se/feeds/nyheter][FZ]]                                                                     :fz:
 *** [[https://www.polygon.com/rss/index.xml][Polygon]]                                                           :polygon:
+*** [[https://www.rockpapershotgun.com/feed][Rock Paper Shotgun]]
+*** [[https://www.pcgamer.com/rss/][PC Gamer]]
 
 ** Tech radar                                                     :tech_radar:
 *** DZone                                                               :dzone:
@@ -54,3 +112,8 @@
 
 ** Humor                                                               :humor:
 *** [[https://xkcd.com/rss.xml][XKCD]]
+*** [[https://www.smbc-comics.com/comic/rss][SMBC]]
+*** [[https://www.monkeyuser.com/index.xml][Monkeyuser]]
+*** [[https://turnoff.us/feed.xml][turnoff.us]]
+*** [[http://syndication.thedailywtf.com/TheDailyWtf][The Daily WTF]]
+*** [[https://www.commitstrip.com/en/feed/][CommitStrip]]

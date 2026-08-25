@@ -1,0 +1,334 @@
+#!/usr/bin/env bash
+# are-audit.sh --- repo-wide ARE reliability audit.
+#
+#   ./scripts/are-audit.sh
+#   just are-audit
+#
+# Looks wider than the current diff. Every check here is deterministic, needs no Emacs and
+# no network, and exists because something was actually found during the ARE bootstrap or
+# because a failure record asked for it. Runs in about a second.
+#
+# Exit status: 0 if no errors (warnings do not fail); 1 if any error.
+#
+# Output style follows scripts/lint.sh: "=== Check: name ===" plus FAIL/WARN lines.
+
+set -euo pipefail
+
+# shellcheck source=scripts/are-lib.sh
+source "$(cd "$(dirname "$0")" && pwd)/are-lib.sh"
+
+errors=0
+warnings=0
+
+fail() { echo "FAIL: $*"; errors=$((errors + 1)); }
+warn() { echo "WARN: $*"; warnings=$((warnings + 1)); }
+
+cd "$ARE_REPO_ROOT"
+
+echo "ARE audit — $ARE_REPO_ROOT (branch $(are_branch) @ $(are_head))"
+echo
+
+# --- Check: are-structure ---------------------------------------------------------
+# The ARE system must be intact before any other check means anything.
+echo "=== Check: are-structure ==="
+for required in \
+    .are/INDEX.md \
+    .are/SYSTEM.md \
+    .are/config.yaml \
+    .are/knowledge/MODULES.md \
+    .are/memory/FAILURE_INDEX.md \
+    .are/memory/LESSONS.md \
+    .are/memory/DECISIONS.md \
+    .are/rules/RISK_RULES.md \
+    .are/rules/VERIFICATION_RULES.md \
+    .are/rules/SAFETY_RULES.md
+do
+    [ -f "$required" ] || fail "missing ARE file: $required"
+done
+
+# --- Check: map-covers-modules ----------------------------------------------------
+# From FAIL-0006's sibling concern: an unmapped path produces incomplete task context, so
+# a new module must come with a path-map row.
+echo "=== Check: map-covers-modules ==="
+for f in lisp/init-*.el init.el early-init.el; do
+    [ -e "$f" ] || continue
+    if ! are_lookup "$f" >/dev/null; then
+        fail "$f has no row in .are/knowledge/MODULES.md (add one: path | area | risk | verify | knowledge)"
+    fi
+done
+
+# --- Check: map-rows-resolve ------------------------------------------------------
+# A map row pointing at a knowledge page that does not exist sends future sessions
+# nowhere.
+echo "=== Check: map-rows-resolve ==="
+while IFS=$'\t' read -r pattern _area risk verify know; do
+    case "$risk" in
+        LOW | MEDIUM | HIGH | CRITICAL) ;;
+        *) fail "map row '$pattern' has invalid RISK '$risk'" ;;
+    esac
+    case "$verify" in
+        fast | relevant | full) ;;
+        *) fail "map row '$pattern' has invalid VERIFY '$verify'" ;;
+    esac
+    if [ -n "$know" ] && [ ! -f ".are/$know" ]; then
+        fail "map row '$pattern' points at missing knowledge page .are/$know"
+    fi
+done < <(are_map_rows)
+
+# --- Check: failure-index-complete ------------------------------------------------
+# A record nobody can find from the index may as well not exist.
+echo "=== Check: failure-index-complete ==="
+if [ -d .are/memory/failures ]; then
+    for rec in .are/memory/failures/*.md; do
+        [ -e "$rec" ] || continue
+        id="$(basename "$rec" .md)"
+        grep -q "$id" .are/memory/FAILURE_INDEX.md \
+            || fail "$id is not listed in .are/memory/FAILURE_INDEX.md"
+    done
+fi
+
+# --- Check: are-files-committable -------------------------------------------------
+# L-009: git check-ignore silently reports nothing for tracked paths, so --no-index is
+# required. A .gitignore rule that swallows an ARE file would make ARE invisible to every
+# other checkout.
+echo "=== Check: are-files-committable ==="
+while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    # *.local.* is per-checkout config that is *supposed* to be ignored
+    # (.claude/settings.local.json is ignored by the user's global gitignore).
+    case "$p" in
+        *.local.json | *.local.yaml | *.local.yml) continue ;;
+    esac
+    if rule="$(git check-ignore -v --no-index "$p" 2>/dev/null)"; then
+        case "$p" in
+            # An uncommittable file under .are/, .claude/ or scripts/ breaks ARE for every
+            # other checkout — that is a failure. Under docs/ it is a heads-up: `docs/*` is
+            # excluded wholesale and that may well be deliberate. See DECISIONS.md D-006.
+            docs/*) warn "$p is ignored by git ($rule) — it will not reach version control" ;;
+            *) fail "$p would be ignored by git ($rule)" ;;
+        esac
+    fi
+done < <(find .are .claude scripts docs -type f \( -name '*.md' -o -name '*.yaml' -o -name '*.json' -o -name 'are-*.sh' \) 2>/dev/null)
+
+# --- Check: no-auto-approve -------------------------------------------------------
+# SAFETY_RULES section 2: SPC m T a already runs `terraform apply` through `compile`. It
+# cannot self-approve today only because there is no TTY. Adding an auto-approve flag
+# anywhere would turn a near-miss into a live destructive keybinding.
+echo "=== Check: no-auto-approve ==="
+if hits="$(grep -rnE '(compile|shell-command|start-process|make-process|call-process)[^)]*(-auto-approve|--force|[^-]-force|--yes|[[:space:]]-y[[:space:]"])' \
+    --include='*.el' lisp/ init.el 2>/dev/null)"; then
+    if [ -n "$hits" ]; then
+        echo "$hits"
+        fail "an auto-approve / force flag reaches a subprocess — see .are/rules/SAFETY_RULES.md s2"
+    fi
+fi
+
+# --- Check: gate-covers-tests -----------------------------------------------------
+# FAIL-0004: a test target that no gate runs is decoration.
+#
+# `just are-verify` delegates to scripts/are-verify.sh, so the justfile recipe body cannot
+# show reachability — the script is where the steps actually are. (The first version of
+# this check grepped the justfile recipe and reported two false failures. L-008.)
+echo "=== Check: gate-covers-tests ==="
+if [ -f justfile ] && [ -f scripts/are-verify.sh ]; then
+    for target in $(grep -oE '^test-[a-z-]+:' justfile | tr -d ':'); do
+        if ! grep -q "just $target\b" scripts/are-verify.sh; then
+            fail "justfile target '$target' is not run by scripts/are-verify.sh, so no gate covers it (see FAIL-0004)"
+        fi
+    done
+fi
+
+# --- Check: docs-commands --------------------------------------------------------
+# L-016: AGENTS.md told every session to "always consult `repomix-output.xml` first" for
+# months. The file had never existed here -- the paragraph was pasted from a Terraform
+# repo that does have one. Nothing looked, because nothing checked that what the docs
+# name is actually reachable. This checks the mechanical half of that: a `just <target>`
+# named in the docs must exist in the justfile.
+echo "=== Check: docs-commands ==="
+if [ -f justfile ]; then
+    for doc in README.org AGENTS.md .are/INDEX.md .are/SYSTEM.md; do
+        [ -f "$doc" ] || continue
+        while IFS= read -r target; do
+            [ -n "$target" ] || continue
+            grep -qE "^${target}( [a-z_]+=?.*)?:" justfile \
+                || fail "$doc names 'just $target', which is not a target in the justfile"
+        # Only code context counts: a backtick/org-verbatim marker, or the start of a
+        # line in a shell block. Bare prose has "just the ..." in it, and English is not
+        # a command. (Matching \bjust reported 'just the' from both docs.)
+        done < <(grep -ohE '(^|[`=])just [a-z][a-z0-9-]+' "$doc" 2>/dev/null \
+            | sed -E 's/^[`=]?just //' | sort -u)
+    done
+fi
+
+# --- Check: docs-paths -----------------------------------------------------------
+# FAIL-0001: README.org and AGENTS.md tell the reader to run a checkout that is not this
+# one. Loud instead of invisible; it does not decide which path is canonical.
+echo "=== Check: docs-paths ==="
+for doc in README.org AGENTS.md; do
+    [ -f "$doc" ] || continue
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        expanded="${p/#\~/$HOME}"
+        if [ "$expanded" != "$ARE_REPO_ROOT" ] && [ "$expanded" != "." ]; then
+            warn "$doc says --init-directory $p, but this checkout is $ARE_REPO_ROOT (FAIL-0001)"
+        fi
+        # Strip trailing markup (org's =...=, markdown's `...`, punctuation) before
+        # comparing, or the same path is reported once per quoting style.
+    done < <(grep -ohE '\-\-init-directory[= ]+[^ )"'"'"']+' "$doc" 2>/dev/null \
+        | sed -E 's/--init-directory[= ]+//; s/[`=,.;:)]+$//' | sort -u)
+done
+
+# --- Check: hooks-installed ------------------------------------------------------
+# FAIL-0005: warn, do not fail. A fresh clone has not been set up and is not broken.
+echo "=== Check: hooks-installed ==="
+hooks_path="$(git config --get core.hooksPath || true)"
+if [ "$hooks_path" != ".githooks" ]; then
+    # Whether CI exists decides how bad this is, so read it rather than assert it --
+    # the message hardcoded "there is no CI" and went on saying so after CI landed.
+    if compgen -G ".github/workflows/*.y*ml" >/dev/null 2>&1; then
+        backstop="CI gates PRs, so this only costs you pre-commit feedback"
+    else
+        backstop="and there is no CI either, so nothing gates a commit"
+    fi
+    warn "core.hooksPath is '${hooks_path:-unset}', so .githooks/pre-commit does not run; $backstop. Fix: just install-hooks (FAIL-0005)"
+fi
+
+# --- Check: hooks-docs-current ---------------------------------------------------
+# The gate's state is machine-readable, so prose restating it drifts. On 2026-08-25
+# `core.hooksPath' was set and both session-entry documents went on saying it was
+# unset; an agent read that, reported the gate as off, and then lost two commit
+# attempts to timeouts because it did not expect a ~3-minute hook to run. Scope is
+# deliberately those two documents -- failure records and knowledge pages keep
+# historical present tense on purpose and must not trip this.
+# Only this direction is checked: the reverse (docs claim installed, it is not) is
+# already surfaced every session by `hooks-installed' above, which prints real state.
+echo "=== Check: hooks-docs-current ==="
+if [ "$hooks_path" = ".githooks" ]; then
+    if hits="$(grep -nE 'core\.hooksPath[^.]{0,60}(unset|not set|not installed|is off)' \
+        AGENTS.md .are/INDEX.md 2>/dev/null)"; then
+        if [ -n "$hits" ]; then
+            echo "$hits"
+            fail "the pre-commit gate is installed, but a session-entry doc still says it is not (FAIL-0005)"
+        fi
+    fi
+fi
+
+# --- Check: stray-files ----------------------------------------------------------
+# FAIL-0007: nothing noticed an accidental untracked file. Warning only — work in progress
+# is normal.
+echo "=== Check: stray-files ==="
+while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    case "$p" in
+        *.el | *.md | *.org | *.sh | *.yaml | *.yml | *.json | *.png | snippets/*) continue ;;
+    esac
+    warn "unexpected untracked file: '$p' (FAIL-0007)"
+done < <(git ls-files --others --exclude-standard 2>/dev/null || true)
+
+# --- Check: knowledge-line-refs --------------------------------------------------
+# The knowledge pages cite source lines as `symbol`, `:NNN`. Those drift the moment
+# anyone inserts a defun above them, and a citation that points at the wrong line is
+# worse than none: it sends a session to read something else and be confident about it.
+# Every reference found stale on the run that added this check — all fifteen of them.
+# Scoped to CLAUDE_LOOP.md, the only page using the convention; extend the loop below
+# when another page adopts it.
+echo "=== Check: knowledge-line-refs ==="
+knowledge_page=".are/knowledge/CLAUDE_LOOP.md"
+knowledge_source="lisp/init-claude-loop.el"
+if [ -f "$knowledge_page" ] && [ -f "$knowledge_source" ]; then
+    while IFS= read -r match; do
+        [ -n "$match" ] || continue
+        symbol=$(printf '%s' "$match" | sed -n 's/^`\([^`]*\)`.*/\1/p')
+        line=$(printf '%s' "$match" | sed -n 's/.*`:\([0-9]*\)`.*/\1/p')
+        [ -n "$symbol" ] && [ -n "$line" ] || continue
+        if ! sed -n "${line}p" "$knowledge_source" | grep -qF "$symbol"; then
+            fail "$knowledge_page cites $symbol at :$line, which is not there"
+        fi
+    done < <(grep -oP '`(rata-claude-loop[^`]*)`[^`]*?`:(\d+)`' "$knowledge_page" || true)
+fi
+
+# --- Check: no-committed-secrets -------------------------------------------------
+# Not a secret scanner. It asserts the one property that matters here: credentials are
+# referenced, never inlined.
+echo "=== Check: no-committed-secrets ==="
+if hits="$(grep -rniE '(password|passwd|secret|api[-_]?key|token)[[:space:]]*(=|:|"|[[:space:]])[[:space:]]*"[A-Za-z0-9_/+=-]{16,}"' \
+    --include='*.el' lisp/ init.el early-init.el 2>/dev/null)"; then
+    if [ -n "$hits" ]; then
+        echo "$hits"
+        fail "a literal credential appears to be committed — see .are/rules/SAFETY_RULES.md s3"
+    fi
+fi
+
+# --- Check: local-example-in-sync ------------------------------------------------
+# `local.el.example' is committed as the checklist for a fresh machine (D-012), so it
+# has to stay true in both directions: every variable it names must exist, and none of
+# them may still carry a real value in the tracked sources. The second half is the one
+# that matters — it is what stops a corporate hostname from being pasted back into
+# lisp/ where it would reach the public remote again.
+#
+# Only `rata-'-prefixed names are checked for existence; the template may also mention
+# third-party variables (khoj-server-url) that are set through use-package :custom and
+# have no defvar in this tree. The value scan reads the defvar line and the one after
+# it, which is where every value in this repo currently sits.
+echo "=== Check: local-example-in-sync ==="
+example="local.el.example"
+if [ -f "$example" ]; then
+    while IFS= read -r var; do
+        [ -n "$var" ] || continue
+        case "$var" in rata-*) ;; *) continue ;; esac
+        def=$(grep -rhA1 -E "^\((defvar|defcustom) ${var}( |$)" lisp/ init.el early-init.el 2>/dev/null || true)
+        if [ -z "$def" ]; then
+            fail "$example sets '$var', which no defvar or defcustom defines"
+            continue
+        fi
+        # A quoted string in the definition is only allowed if it is a placeholder.
+        value=$(printf '%s' "$def" | sed -n 's/^([^ ]* [^ ]* \(.*\)$/\1/p')
+        case "$value" in
+            *'"'*)
+                case "$value" in
+                    *CHANGE-ME* | *YOUR* | *example*) ;;
+                    *) fail "$var still has a real value in the tracked sources; it belongs in local.el ($example)" ;;
+                esac
+                ;;
+        esac
+    done < <(grep -oE '\(setq [a-zA-Z][a-zA-Z0-9-]*' "$example" | awk '{print $2}' | sort -u)
+else
+    warn "$example is missing — a fresh machine has no checklist (D-012)"
+fi
+
+# --- Check: no-custom-el-advice ---------------------------------------------------
+# D-012 splits the two gitignored files: `custom.el' is Custom's machine-generated
+# churn (rewritten on every `M-x customize' save, never hand-edited), `local.el' is
+# where a hand-written per-machine value goes. A docstring that tells the reader to
+# set a value "in custom.el" therefore sends them to the file that will silently
+# overwrite it, and it contradicts `local.el.example', which is the checklist. Cost:
+# `rata-jira-base-url' shipped with exactly that instruction.
+echo "=== Check: no-custom-el-advice ==="
+if hits="$(grep -rniE "(set|configure|put)[^.]{0,40}\`?custom\.el" \
+    --include='*.el' lisp/ 2>/dev/null)"; then
+    if [ -n "$hits" ]; then
+        echo "$hits"
+        fail "a module tells the reader to set a value in custom.el; per-machine values go in local.el (D-012)"
+    fi
+fi
+
+# --- Check: context-freshness ----------------------------------------------------
+echo "=== Check: context-freshness ==="
+ctx=".are/generated/CURRENT_CONTEXT.md"
+if [ ! -f "$ctx" ]; then
+    warn "$ctx does not exist yet — run: just are-context"
+elif [ -n "$(find lisp init.el early-init.el -newer "$ctx" -print -quit 2>/dev/null)" ]; then
+    warn "$ctx is older than a changed source file — run: just are-context"
+fi
+
+# --- Summary ---------------------------------------------------------------------
+echo
+if [ "$errors" -gt 0 ]; then
+    echo "ARE AUDIT FAILED: $errors error(s), $warnings warning(s)"
+    exit 1
+fi
+if [ "$warnings" -gt 0 ]; then
+    echo "ARE audit passed with $warnings warning(s)."
+else
+    echo "ARE audit passed."
+fi

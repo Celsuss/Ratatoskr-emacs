@@ -7,7 +7,7 @@
   :config
   (gptel-make-ollama "Ollama"
     :host "localhost:11434"
-    :models '("deepseek-coder:latest" "mistral:latest")
+    :models '("ollama_chat/qwen3.5-coder:9b-32k" "mistral:latest")
     :stream t)
   (setq gptel-default-mode 'org-mode)
   (rata-leader
@@ -23,38 +23,41 @@
 (use-package ellama
   :after general
   :commands (ellama-chat ellama-ask-about ellama-enhance-code)
-  :config
-  (require 'llm-ollama)
-  (setq ellama-provider
-        (make-llm-ollama :chat-model "mistral:latest" :embedding-model "nomic-embed-text"))
+  :init
   (rata-leader
     :states '(normal visual)
     "aie"   '(:ignore t :which-key "ellama")
     "aiee"  '(ellama-chat         :which-key "ellama chat")
     "aiea"  '(ellama-ask-about    :which-key "ask about region")
-    "aiec"  '(ellama-enhance-code :which-key "enhance code")))
+    "aiec"  '(ellama-enhance-code :which-key "enhance code"))
+  :config
+  (require 'llm-ollama)
+  (setq ellama-provider
+        (make-llm-ollama :chat-model "mistral:latest" :embedding-model "nomic-embed-text")))
 
 ;; --- aidermacs (Ollama local) ---
 (use-package aidermacs
   :after general
   :commands (aidermacs-transient-menu aidermacs-open)
-  :config
-  (setq aidermacs-default-model "ollama_chat/deepseek-coder:latest")
+  :init
   (rata-leader
     :states '(normal visual)
     "aia"   '(:ignore t :which-key "aider")
     "aiaa"  '(aidermacs-transient-menu :which-key "aider menu")
-    "aiao"  '(aidermacs-open           :which-key "open aider")))
+    "aiao"  '(aidermacs-open           :which-key "open aider"))
+  :config
+  (setq aidermacs-default-model "ollama_chat/qwen3.5-coder:9b-32k"))
 
 ;; --- agent-shell (Claude Code via web login) ---
 (use-package agent-shell
   :after general
+  :commands (agent-shell agent-shell-anthropic-start-claude-code)
   :custom
   (agent-shell-anthropic-claude-acp-command '("claude-code-acp"))
-  :config
+  :init
   (rata-leader
     :states '(normal visual)
-    "aic"   '(:ignore t :which-key "claude")
+    "aic"   '(:ignore t :which-key "agent shell")
     "aics"  '(agent-shell                             :which-key "agent shell")
     "aicc"  '(agent-shell-anthropic-start-claude-code  :which-key "claude code")))
 

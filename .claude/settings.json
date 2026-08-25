@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/are-session-start.sh",
+            "timeout": 60,
+            "statusMessage": "ARE: fast verification"
+          }
+        ]
+      }
+    ]
+  }
+}

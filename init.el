@@ -62,9 +62,22 @@
 (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
 
 ;; --- 5. Keep 'custom.el' separate ---
+;; Two different jobs, deliberately two files, both gitignored:
+;;
+;;   custom.el  Custom's own scratch pad.  Machine-generated churn (faces,
+;;              safe-local-variable-values), rewritten whenever you save from
+;;              `M-x customize'.  Never hand-edit it and never sync it.
+;;   local.el   Hand-written, per-machine: the values that must not sit on a
+;;              public remote (instance hostnames, corporate identity).  A fresh
+;;              checkout starts from the committed `local.el.example', which is
+;;              the authoritative list of what a new machine needs.
 (setq custom-file (locate-user-emacs-file "custom.el"))
 (when (file-exists-p custom-file)
   (load custom-file))
+
+;; Loaded after custom.el so a hand-written value wins over a stale Custom one,
+;; and before the modules so their `defvar's see it.
+(load (locate-user-emacs-file "local.el") 'noerror 'nomessage)
 
 ;; --- 6. Load Core Modules ---
 (defvar rata--failed-modules nil
@@ -120,15 +133,19 @@ normally for a full backtrace.  Otherwise, catch and log them to
 (rata-load-module 'init-helm)
 (rata-load-module 'init-pkgbuild)
 (rata-load-module 'init-casual)
+(rata-load-module 'init-sql)
 (rata-load-module 'init-k8s)
 (rata-load-module 'init-gamedev)
 (rata-load-module 'init-snippets)
 (rata-load-module 'init-llm)
+(rata-load-module 'init-claude-loop)
 (rata-load-module 'init-khoj)
 (rata-load-module 'init-irc)
 (rata-load-module 'init-elfeed)
+(rata-load-module 'init-jira)
 ;; (rata-load-module 'init-mcp)      ; experimental — uncomment when stable
 (rata-load-module 'init-persp)
 (rata-load-module 'init-org)
+(rata-load-module 'init-present)   ; org-re-reveal slide export
 (rata-load-module 'init-dashboard)
 (elpaca-wait) ; ensure all packages fully loaded before startup hooks fire
