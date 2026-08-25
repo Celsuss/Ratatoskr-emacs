@@ -20,6 +20,7 @@ credentials and a homelab.
 | Khoj (self-hosted) | `http://khoj.homelab.local` | `init-khoj.el` | none configured | **indexes `~/workspace/second-brain/org-roam/`** — sends the operator's notes to the homelab host |
 | Snowflake | `<rata-sql-snowflake-account>.snowflakecomputing.com` over JDBC, set in `local.el` | `init-sql.el` | SSO, `authenticator=externalbrowser` | corporate. nil in the tracked sources since D-012, so `SPC a d s` refuses to build a URI until `local.el` exists; see [SECRETS_AND_SENSITIVE_DATA.md](SECRETS_AND_SENSITIVE_DATA.md) |
 | GitHub | api.github.com | `init-dev.el` (`forge`) | `~/.authinfo.gpg`, `USER^forge` | |
+| Jira REST API | `rata-jira-base-url`, set in the gitignored `local.el` | `init-jira.el` (`jira.el`) | `~/.authinfo.gpg`, `machine <instance> login <email> port https` | corporate. Unset by default, so the module loads inert. Cloud API token or on-prem PAT (`jira-token-is-personal-access-token`) |
 | Libera.Chat IRC | port 6697, TLS | `init-irc.el` (`circe`) | SASL password from `auth-source` | nick `celsuss` |
 | QuakeNet IRC | port 6667, **no TLS** | `init-irc.el` | none | plaintext by protocol choice |
 | Hugo dev server | `localhost:1313` | `init-org.el` | none | `start-process "hugo"` |
@@ -29,6 +30,17 @@ credentials and a homelab.
 | tree-sitter grammar repos | 10 GitHub repos | `init-lang.el` | none | `just install-grammars` **downloads and compiles C** |
 | Maven Central | via Leiningen | `init-sql.el` | none | resolves `snowflake-jdbc` 3.28.0 into `~/.m2` on first connect |
 | elpaca package sources | 132 declared, 197 built (incl. transitive) | `init-pkg.el` / every module | none | see §3 |
+
+**The Jira row is the one most likely to rot, and the reason is not in this repo.**
+Atlassian retired the old JQL search endpoints on Cloud, so an Emacs Jira client is alive
+or dead according to which endpoint its source calls — not according to its star count.
+Verified in the installed build: `elpaca/builds/jira/jira-api.el:244-270` probes
+`search/jql` first and caches the answer in `jira-search-endpoint`, falling back to
+`search` only for instances too old to know it. That fallback is why `jira-api-version 2`
+still works on-premise. Packages pinned to `rest/api/2/search` — `jiralib2`, and therefore
+`ejira` — are what stopped working on Cloud, and that, not maintenance activity alone, is
+why they were rejected in D-011. If `SPC J j` ever returns nothing, read that probe before
+suspecting credentials.
 
 ## 2. External binaries
 

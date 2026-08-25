@@ -142,6 +142,7 @@ normally for a full backtrace.  Otherwise, catch and log them to
 (rata-load-module 'init-khoj)
 (rata-load-module 'init-irc)
 (rata-load-module 'init-elfeed)
+(rata-load-module 'init-jira)
 ;; (rata-load-module 'init-mcp)      ; experimental — uncomment when stable
 (rata-load-module 'init-persp)
 (rata-load-module 'init-org)

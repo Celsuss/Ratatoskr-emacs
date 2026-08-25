@@ -237,3 +237,76 @@ The generalisation is about where to put the check, not about models:
   was a tool that was not on it, and `should-not` assertions on the tolerant path
   (`a denied WebFetch is tolerated`) read as coverage while certifying the gap. When a
   list decides pass/fail, test the *categories* it is meant to partition, not the entries.
+
+## L-017 — "Does not support Evil" in a package's readme is a keymap-shadowing report
+
+`jira.el`'s readme answers "Does it work with Evil Mode?" with "Not supported currently".
+Read literally that sounds like a missing feature, and the tempting fix is to write the
+bindings yourself. It is not a missing feature: `jira-issues-mode` derives from
+`tabulated-list-mode` and `jira-detail-mode` from `magit-section-mode`, and evil's normal
+state shadows both — the same mechanism that made plain `define-key` dead in the
+`*claude-loop*` buffer.
+
+- **The diagnosis is in the mode's ancestry, not the readme.** `define-derived-mode X
+  tabulated-list-mode` (or any mode absent from evil's state lists) plus single-letter keys
+  is sufficient to predict the symptom before installing anything.
+- **`evil-set-initial-state` is the cheap fix; re-binding is the expensive one.** Upstream
+  ships `?`, `l`, `C`, `U`, `E`, `H`, `S` and adds more on a monthly cadence. A hand-written
+  `evil-define-key*` table for them is a promise to track someone else's keymap forever.
+  Emacs state costs two lines and never drifts; `C-z` is the way out.
+- **This is the third distinct shape of the same root cause** (deferred `:config` leader keys
+  in FAIL-0009, `define-key` in a `special-mode` child, an upstream package's own keymap).
+  When adding any module whose buffer is not an editing buffer, ask which of the three
+  applies before assuming the keys work.
+
+## L-018 — A config value that is *nearly* right fails as though the credential were wrong
+
+`rata-jira-base-url` was set with a trailing slash. jira.el builds its auth-source host by
+stripping only the scheme — `(replace-regexp-in-string "https://" "" url)`, `jira-api.el:99`
+and `:108` — so the host became `host.example.com/`, no `machine` line in `~/.authinfo.gpg`
+matched, `jira-api--token` returned nil, and the request went out with an empty credential.
+The observable symptom is a 401. Everything a 401 makes you look at — the token, its expiry,
+its scopes, whether SSO blocks basic auth — was fine.
+
+- **One character in a URL and a wrong password are indistinguishable at the failure site.**
+  Whenever a lookup key is *derived* from user-entered text, the derivation is a place a
+  mistake can hide, and the error surfaces one layer away from its cause.
+- **Normalise at the boundary rather than documenting the constraint.**
+  `(directory-file-name url)` is a builtin, costs one line, and makes the trailing slash
+  permanently harmless. A comment in a template asking the operator to be careful does not.
+- **Test the derived value, not the input.** `rata-test-jira-base-url-has-no-trailing-slash`
+  recomputes the auth host exactly as jira.el does and asserts no slash survives. Asserting
+  on `rata-jira-base-url` alone would have passed while the bug was live.
+- **First version of that test skipped on every run** — it guarded with
+  `skip-unless (boundp 'jira-base-url)`, and the variable does not exist until the deferred
+  package loads. It reported "skipped" in a green suite, which reads as coverage. A skip
+  condition that is *always* true is a silent hole; if a test needs a feature loaded, load it.
+
+Related: the instance turned out to be Server/Data Center, not Cloud — `/rest/api/3/`
+302s there and `/rest/api/2/` 401s. Two anonymous curls settle it, and the answer changes
+`jira-api-version` and whether the token is a PAT. Ask the endpoint, not the hostname.
+
+## L-019 — A comment naming a key or a file is a claim, and it drifts silently
+
+Writing the jira.el cheat sheet meant reading the package's actual keymaps, and the header
+of `lisp/init-jira.el` disagreed with them: it told the reader to press `E` to export, where
+`jira-issues-mode-map` binds `e` (`jira-issues.el:395`) and nothing in the package binds `E`
+at all. The same header sent the operator to `custom.el` for `rata-jira-base-url`, which
+D-012 reserves for Custom's machine-generated churn — a value hand-written there is
+overwritten on the next `M-x customize` save, and `local.el.example` already said `local.el`.
+
+- **Prose about a third-party keymap is unverifiable and therefore rots.** Neither wrong key
+  would fail any test, any lint, or any compile. Point at the package's keymap and at a
+  cheat sheet that was derived from it (`docs/jira-cheatsheet.org`) rather than restating
+  keys inline, and re-derive rather than trusting the comment.
+- **A doc bug that contradicts a decision record is mechanically checkable, so check it.**
+  `no-custom-el-advice` in `scripts/are-audit.sh` fails any module telling the reader to set
+  a value in `custom.el`. That is the half of this that could have been caught for free, and
+  now is.
+- **`docs/` was entirely gitignored** (`docs/*`, added incidentally in 7e599c1), so a
+  hand-written document there never reaches the remote — the audit's own
+  `are-files-committable` warning about `docs/ARE-FINDINGS.md` had been saying so. Committed
+  documentation now needs an explicit negation in `.gitignore`.
+
+Related: L-017 and L-018 (both from the same module — its cost has been in the seams
+between this config and upstream, not in either one).

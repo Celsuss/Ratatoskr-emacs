@@ -254,6 +254,22 @@ else
     warn "$example is missing — a fresh machine has no checklist (D-012)"
 fi
 
+# --- Check: no-custom-el-advice ---------------------------------------------------
+# D-012 splits the two gitignored files: `custom.el' is Custom's machine-generated
+# churn (rewritten on every `M-x customize' save, never hand-edited), `local.el' is
+# where a hand-written per-machine value goes. A docstring that tells the reader to
+# set a value "in custom.el" therefore sends them to the file that will silently
+# overwrite it, and it contradicts `local.el.example', which is the checklist. Cost:
+# `rata-jira-base-url' shipped with exactly that instruction.
+echo "=== Check: no-custom-el-advice ==="
+if hits="$(grep -rniE "(set|configure|put)[^.]{0,40}\`?custom\.el" \
+    --include='*.el' lisp/ 2>/dev/null)"; then
+    if [ -n "$hits" ]; then
+        echo "$hits"
+        fail "a module tells the reader to set a value in custom.el; per-machine values go in local.el (D-012)"
+    fi
+fi
+
 # --- Check: context-freshness ----------------------------------------------------
 echo "=== Check: context-freshness ==="
 ctx=".are/generated/CURRENT_CONTEXT.md"

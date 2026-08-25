@@ -171,7 +171,8 @@ init-dev → init-lang → init-rust → init-go → init-python → init-cpp �
 init-cmake → init-terraform → init-just → init-docker → init-markdown →
 init-yaml → init-ansible → init-jupyter → init-helm → init-pkgbuild →
 init-casual → init-sql → init-k8s → init-gamedev → init-snippets →
-init-llm → init-claude-loop → init-khoj → init-irc → init-elfeed → init-persp → init-org →
+init-llm → init-claude-loop → init-khoj → init-irc → init-elfeed → init-jira →
+init-persp → init-org →
 init-present → init-dashboard
 ```
 
@@ -232,6 +233,14 @@ init-present → init-dashboard
     retries being told to fix a break it inherited. The baseline's output is deliberately
     discarded rather than kept as retry feedback.
   - Tests: pure functions in `tests/run-tests.el`; the state machine in `tests/claude-loop-e2e.el` via `just test-claude-loop`, against a stub CLI with no API calls.
+- `init-jira.el` — `jira.el` issue browser under `SPC J`. A second *view* onto work tasks, not a
+  sync: nothing writes into the org-roam tree (see D-011 in `.are/memory/DECISIONS.md`). Two
+  things are deliberate. `jira-username`/`jira-token` are left unset, which is what makes
+  `jira.el` fall back to `auth-source`; and `rata-jira-base-url` defaults to nil and is set in
+  the gitignored `local.el`, because the instance hostname is corporate identity on a public
+  remote. The three Jira modes are put in **emacs state** via `evil-set-initial-state` —
+  upstream does not support evil, and its keymaps live in `tabulated-list-mode` and
+  `magit-section-mode` children, which evil shadows. See L-017 in `.are/memory/LESSONS.md`.
 - `init-org.el` — org-agenda with org-super-agenda, org-roam, org-transclusion, ox-hugo
 - `init-present.el` — reveal.js slide export via `org-re-reveal` under `SPC o p`. Decks are org-roam nodes in the flat roam root, identified by the `rata-reveal-deck-tag` (`:presentation:`) filetag rather than by directory. New decks come from the `presentation` org-roam capture template in `init-org.el` (key `r`) rather than a bespoke command; `rata-reveal-add-header` converts an existing note in place, mirroring `rata-toggle-hastodo-filetag`. `rata-reveal-export-all` finds them with an `org-roam-db-query` mirroring `rata-org-roam-agenda-files` in `init-org.el`. HTML output is redirected to `rata-reveal-export-dir` (outside org-roam) by shadowing `org-export-output-file-name`'s PUB-DIR argument, so no generated file lands in the note tree. Two `ox-html` advices make export non-interactive in this config: one suppresses `set-auto-mode` in `org-html-final-function` (it activates `mhtml-mode`, whose submodes trigger treesit-auto), the other binds `treesit-auto-install` to nil around `org-html-fontify-code` (src-block fontification otherwise prompts to install a missing grammar mid-export). Keybindings sit at top level, not in the deferred `use-package :config`, because `:after (ox general)` would leave them dead until the first manual export. reveal.js assets come from a CDN by default; `rata-reveal-install-local` clones a local copy and `rata-reveal-toggle-root` switches between them for offline presenting. Reuses the `simple-httpd` recipe declared in `init-org.el` to serve decks over HTTP.
 

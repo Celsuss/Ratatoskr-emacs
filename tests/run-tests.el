@@ -185,7 +185,8 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC p t" . projectile-run-project-tests)
     ("SPC p k" . projectile-kill-buffers)
     ("SPC b b" . consult-buffer)
-    ("SPC f f" . find-file))
+    ("SPC f f" . find-file)
+    ("SPC J j" . jira-issues))
   "Leader keys that must resolve immediately after init, with their commands.
 Not exhaustive — a contract for the keys most likely to be broken by the
 failure mode in .are/memory/failures/FAIL-0009.md.  Extend it when a
@@ -826,6 +827,29 @@ template is the whole failure mode this design exists to prevent."
     (should-not (zerop (call-process "git" nil nil nil "-C" user-emacs-directory
                                      "check-ignore" "--no-index" "--quiet"
                                      "local.el.example")))))
+
+(ert-deftest rata-test-jira-base-url-has-no-trailing-slash ()
+  "The Jira base URL reaches jira.el without a trailing slash.
+jira.el derives its auth-source host by stripping only \"https://\"
+\(jira-api.el:99,108).  A trailing slash therefore produces the host
+\"acme.atlassian.net/\", no `machine\=' line matches, and the request 401s
+as though the token were wrong.  L-018."
+  ;; jira is deferred via :commands, so the variable does not exist until the
+  ;; package loads.  Load it: a `skip-unless (boundp ...)' here would skip on
+  ;; every run and read as coverage.
+  (skip-unless (require 'jira-api nil t))
+  (skip-unless (and (stringp jira-base-url) (not (string= "" jira-base-url))))
+  (should-not (string-suffix-p "/" jira-base-url))
+  ;; And the derived host, computed exactly as jira.el does it.
+  (should-not (string-match-p
+               "/" (replace-regexp-in-string "https://" "" jira-base-url))))
+
+(ert-deftest rata-test-jira-base-url-normalisation ()
+  "A trailing slash in `rata-jira-base-url\=' is dropped, not passed through."
+  (should (equal (directory-file-name "https://acme.atlassian.net/")
+                 "https://acme.atlassian.net"))
+  (should (equal (directory-file-name "https://acme.atlassian.net")
+                 "https://acme.atlassian.net")))
 
 ;;; ============================================================
 ;;; Run all tests

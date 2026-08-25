@@ -162,6 +162,50 @@ The error is in the safe direction — an over-count halts a run early rather th
 than being hidden in a comment. Settle it by reading one real journal file: if a task's
 `cost` is roughly the sum of its attempts' individual costs, the assumption holds.
 
+## D-011 — Jira is a second view in Emacs, not a sync into `work_tasks.org`
+
+**2026-08-25.**
+
+The operator keeps work tasks by hand in `~/workspace/second-brain/org-roam/work_tasks.org`
+and also has tickets in corporate Jira. The obvious-looking answer — mirror the tickets into
+that file, keyed on an issue id — was rejected, and so was `org-jira`, on the operator's
+instruction: no custom sync code to own.
+
+`lisp/init-jira.el` therefore adds `jira.el` (MELPA `jira`, upstream
+`unmonoqueteclea/jira.el`, v2.21.1) as a *separate* view: a `tabulated-list` of issues under
+`SPC J j`, filterable by JQL, with status changes and worklogs. Nothing writes into the roam
+tree. `E` in the issues buffer exports what is on screen to Org-mode when a one-off bridge is
+wanted, and that stays a deliberate, manual act.
+
+Why not a sync, for the record — because the next session will be tempted again:
+
+- The file is under `~/workspace/second-brain/`, which `rules/SAFETY_RULES.md` puts
+  off-limits to autonomous writes. A sync is a program whose whole purpose is to write there.
+- Jira and the org file disagree about what a task *is*. The org headings carry quoted notes
+  from colleagues, `#+begin_quote` briefs written for the claude-loop, and sub-checklists.
+  A mirror either drops that or has to preserve it around an idempotent rewrite.
+- `work_tasks.org` is one node in a `hastodo` agenda query with an `org-kanban` block that
+  nothing refreshes automatically. A writer would have to keep that block honest too.
+
+Two smaller choices inside the same decision:
+
+- **Credentials are not configured in the module.** `jira-username` and `jira-token` are
+  deliberately left unset, which is what makes `jira.el` fall back to `auth-source` — the
+  mechanism `init-system.el` already established. `rata-jira-base-url` defaults to nil and is
+  set in the gitignored `custom.el`, because the instance hostname is corporate identity on a
+  public remote (`knowledge/SECRETS_AND_SENSITIVE_DATA.md` §2). The module loads inert until
+  the operator sets it.
+- **The Jira buffers get emacs state, not evil bindings.** Upstream says it does not support
+  evil (issue #31), and its keymaps live in `tabulated-list-mode` and `magit-section-mode`
+  children — the shadowing trap already documented for `*claude-loop*`. Re-binding its dozen
+  keys with `evil-define-key*` would be a maintenance liability against a package on a
+  monthly release cadence, so `evil-set-initial-state` puts the three modes in emacs state
+  and the documented keys work as shipped. `C-z` returns to normal state.
+
+Revisit if the operator starts wanting Jira tickets in the agenda view rather than in their
+own buffer. That is the point where a sync earns its cost — and it should be reconsidered as
+a *whole* problem then, not bolted on.
+
 ## D-012 — `custom.el` is Custom's scratch pad; `local.el` is yours
 
 **2026-08-25.**
