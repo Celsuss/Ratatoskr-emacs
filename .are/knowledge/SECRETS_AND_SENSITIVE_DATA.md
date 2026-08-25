@@ -26,27 +26,33 @@ authinfo|netrc`. Every hit is a *reference to* a credential store, never a crede
 
 **Status: PASS.** No key, token or password is in version control.
 
-## 2. Corporate identity *is* committed — MEDIUM, unresolved
+## 2. Corporate identity — moved out of the tracked sources, 2026-08-25
 
-`lisp/init-sql.el:8-20` commits, in plain text, on a public remote:
+`lisp/init-sql.el` used to commit six `defvar`s in plain text on a public remote: a work
+email, a Snowflake account with its tenant region, a role, a warehouse, a database and a
+schema. None of it authenticated anything on its own — SSO stands in the way — but it was
+reconnaissance-grade: an employer, an internal warehouse name, a tenant region, a working
+email.
 
-- work email `JENS.LORDEN@TELE2.COM`
-- Snowflake account `tele2.eu-west-1`
-- role `USER__JENS_DOT_LORDEN_AT_TELE2_DOT_COM`
-- warehouse `AIHUB_B2C_LIGHT_WH`
-- database `SANDBOX`, schema `JENS_DOT_LORDEN_AT_TELE2_DOT_COM`
+**Resolved for new commits.** All six are now `nil` in the tracked file and the real values
+live in `local.el`, which is gitignored (`.gitignore:45`) and loaded by `init.el` with
+`noerror`. `local.el.example` is committed as the checklist so a fresh machine knows what to
+fill in, and `rata-sql-snowflake-uri` signals a `user-error` naming the unset parameters
+rather than building a URI out of nils. This is the remedy this page recommended before it
+was taken. See D-012 in [../memory/DECISIONS.md](../memory/DECISIONS.md).
 
-None of it authenticates anything on its own — SSO stands in the way. It is
-reconnaissance-grade information: an employer, an internal warehouse name, a tenant
-region, a working email. Whether that is acceptable is the operator's judgement, not
-ARE's, so **this has not been changed.**
+The same mechanism now holds `rata-jira-base-url`, for the same reason.
 
-If it should be removed, note that removal is not a simple edit: the values are in git
-history from commit `0d3eb8a` onward, so it needs history rewriting plus a rotation
-decision, and it is a HIGH-risk operation requiring explicit approval
-([../rules/SAFETY_RULES.md](../rules/SAFETY_RULES.md)). The low-friction alternative is to
-move the six `defvar`s into the already-`.gitignore`d `custom.el`, or into a
-`private.el` loaded with `(load … 'noerror)`.
+**Still open: the history.** The values are in every commit from `0d3eb8a` onward, so they
+remain readable to anyone who clones. Erasing them needs a history rewrite plus a rotation
+decision — HIGH risk, explicit operator approval
+([../rules/SAFETY_RULES.md](../rules/SAFETY_RULES.md)), and not done. Deliberately not
+restated here: this page describing the leak in detail was itself part of it, and printing
+the values to document that they should not be printed is self-defeating.
+
+`scripts/are-audit.sh` (`local-example-in-sync`) now fails if any variable named in
+`local.el.example` carries a real value in the tracked sources again. Both of its failure
+modes were probed with deliberate regressions when it was added, not assumed.
 
 ## 3. Operator data reachable from this config
 

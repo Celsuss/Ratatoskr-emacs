@@ -1,0 +1,57 @@
+;;; -*- lexical-binding: t; -*-
+;;; local.el.example --- Per-machine configuration template  -*- no-byte-compile: t; -*-
+;;
+;; Copy this to `local.el' in the same directory and fill in the real values:
+;;
+;;     cp local.el.example local.el
+;;
+;; `local.el' is gitignored (.gitignore:45) and loaded by init.el:75 with
+;; `noerror', so a machine without one starts normally — the affected features
+;; are simply inert until it exists.
+;;
+;; THIS FILE IS THE CHECKLIST.  It is committed precisely so that a new machine
+;; does not have to remember what to recreate.  When you add a value that must
+;; stay off the public remote, add a commented line for it here in the same
+;; commit — `just are-audit' fails if a variable named below still carries a real
+;; value in the tracked sources, and if a name below does not exist at all.
+;;
+;; What belongs here: instance hostnames, corporate identity, anything specific
+;; to one machine.  What does NOT: passwords and tokens (those live in
+;; ~/.authinfo.gpg, read lazily via `rata-auth-get'), and anything Custom writes
+;; for itself (that is custom.el, which you should not hand-edit).
+
+;; --- Jira (lisp/init-jira.el) ---
+;; The instance URL.  Cloud looks like https://acme.atlassian.net; a Server or
+;; Data Center instance is whatever host your organisation runs.
+;;
+;; NO TRAILING SLASH.  jira.el derives its auth-source host by stripping only
+;; "https://" (jira-api.el:99,108), so ".../" yields the host "acme.example.com/",
+;; no `machine' line matches, and the request 401s as though the token were
+;; wrong.  `init-jira.el' now runs the value through `directory-file-name', so a
+;; slash is harmless -- but the tracked default of that guard is the only thing
+;; standing between you and an hour of debugging.  See L-018.
+;; (setq rata-jira-base-url "https://CHANGE-ME.atlassian.net")
+;;
+;; Which API version: 3 is Cloud-only, 2 exists on both.  Tell them apart
+;; without credentials -- Server/DC 302s on v3 and 401s on v2:
+;;   curl -s -o /dev/null -w '%{http_code}\n' "$URL/rest/api/3/serverInfo"
+;; (setq rata-jira-api-version 3)
+;;
+;; Server/DC authenticates with a Personal Access Token, sent as `Bearer'.
+;; Cloud uses an API token as basic auth, where this stays nil.
+;; (setq jira-token-is-personal-access-token nil)
+
+;; --- Snowflake (lisp/init-sql.el) ---
+;; No password: `authenticator=externalbrowser' does SSO in the browser.  These
+;; mirror ~/.dbt/profiles.yml.  All six are needed before `SPC a d s' can
+;; connect; `rata-sql-snowflake-uri' refuses to build a URI from a partial set.
+;; (setq rata-sql-snowflake-account   "CHANGE-ME")
+;; (setq rata-sql-snowflake-user      "CHANGE-ME")
+;; (setq rata-sql-snowflake-role      "CHANGE-ME")
+;; (setq rata-sql-snowflake-warehouse "CHANGE-ME")
+;; (setq rata-sql-snowflake-database  "CHANGE-ME")
+;; (setq rata-sql-snowflake-schema    "CHANGE-ME")
+
+;; --- Khoj (lisp/init-khoj.el) ---
+;; Only if your homelab host differs from the committed default.
+;; (setq khoj-server-url "http://khoj.homelab.local")

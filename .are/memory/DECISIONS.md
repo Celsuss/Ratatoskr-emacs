@@ -161,3 +161,95 @@ The error is in the safe direction — an over-count halts a run early rather th
 — so the assumption ships, recorded here and in `.are/knowledge/CLAUDE_LOOP.md` §3, rather
 than being hidden in a comment. Settle it by reading one real journal file: if a task's
 `cost` is roughly the sum of its attempts' individual costs, the assumption holds.
+
+## D-011 — Jira is a second view in Emacs, not a sync into `work_tasks.org`
+
+**2026-08-25.**
+
+The operator keeps work tasks by hand in `~/workspace/second-brain/org-roam/work_tasks.org`
+and also has tickets in corporate Jira. The obvious-looking answer — mirror the tickets into
+that file, keyed on an issue id — was rejected, and so was `org-jira`, on the operator's
+instruction: no custom sync code to own.
+
+`lisp/init-jira.el` therefore adds `jira.el` (MELPA `jira`, upstream
+`unmonoqueteclea/jira.el`, v2.21.1) as a *separate* view: a `tabulated-list` of issues under
+`SPC J j`, filterable by JQL, with status changes and worklogs. Nothing writes into the roam
+tree. `E` in the issues buffer exports what is on screen to Org-mode when a one-off bridge is
+wanted, and that stays a deliberate, manual act.
+
+Why not a sync, for the record — because the next session will be tempted again:
+
+- The file is under `~/workspace/second-brain/`, which `rules/SAFETY_RULES.md` puts
+  off-limits to autonomous writes. A sync is a program whose whole purpose is to write there.
+- Jira and the org file disagree about what a task *is*. The org headings carry quoted notes
+  from colleagues, `#+begin_quote` briefs written for the claude-loop, and sub-checklists.
+  A mirror either drops that or has to preserve it around an idempotent rewrite.
+- `work_tasks.org` is one node in a `hastodo` agenda query with an `org-kanban` block that
+  nothing refreshes automatically. A writer would have to keep that block honest too.
+
+Two smaller choices inside the same decision:
+
+- **Credentials are not configured in the module.** `jira-username` and `jira-token` are
+  deliberately left unset, which is what makes `jira.el` fall back to `auth-source` — the
+  mechanism `init-system.el` already established. `rata-jira-base-url` defaults to nil and is
+  set in the gitignored `custom.el`, because the instance hostname is corporate identity on a
+  public remote (`knowledge/SECRETS_AND_SENSITIVE_DATA.md` §2). The module loads inert until
+  the operator sets it.
+- **The Jira buffers get emacs state, not evil bindings.** Upstream says it does not support
+  evil (issue #31), and its keymaps live in `tabulated-list-mode` and `magit-section-mode`
+  children — the shadowing trap already documented for `*claude-loop*`. Re-binding its dozen
+  keys with `evil-define-key*` would be a maintenance liability against a package on a
+  monthly release cadence, so `evil-set-initial-state` puts the three modes in emacs state
+  and the documented keys work as shipped. `C-z` returns to normal state.
+
+Revisit if the operator starts wanting Jira tickets in the agenda view rather than in their
+own buffer. That is the point where a sync earns its cost — and it should be reconsidered as
+a *whole* problem then, not bolted on.
+
+## D-012 — `custom.el` is Custom's scratch pad; `local.el` is yours
+
+**2026-08-25.**
+
+D-011 told the operator to hand-write `rata-jira-base-url` into `custom.el`. That was wrong,
+and the reason is worth keeping because it is easy to repeat.
+
+`custom.el` was tracked until `ef33237` (2026-03-28), where it was gitignored in the same
+commit that ignored `/var/`, `/etc/`, `/elfeed-db/` and `/persp-confs/` — i.e. it was
+classified as *generated state*, correctly. Its entire content at that point was
+`'(package-selected-packages nil)` and an empty `custom-set-faces`. Custom rewrites the file
+whenever anything is saved from `M-x customize`, so anything hand-written there is churn
+waiting to be clobbered, and it is ignored precisely because it is disposable.
+
+So the two jobs are now two files, both gitignored:
+
+| File | Written by | Contains |
+|---|---|---|
+| `custom.el` | Custom, on save | faces, `safe-local-variable-values`, theme trust — do not hand-edit |
+| `local.el` | the operator, by hand | per-machine values that must not reach a public remote |
+
+`local.el` is loaded by `init.el` *after* `custom.el` (so a hand-written value wins over a
+stale Custom one) and *before* the modules (so their `defvar`s see it — `defvar` and
+`defcustom` both leave an already-bound value alone, which is what makes plain `setq` in
+`local.el` work).
+
+**The committed template is the point of the design.** `local.el.example` exists so that the
+answer to "what does a fresh machine need?" is versioned rather than remembered. The
+operator's actual complaint was not that the file was gitignored — it was not knowing what to
+recreate. A gitignored file with no committed manifest has that failure mode built in.
+
+Rejected alternatives, briefly:
+
+- **A committed `local.el.gpg`.** Solves syncing outright and is safe on a public remote, but
+  startup currently never touches GPG (`~/.authinfo.gpg` is read lazily — see
+  `init-irc.el:75`), and it would have to be skipped under `noninteractive` or it hangs
+  `just batch`, `test-ert` and CI on a passphrase prompt. A passphrase at every startup to
+  avoid copying one file per machine is a bad trade.
+- **A committed file keyed on `(system-name)`.** No GPG and no manual step, but it only works
+  for values you are willing to publish, which is exactly what these are not.
+
+The same commit moved the six Snowflake `defvar`s out of `lisp/init-sql.el`, which
+`.are/knowledge/SECRETS_AND_SENSITIVE_DATA.md` §2 had recommended and recorded as unresolved.
+`rata-sql-snowflake-uri` now signals a `user-error` naming the unset parameters instead of
+building a URI from nils that would fail much later inside a Leiningen nREPL boot. The git
+history still contains the values; erasing that is a separate, HIGH-risk job that has not been
+approved.

@@ -186,7 +186,8 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC p k" . projectile-kill-buffers)
     ("SPC b b" . consult-buffer)
     ("SPC f f" . find-file)
-    ("SPC j d" . xref-find-definitions))
+    ("SPC j d" . xref-find-definitions)
+    ("SPC J j" . jira-issues))
   "Leader keys that must resolve immediately after init, with their commands.
 Not exhaustive — a contract for the keys most likely to be broken by the
 failure mode in .are/memory/failures/FAIL-0009.md.  Extend it when a
@@ -587,6 +588,67 @@ carries the `result' event the loop makes every decision from."
     (should (equal '(timeout . "took too long")
                    (classify '(:outcome (timeout . "took too long")) 9)))))
 
+(ert-deftest rata-test-claude-loop-classify-unverified ()
+  "Work that was never executed fails, however cheerfully it reports."
+  (cl-flet ((classify (state code)
+              (let ((rata-claude-loop--state state))
+                (rata-claude-loop--classify code))))
+    ;; The run this check was written for: three denied Bash calls, the edits
+    ;; on disk, exit 0, and `done' in the final message.
+    (let ((verdict (classify '(:result ((subtype . "success")
+                                        (permission_denials
+                                         . (((tool_name . "Bash")
+                                             (tool_input
+                                              . ((command . "python3 hello.py")))))))
+                               :report done)
+                             0)))
+      (should (eq 'unverified (car verdict)))
+      (should (string-match-p "never run" (cdr verdict)))
+      ;; It must name the fix: retrying alone hits the same wall.
+      (should (string-match-p "Bash(python3:\\*)" (cdr verdict))))
+    ;; Self-reported, and it wins the wording over the inferred version.
+    (should (equal '(unverified . "could not run pytest")
+                   (classify '(:result ((subtype . "success"))
+                               :report unverified
+                               :report-reason "could not run pytest")
+                             0)))
+    ;; Opting out restores the old tolerance.
+    (let ((rata-claude-loop-verification-denial-tools nil))
+      (should-not (classify '(:result ((subtype . "success")
+                                       (permission_denials
+                                        . (((tool_name . "Bash")))))
+                              :report done)
+                            0)))
+    ;; A denied Edit is the stronger finding and keeps its own kind.
+    (should (eq 'denied
+                (car (classify '(:result ((subtype . "success")
+                                          (permission_denials
+                                           . (((tool_name . "Edit"))
+                                              ((tool_name . "Bash"))))))
+                               0))))))
+
+(ert-deftest rata-test-claude-loop-denial-pattern ()
+  "A denial suggests the narrowest --allowedTools pattern that would fit it."
+  (cl-flet ((pattern (denial) (rata-claude-loop--denial-pattern denial)))
+    (should (equal "Bash(python3:*)"
+                   (pattern '((tool_name . "Bash")
+                              (tool_input . ((command . "python3 hello.py")))))))
+    ;; An absolute path names the program, not the path.
+    (should (equal "Bash(python3:*)"
+                   (pattern '((tool_name . "Bash")
+                              (tool_input
+                               . ((command . "/usr/bin/python3 hello.py")))))))
+    ;; Some events carry `input' rather than `tool_input'.
+    (should (equal "Bash(just:*)"
+                   (pattern '((tool_name . "Bash")
+                              (input . ((command . "just test")))))))
+    ;; Nothing parseable: the bare tool name is wider than ideal, and honest.
+    (should (equal "Bash" (pattern '((tool_name . "Bash")))))
+    (should (equal "Bash" (pattern '((tool_name . "Bash")
+                                     (tool_input . ((command . "FOO=1 make")))))))
+    (should (equal "WebFetch" (pattern '((tool_name . "WebFetch")))))
+    (should-not (pattern '((tool_use_id . "x"))))))
+
 (ert-deftest rata-test-claude-loop-note-status ()
   "The self-reported status line is parsed, last occurrence winning."
   (cl-flet ((note (text)
@@ -599,6 +661,8 @@ carries the `result' event the loop makes every decision from."
                    (note "RATA-TASK-STATUS: blocked -- the API does not exist")))
     (should (equal '(blocked . "em dash reason")
                    (note "RATA-TASK-STATUS: blocked — em dash reason")))
+    (should (equal '(unverified . "could not run pytest")
+                   (note "RATA-TASK-STATUS: unverified -- could not run pytest")))
     (should (equal '(nil) (note "no status here")))
     (should (eq 'done (car (note "RATA-TASK-STATUS: blocked -- x\nRATA-TASK-STATUS: done"))))))
 
@@ -626,6 +690,34 @@ carries the `result' event the loop makes every decision from."
       (should (member "stream-json" argv))
       (should (string-match-p "do a thing" (nth 2 argv)))
       (should (string-match-p "RATA-TASK-STATUS" (nth 2 argv))))))
+
+(ert-deftest rata-test-claude-loop-prompt-demands-verification ()
+  "The prompt asks for a run, not a reading, and offers a way to say so."
+  (let ((prompt (rata-claude-loop--prompt "do a thing" "/tmp/tasks.md")))
+    (should (string-match-p "verify" prompt))
+    (should (string-match-p "not verification" prompt))
+    (should (string-match-p "RATA-TASK-STATUS: unverified" prompt))
+    (should (string-match-p "never able to execute" prompt))))
+
+(ert-deftest rata-test-claude-loop-allowed-tools-reach-argv ()
+  "Allowed tools and the appended system prompt survive into both commands.
+`--allowedTools' is variadic, so whatever follows its patterns has to be a
+flag; anything else would be swallowed as one more tool pattern."
+  (let ((rata-claude-loop--state (list :root "/tmp/" :session-id "abc-123"))
+        (rata-claude-loop-executable "claude")
+        (rata-claude-loop-allowed-tools '("Bash(just:*)" "Bash(python3:*)"))
+        (rata-claude-loop-append-system-prompt "be terse")
+        (rata-claude-loop-extra-args '("--permission-mode" "acceptEdits")))
+    (dolist (argv (list (rata-claude-loop--build-command "do a thing" "/tmp/t.md")
+                        (rata-claude-loop--build-retry-command "verify failed" "x")))
+      (should (member "--allowedTools" argv))
+      (should (member "--append-system-prompt" argv))
+      (should (member "be terse" argv))
+      (let* ((tail (cdr (member "--allowedTools" argv)))
+             (after (nthcdr 2 tail)))
+        (should (equal (seq-take tail 2) '("Bash(just:*)" "Bash(python3:*)")))
+        ;; Nothing, or a flag -- never a bare word.
+        (should (or (null after) (string-prefix-p "-" (car after))))))))
 
 (ert-deftest rata-test-claude-loop-retry-command-repasses-flags ()
   "A retry re-passes every flag: `--resume' inherits none of them."
@@ -765,6 +857,93 @@ operator's calendar rather than about the work."
     (should (string-match-p "2 attempts" line))
     (should (string-match-p "\\$0\\.50" line))
     (should (string-match-p "verify command failed" line))))
+
+;;; ============================================================
+;;; 8. Per-machine configuration (local.el) -- D-012
+;;; ============================================================
+
+(ert-deftest rata-test-sql-snowflake-parameters-not-committed ()
+  "The Snowflake identity is absent from the tracked source.
+It lives in the gitignored `local.el\='.  This asserts the property the
+audit check enforces textually, from the loaded config: whatever the
+running Emacs has, the file on disk must not carry it."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "lisp/init-sql.el" user-emacs-directory))
+    (dolist (var '("account" "user" "role" "warehouse" "database" "schema"))
+      (goto-char (point-min))
+      (should (re-search-forward
+               (format "(defvar rata-sql-snowflake-%s nil" var) nil t)))))
+
+(ert-deftest rata-test-sql-snowflake-uri-refuses-partial-config ()
+  "Building a URI from unset parameters is refused, and names what is missing.
+A URI made of nils is accepted here and fails much later, inside a
+Leiningen nREPL boot, where the real cause is invisible."
+  (let ((rata-sql-snowflake-account nil)
+        (rata-sql-snowflake-user nil)
+        (rata-sql-snowflake-role nil)
+        (rata-sql-snowflake-warehouse nil)
+        (rata-sql-snowflake-database nil)
+        (rata-sql-snowflake-schema nil))
+    (let ((err (should-error (rata-sql-snowflake-uri) :type 'user-error)))
+      (should (string-match-p "rata-sql-snowflake-account" (cadr err)))
+      (should (string-match-p "local.el.example" (cadr err)))))
+  ;; One parameter short is still short -- the common case after a partial copy.
+  (let ((rata-sql-snowflake-account "acct")
+        (rata-sql-snowflake-user "u")
+        (rata-sql-snowflake-role "r")
+        (rata-sql-snowflake-warehouse "w")
+        (rata-sql-snowflake-database "d")
+        (rata-sql-snowflake-schema nil))
+    (let ((err (should-error (rata-sql-snowflake-uri) :type 'user-error)))
+      (should (string-match-p "rata-sql-snowflake-schema" (cadr err)))
+      (should-not (string-match-p "rata-sql-snowflake-account" (cadr err)))))
+  ;; Fully configured: a URI, with the parameters in it.
+  (let ((rata-sql-snowflake-account "acct")
+        (rata-sql-snowflake-user "u@example.com")
+        (rata-sql-snowflake-role "r")
+        (rata-sql-snowflake-warehouse "w")
+        (rata-sql-snowflake-database "d")
+        (rata-sql-snowflake-schema "s"))
+    (let ((uri (rata-sql-snowflake-uri)))
+      (should (string-prefix-p "jdbc:snowflake://acct.snowflakecomputing.com/" uri))
+      (should (string-match-p "authenticator=externalbrowser" uri))
+      ;; The user is hexified, so the @ must not survive raw.
+      (should (string-match-p "user=u%40example\\.com" uri)))))
+
+(ert-deftest rata-test-local-example-is-committed ()
+  "`local.el.example\=' exists and is not gitignored.
+It is the checklist a fresh machine works from, so an ignored or missing
+template is the whole failure mode this design exists to prevent."
+  (let ((example (expand-file-name "local.el.example" user-emacs-directory)))
+    (should (file-exists-p example))
+    ;; `git check-ignore --quiet' exits 0 when the path IS ignored, so a
+    ;; committable template is a NON-zero exit.
+    (should-not (zerop (call-process "git" nil nil nil "-C" user-emacs-directory
+                                     "check-ignore" "--no-index" "--quiet"
+                                     "local.el.example")))))
+
+(ert-deftest rata-test-jira-base-url-has-no-trailing-slash ()
+  "The Jira base URL reaches jira.el without a trailing slash.
+jira.el derives its auth-source host by stripping only \"https://\"
+\(jira-api.el:99,108).  A trailing slash therefore produces the host
+\"acme.atlassian.net/\", no `machine\=' line matches, and the request 401s
+as though the token were wrong.  L-018."
+  ;; jira is deferred via :commands, so the variable does not exist until the
+  ;; package loads.  Load it: a `skip-unless (boundp ...)' here would skip on
+  ;; every run and read as coverage.
+  (skip-unless (require 'jira-api nil t))
+  (skip-unless (and (stringp jira-base-url) (not (string= "" jira-base-url))))
+  (should-not (string-suffix-p "/" jira-base-url))
+  ;; And the derived host, computed exactly as jira.el does it.
+  (should-not (string-match-p
+               "/" (replace-regexp-in-string "https://" "" jira-base-url))))
+
+(ert-deftest rata-test-jira-base-url-normalisation ()
+  "A trailing slash in `rata-jira-base-url\=' is dropped, not passed through."
+  (should (equal (directory-file-name "https://acme.atlassian.net/")
+                 "https://acme.atlassian.net"))
+  (should (equal (directory-file-name "https://acme.atlassian.net")
+                 "https://acme.atlassian.net")))
 
 ;;; ============================================================
 ;;; Run all tests

@@ -60,10 +60,15 @@ headless agent with `--permission-mode acceptEdits` and an operator-supplied she
 
 ### Known open items (do not rediscover these)
 
-`.are/memory/FAILURE_INDEX.md` has the full list. The live one:
+`.are/memory/FAILURE_INDEX.md` has the full list. The live ones:
 two checkouts of this repo exist and the docs below point at the stale one (FAIL-0001).
-(FAIL-0005 is resolved: `core.hooksPath` is now installable via `just install-hooks` and
-GitHub Actions CI runs on PRs and pushes to `master` — `.github/workflows/ci.yml`.)
+
+FAIL-0005 is **closed in this checkout** (2026-08-25): `core.hooksPath` is `.githooks`, so
+`just are-verify full` gates every commit here, and `.github/workflows/ci.yml` gates PRs to
+master. Budget ~3 min for a commit. The cause is permanent, though — `core.hooksPath` is
+per-clone and cannot be committed, so a fresh clone starts ungated until someone runs
+`just install-hooks`. `are-audit`'s `hooks-installed` check warns when that is so; read it
+rather than assuming either state.
 
 ## Commands
 
@@ -126,9 +131,45 @@ emacs --batch --eval "(load-file \"~/workspace/Ratatoskr-emacs/lisp/init-evil.el
 
 ## Repository Context & Navigation
 
-- **Primary Context Source:** Always consult `repomix-output.xml` first when you need to understand the repository structure, review module dependencies, or plan cross-file changes.
-- **File Contents:** This file contains the complete, up-to-date, and packed context of all relevant code, optimized in XML format.
-- **Context Refresh:** If you make significant changes or if the context seems stale, run `repomix` to regenerate the `repomix-output.xml` file before proceeding with further analysis.
+- **Primary source: `just are-context "<task>"`,** then the tables in
+  `.are/knowledge/MODULES.md`. That is the cheap, deterministic path and it is what the
+  ARE rules above require.
+- **`repomix-output.xml` is an optional, per-machine fallback.** It is a generated
+  whole-repo pack (~133k tokens, 59 files) — useful when you genuinely need to see many
+  files at once (a cross-cutting rename, an unfamiliar dependency web), never as a first
+  read. It is gitignored, so it may simply be absent on a given checkout; do not assume it
+  exists, and do not treat a missing pack as a fault.
+  - Set it up once: `just install-repomix` (needs `node`/`npx`; no global install required).
+  - Refresh after significant changes: `just repomix`.
+  - Scope lives in `repomix.config.json`. It deliberately excludes `SPEC.md` (drifted —
+    grep it) and `.are/**` (its own retrieval path is `just are-context`), plus everything
+    `.gitignore` already covers.
+
+## Per-machine configuration
+
+Two gitignored files, two different jobs. Do not merge them and do not hand-edit the wrong
+one (D-012 in `.are/memory/DECISIONS.md`):
+
+| File | Written by | Contains |
+|---|---|---|
+| `custom.el` | Custom itself, on every `M-x customize` save | faces, `safe-local-variable-values`, theme trust. Disposable churn — never hand-edit, never sync. |
+| `local.el` | you, by hand | per-machine values that must not reach the public remote: instance hostnames, corporate identity |
+
+**`local.el.example` is committed and is the authoritative checklist** for what a fresh
+checkout needs. A new machine is `cp local.el.example local.el` plus filling in the values.
+
+- Loaded by `init.el` after `custom.el` (a hand-written value beats a stale Custom one) and
+  before the modules, so their `defvar`s see it. Plain `setq` is correct there: `defvar` and
+  `defcustom` both leave an already-bound value alone.
+- **Adding a value that must stay private means adding a commented line to
+  `local.el.example` in the same commit.** `scripts/are-audit.sh` (`local-example-in-sync`)
+  fails if a variable named in the template still carries a real value in the tracked
+  sources, and if the template names a `rata-` variable nothing defines.
+- Tokens and passwords do **not** go here. They live in `~/.authinfo.gpg`, read lazily
+  through `rata-auth-get` (`lisp/init-system.el:50`) so that startup never blocks on GPG.
+- `lisp/init-sql.el` is the worked example: its six Snowflake parameters are `nil` in git and
+  `rata-sql-snowflake-uri` signals a `user-error` naming the unset ones rather than building
+  a URI out of nils.
 
 ## Architecture
 
@@ -136,7 +177,7 @@ The config follows a modular structure: `early-init.el` → `init.el` → module
 
 **Startup sequence:**
 1. `early-init.el` — disables package.el (elpaca replaces it), removes UI chrome, sets `gc-cons-threshold` to max
-2. `init.el` — bootstraps elpaca, resets GC after startup, adds `lisp/` to load-path, loads `custom.el`, then requires all modules via `rata-load-module`
+2. `init.el` — bootstraps elpaca, resets GC after startup, adds `lisp/` to load-path, loads `custom.el` then `local.el` (see **Per-machine configuration** below), then requires all modules via `rata-load-module`
 3. Modules are loaded in strict order (dependencies matter):
 
 ```
@@ -145,7 +186,8 @@ init-dev → init-lang → init-rust → init-go → init-python → init-cpp �
 init-cmake → init-terraform → init-just → init-docker → init-markdown →
 init-yaml → init-ansible → init-jupyter → init-helm → init-pkgbuild →
 init-casual → init-sql → init-k8s → init-gamedev → init-snippets →
-init-llm → init-claude-loop → init-khoj → init-irc → init-elfeed → init-persp → init-org →
+init-llm → init-claude-loop → init-khoj → init-irc → init-elfeed → init-jira →
+init-persp → init-org →
 init-present → init-dashboard
 ```
 
@@ -185,11 +227,35 @@ init-present → init-dashboard
     The state machine lives in memory; the session ids are the one thing a restart cannot
     recompute and the only way back into a task by hand. A journal write failure disables
     journalling and reports once — it can never stop a run.
+  - **An instruction the agent cannot obey is answered with a fabrication.**
+    `acceptEdits` auto-approves file edits and nothing else, so until
+    `rata-claude-loop-allowed-tools` is set the agent cannot run a command at all —
+    print mode denies silently rather than prompting. A task told to verify its work
+    and structurally prevented from doing so reads its own diff, calls that
+    verification and reports `done`. Hence three things that only work together:
+    `--allowedTools` patterns (narrow — `Bash(just:*)`, never `Bash`), a prompt that
+    says re-reading the diff is not verification, and a third verdict
+    `RATA-TASK-STATUS: unverified` so the honest answer has an encoding. A denied
+    `Bash` now fails the attempt as kind `unverified`
+    (`rata-claude-loop-verification-denial-tools`) rather than being tolerated: the
+    denial exists *because* the agent tried the call, so it is evidence about what
+    happened, where the status line is only a claim. The buffer prints the
+    `--allowedTools` pattern that would have let it through, because the run has
+    already paid to discover it. See [`FAIL-0010`](.are/memory/failures/FAIL-0010.md)
+    and L-015.
   - **The verify command is baselined before the first task** (`rata-claude-loop-verify-baseline`).
     A gate that is already red says nothing about a task, and every task would spend its
     retries being told to fix a break it inherited. The baseline's output is deliberately
     discarded rather than kept as retry feedback.
   - Tests: pure functions in `tests/run-tests.el`; the state machine in `tests/claude-loop-e2e.el` via `just test-claude-loop`, against a stub CLI with no API calls.
+- `init-jira.el` — `jira.el` issue browser under `SPC J`. A second *view* onto work tasks, not a
+  sync: nothing writes into the org-roam tree (see D-011 in `.are/memory/DECISIONS.md`). Two
+  things are deliberate. `jira-username`/`jira-token` are left unset, which is what makes
+  `jira.el` fall back to `auth-source`; and `rata-jira-base-url` defaults to nil and is set in
+  the gitignored `local.el`, because the instance hostname is corporate identity on a public
+  remote. The three Jira modes are put in **emacs state** via `evil-set-initial-state` —
+  upstream does not support evil, and its keymaps live in `tabulated-list-mode` and
+  `magit-section-mode` children, which evil shadows. See L-017 in `.are/memory/LESSONS.md`.
 - `init-org.el` — org-agenda with org-super-agenda, org-roam, org-transclusion, ox-hugo
 - `init-present.el` — reveal.js slide export via `org-re-reveal` under `SPC o p`. Decks are org-roam nodes in the flat roam root, identified by the `rata-reveal-deck-tag` (`:presentation:`) filetag rather than by directory. New decks come from the `presentation` org-roam capture template in `init-org.el` (key `r`) rather than a bespoke command; `rata-reveal-add-header` converts an existing note in place, mirroring `rata-toggle-hastodo-filetag`. `rata-reveal-export-all` finds them with an `org-roam-db-query` mirroring `rata-org-roam-agenda-files` in `init-org.el`. HTML output is redirected to `rata-reveal-export-dir` (outside org-roam) by shadowing `org-export-output-file-name`'s PUB-DIR argument, so no generated file lands in the note tree. Two `ox-html` advices make export non-interactive in this config: one suppresses `set-auto-mode` in `org-html-final-function` (it activates `mhtml-mode`, whose submodes trigger treesit-auto), the other binds `treesit-auto-install` to nil around `org-html-fontify-code` (src-block fontification otherwise prompts to install a missing grammar mid-export). Keybindings sit at top level, not in the deferred `use-package :config`, because `:after (ox general)` would leave them dead until the first manual export. reveal.js assets come from a CDN by default; `rata-reveal-install-local` clones a local copy and `rata-reveal-toggle-root` switches between them for offline presenting. Reuses the `simple-httpd` recipe declared in `init-org.el` to serve decks over HTTP.
 

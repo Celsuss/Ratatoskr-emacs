@@ -1,0 +1,3 @@
+# Machine-local patterns for repomix, on top of .gitignore and repomix.config.json.
+# The shared exclusions live in repomix.config.json ("ignore.customPatterns");
+# keep this file for anything specific to one checkout.

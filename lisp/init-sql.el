@@ -2,20 +2,28 @@
 ;;; init-sql.el --- SQL client (ejc-sql + Snowflake over JDBC)
 
 ;; --- Snowflake connection parameters ---
-;; Mirrors ~/.dbt/profiles.yml (tele2_nba_dbt, target dev).  No secret
-;; lives here: authenticator=externalbrowser does SSO in the browser.
-(defvar rata-sql-snowflake-account "tele2.eu-west-1"
+;; Set these in `local.el', which is gitignored; `local.el.example' is the
+;; template.  They are nil here on purpose: they mirror ~/.dbt/profiles.yml and
+;; name a real account, user, role and schema, and this repository has a public
+;; remote.  No password is involved either way — authenticator=externalbrowser
+;; does SSO in the browser.  See D-012 in .are/memory/DECISIONS.md.
+(defvar rata-sql-snowflake-account nil
   "Snowflake account identifier (the host part of the JDBC URI).")
 
-(defvar rata-sql-snowflake-user "JENS.LORDEN@TELE2.COM")
+(defvar rata-sql-snowflake-user nil
+  "Snowflake user, usually a work email address.")
 
-(defvar rata-sql-snowflake-role "USER__JENS_DOT_LORDEN_AT_TELE2_DOT_COM")
+(defvar rata-sql-snowflake-role nil
+  "Snowflake role to assume on connect.")
 
-(defvar rata-sql-snowflake-warehouse "AIHUB_B2C_LIGHT_WH")
+(defvar rata-sql-snowflake-warehouse nil
+  "Snowflake warehouse to run queries on.")
 
-(defvar rata-sql-snowflake-database "SANDBOX")
+(defvar rata-sql-snowflake-database nil
+  "Snowflake database to connect to.")
 
-(defvar rata-sql-snowflake-schema "JENS_DOT_LORDEN_AT_TELE2_DOT_COM")
+(defvar rata-sql-snowflake-schema nil
+  "Snowflake schema to connect to.")
 
 (defvar rata-sql-snowflake-jdbc-version "3.28.0"
   "Maven version of net.snowflake/snowflake-jdbc.
@@ -29,8 +37,20 @@ renamed the driver class to `net.snowflake.client.api.driver.SnowflakeDriver'.")
   (expand-file-name "var/sql/snowflake.sql" user-emacs-directory)
   "Persistent scratch file for ad-hoc Snowflake queries.")
 
+(defvar rata-sql-snowflake-parameters
+  '(rata-sql-snowflake-account rata-sql-snowflake-user rata-sql-snowflake-role
+    rata-sql-snowflake-warehouse rata-sql-snowflake-database
+    rata-sql-snowflake-schema)
+  "The connection parameters that must be set before connecting.")
+
 (defun rata-sql-snowflake-uri ()
-  "Build the Snowflake JDBC connection URI."
+  "Build the Snowflake JDBC connection URI.
+Signals if any parameter is unset: a URI built from nil would be
+accepted here and fail much later, inside a Leiningen nREPL boot."
+  (let ((missing (seq-remove #'symbol-value rata-sql-snowflake-parameters)))
+    (when missing
+      (user-error "Snowflake is not configured: %s unset.  See local.el.example"
+                  (mapconcat #'symbol-name missing ", "))))
   (format (concat "jdbc:snowflake://%s.snowflakecomputing.com/"
                   "?authenticator=externalbrowser"
                   "&user=%s&role=%s&warehouse=%s&db=%s&schema=%s")

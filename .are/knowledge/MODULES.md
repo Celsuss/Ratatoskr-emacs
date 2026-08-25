@@ -45,6 +45,7 @@ that can actually go wrong in an Emacs configuration are:
 | lisp/init-llm.el | integrations,operator-data | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-irc.el | integrations,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-elfeed.el | integrations,network | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
+| lisp/init-jira.el | integrations,network,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-lang.el | languages,toolchain | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-completion.el | ui,keybindings | MEDIUM | relevant | knowledge/ARCHITECTURE.md |
 | lisp/init-ui.el | ui | MEDIUM | relevant | knowledge/ARCHITECTURE.md |
@@ -84,8 +85,11 @@ that can actually go wrong in an Emacs configuration are:
 | SPEC.md | docs,historical | LOW | fast | memory/DECISIONS.md |
 | snippets/* | editing | LOW | fast | knowledge/MODULES.md |
 | feeds.org | integrations,network | LOW | fast | knowledge/INTEGRATIONS.md |
+| local.el.example | packaging,secrets | MEDIUM | fast | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | .gitignore | packaging | MEDIUM | fast | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | .gitattributes | packaging | LOW | fast | knowledge/MODULES.md |
+| repomix.config.json | packaging,tooling | LOW | fast | knowledge/MODULES.md |
+| .repomixignore | packaging,tooling | LOW | fast | knowledge/MODULES.md |
 | logo.png | assets | LOW | fast | knowledge/MODULES.md |
 | LICENSE | legal | LOW | fast | knowledge/MODULES.md |
 

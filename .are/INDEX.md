@@ -98,9 +98,11 @@ Ranked. Full detail in the linked records.
 3. **The `claude-loop` e2e suite is excluded from `just test`,** so the largest and only
    stateful module (1573 lines) is outside the pre-commit gate.
    → [FAIL-0004](memory/failures/FAIL-0004.md)
-4. ~~**`.githooks/pre-commit` is not installed**~~ RESOLVED — `core.hooksPath` is set to
-   `.githooks` and the pre-commit gate is active; CI (`.github/workflows/ci.yml`) also runs.
-   → [FAIL-0005](memory/failures/FAIL-0005.md)
+4. **A fresh clone starts ungated.** `core.hooksPath` is per-clone config and cannot be
+   committed, so the shipped `.githooks/pre-commit` is off in any new checkout until
+   `just install-hooks` runs. *This* checkout is installed (`.githooks`, verified
+   2026-08-25) and gates every commit with `just are-verify full`; `are-audit` warns when a
+   checkout is not. → [FAIL-0005](memory/failures/FAIL-0005.md)
 5. **Corporate identifiers are committed** in `lisp/init-sql.el` (work email, Snowflake
    account/role/warehouse/database/schema) in a repo with a public GitHub remote. No
    secret is exposed; SSO is used. → [knowledge/SECRETS_AND_SENSITIVE_DATA.md](knowledge/SECRETS_AND_SENSITIVE_DATA.md)
