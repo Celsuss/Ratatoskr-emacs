@@ -148,6 +148,11 @@
    "jj"  '(consult-imenu :which-key "imenu jump")
    "jJ"  '(consult-imenu-multi :which-key "imenu jump multi")
    "jo"  '(consult-outline :which-key "outline jump")
+   "jd"  '(xref-find-definitions :which-key "definition at point")
+   "jD"  '(xref-find-definitions-other-window :which-key "definition other window")
+   "jb"  '(xref-go-back :which-key "jump back")
+   "jr"  '(xref-find-references :which-key "references at point")
+   "js"  '(consult-lsp-symbols :which-key "symbol in project")
 
    "e"   '(:ignore t :which-key "errors")
    "en"  '(flycheck-next-error :which-key "next error")
@@ -195,7 +200,15 @@
    "q"   '(:ignore t :which-key "quit")
    "qq"  '(save-buffers-kill-terminal :which-key "quit emacs")
    "qQ"  '(kill-emacs :which-key "quit without saving")
-   "qr"  '(rata-reload-init-file :which-key "reload init.el")))
+   "qr"  '(rata-reload-init-file :which-key "reload init.el"))
+
+  ;; Vim-idiomatic goto keys in normal state. xref plugs into LSP, Elisp and
+  ;; etags, so these work regardless of backend. Bound in the global normal
+  ;; state (not 'override) so evil-collection's mode-local g-keys still win.
+  (general-define-key
+   :states 'normal
+   "gd" 'xref-find-definitions
+   "gr" 'xref-find-references))
 
 ;; Synchronize elpaca queue — general + evil must be ready before
 ;; any downstream module calls rata-leader

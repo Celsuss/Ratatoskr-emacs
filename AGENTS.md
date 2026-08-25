@@ -333,7 +333,6 @@ init-present → init-dashboard
 ### Documentation
 - Use `:which-key` descriptions for all keybindings
 - Comment complex logic or non-obvious configurations
-- Maintain `CONVENTIONS.md` for architectural decisions
 
 ## Adding New Modules
 1. Create `lisp/init-{category}.el` with lexical-binding header

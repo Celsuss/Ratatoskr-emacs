@@ -18,7 +18,13 @@ A modular, Evil-based Emacs configuration built for speed and productivity.
 - *Kubernetes* — kubel integration for cluster management
 - *Git* — magit, diff-hl (gutter indicators), browse-at-remote
 - *LLM tools* — gptel, ellama, aidermacs (Ollama), agent-shell
-- *Snippets* — yasnippet with 63 custom snippets across 9 modes
+- *Claude Code task loop* — work a =- [ ]= checklist file top to bottom, one headless =claude -p= run per task
+- *SQL client* — ejc-sql with a Snowflake JDBC connection
+- *Khoj* — self-hosted semantic search and chat over your org-roam notes
+- *IRC* — Circe client
+- *RSS* — elfeed reader with tagged feeds
+- *Casual* — transient menus for built-in utility modes
+- *Snippets* — yasnippet with 64 custom snippets across 9 modes
 - *Multiple cursors* via =evil-mc=
 - *REST client* — restclient for =.http= files
 - *Workspaces* via =persp-mode=
@@ -217,8 +223,9 @@ levels, and what each one does *not* prove, are in =.are/knowledge/TESTING_STRAT
   just are-verify full       # ~3min — adds batch startup; what the pre-commit hook runs
 #+end_src
 
-Note: the pre-commit hook is not active until you run =just install-hooks=, and there is
-no CI. See =.are/memory/FAILURE_INDEX.md=.
+Note: the pre-commit hook is not active until you run =just install-hooks=. GitHub Actions
+also runs the verification levels on pull requests and pushes to =master=
+(=.github/workflows/ci.yml=). See =.are/memory/FAILURE_INDEX.md=.
 
 ** Architecture
 
@@ -240,12 +247,18 @@ no CI. See =.are/memory/FAILURE_INDEX.md=.
 | =init-evil=       | Evil + evil-collection, general.el, winum               |
 | =init-completion= | Orderless, vertico, marginalia, consult, embark         |
 | =init-dev=        | LSP, corfu, flycheck, magit, projectile, vterm, dirvish |
-| =init-lang=       | Tree-sitter, language-specific modes and formatters     |
+| =init-lang=       | Cross-cutting infra: tree-sitter (treesit-auto), dap-mode core, combobulate |
+| =init-<lang>=     | Per-language files loaded after init-lang: rust, go, python, cpp, cmake, terraform, just, docker, markdown, yaml, ansible, jupyter, helm, pkgbuild |
+| =init-casual=     | Casual transient menus for built-in utility modes       |
+| =init-sql=        | ejc-sql client + Snowflake JDBC connection              |
 | =init-k8s=        | Kubel for Kubernetes cluster management                 |
 | =init-gamedev=    | Godot 4.x / GDExtension development                    |
 | =init-snippets=   | Yasnippet + community snippets                          |
-| =init-llm=        | gptel, ellama, aidermacs                                |
+| =init-llm=        | gptel, ellama, aidermacs, agent-shell                   |
 | =init-claude-loop= | Runs Claude Code through a checklist file, task by task |
+| =init-khoj=       | Self-hosted semantic search / chat over org-roam        |
+| =init-irc=        | Circe IRC client                                        |
+| =init-elfeed=     | Elfeed RSS reader with tagged feeds                     |
 | =init-persp=      | Workspace management via persp-mode                     |
 | =init-org=        | Org-roam, org-super-agenda, org-kanban, org-transclusion |
 | =init-present=    | Reveal.js slide export from org (org-re-reveal)          |

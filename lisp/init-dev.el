@@ -18,8 +18,11 @@
   (lsp-enable-on-type-formatting nil)
   (lsp-before-save-edits nil)
   (lsp-enable-file-watchers nil)
-  (lsp-completion-provider :none)
-  :config
+  (lsp-completion-provider :none))
+
+;; LSP leader keys at top level so they are live from startup (FAIL-0009);
+;; commands autoload from lsp-mode via the :commands list above.
+(with-eval-after-load 'general
   (rata-leader
     :states '(normal visual)
     "L"   '(:ignore t :which-key "lsp")
@@ -32,6 +35,14 @@
     "Lt"  '(lsp-find-type-definition :which-key "type definition")
     "Ls"  '(lsp-workspace-restart :which-key "restart LSP")
     "LL"  '(lsp :which-key "start LSP")))
+
+;; --- Consult + LSP (project-wide symbol search) ---
+;; Declared here, after lsp-mode's explicit recipe, so elpaca does not pull
+;; lsp-mode into an earlier queue with a default recipe as a transitive dep
+;; (which conflicts with the :files recipe above).
+(use-package consult-lsp
+  :after (consult lsp-mode)
+  :commands (consult-lsp-symbols consult-lsp-file-symbols consult-lsp-diagnostics))
 
 ;; --- LSP UI ---
 (use-package lsp-ui
@@ -114,8 +125,10 @@
 ;; --- Magit ---
 (use-package magit
   :after general
-  :commands (magit-status magit-blame magit-log magit-find-file magit-diff-buffer-file)
-  :config
+  :commands (magit-status magit-blame magit-log magit-find-file magit-diff-buffer-file))
+
+;; Git leader keys at top level so they are live from startup (FAIL-0009).
+(with-eval-after-load 'general
   (rata-leader
     :states '(normal visual)
     "gg"  '(magit-status :which-key "status")
@@ -124,17 +137,14 @@
     "gb"  '(magit-blame :which-key "blame")
     "gl"  '(magit-log :which-key "log")
     "gf"  '(magit-find-file :which-key "find file")
-    "gd"  '(magit-diff-buffer-file :which-key "diff buffer")))
+    "gd"  '(magit-diff-buffer-file :which-key "diff buffer")
+    "gF"  '(forge-list-pullreqs :which-key "pull requests")
+    "gI"  '(forge-list-issues :which-key "issues")))
 
 ;; --- Forge (GitHub PRs/Issues) ---
 ;; Requires ~/.authinfo.gpg: machine api.github.com login USER^forge password TOKEN
 (use-package forge
-  :after magit
-  :config
-  (rata-leader
-    :states '(normal visual)
-    "gF"  '(forge-list-pullreqs :which-key "pull requests")
-    "gI"  '(forge-list-issues :which-key "issues")))
+  :after magit)
 
 ;; --- Vterm ---
 (use-package vterm
@@ -144,8 +154,10 @@
 ;; --- Vterm-toggle ---
 (use-package vterm-toggle
   :after general
-  :commands (vterm-toggle vterm-toggle-cd)
-  :config
+  :commands (vterm-toggle vterm-toggle-cd))
+
+;; Terminal leader keys at top level so they are live from startup (FAIL-0009).
+(with-eval-after-load 'general
   (rata-leader
     :states '(normal visual)
     "t"   '(:ignore t :which-key "toggle")
@@ -200,7 +212,10 @@
   :after general
   :config
   (dirvish-override-dired-mode)
-  (setq dirvish-attributes '(nerd-icons file-size vc-state git-msg))
+  (setq dirvish-attributes '(nerd-icons file-size vc-state git-msg)))
+
+;; Dirvish leader key at top level so it is live from startup (FAIL-0009).
+(with-eval-after-load 'general
   (rata-leader
     :states '(normal visual)
     "fd"  '(dirvish :which-key "dirvish")))
@@ -223,10 +238,15 @@
   :demand t
   :if (executable-find "enchant-2")
   :config
-  (global-jinx-mode)
-  (rata-leader
-    :states '(normal visual)
-    "ts" '(jinx-correct :which-key "spell correct")))
+  (global-jinx-mode))
+
+;; Spell-correct leader key at top level so it is live from startup (FAIL-0009).
+;; Guarded on enchant-2 to match the jinx :if -- no point binding it otherwise.
+(when (executable-find "enchant-2")
+  (with-eval-after-load 'general
+    (rata-leader
+      :states '(normal visual)
+      "ts" '(jinx-correct :which-key "spell correct"))))
 
 ;; --- Diff-hl (git gutter indicators) ---
 (use-package diff-hl
@@ -252,7 +272,10 @@
 ;; --- Browse-at-remote ---
 (use-package browse-at-remote
   :after general
-  :config
+  :commands (browse-at-remote))
+
+;; Browse-at-remote leader key at top level so it is live from startup (FAIL-0009).
+(with-eval-after-load 'general
   (rata-leader
     :states '(normal visual)
     "go" '(browse-at-remote :which-key "open on remote")))

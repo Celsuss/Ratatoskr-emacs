@@ -148,4 +148,17 @@ normally for a full backtrace.  Otherwise, catch and log them to
 (rata-load-module 'init-org)
 (rata-load-module 'init-present)   ; org-re-reveal slide export
 (rata-load-module 'init-dashboard)
-(elpaca-wait) ; ensure all packages fully loaded before startup hooks fire
+
+;; Interactively we do NOT drain the queue here: a trailing (elpaca-wait) forced
+;; EVERY package to finish installing and loading before `emacs-startup-hook'
+;; fired, which negated the :defer/:after deferral the modules set up. general +
+;; evil already synchronise via the (elpaca-wait) in init-evil.el, which is all
+;; downstream modules need for their keymaps.
+;;
+;; In batch/headless runs (`just batch', the ERT suite, CI) there is no idle
+;; loop to run elpaca's async queue, so nothing would be installed or autoloaded
+;; before the process inspects the environment and exits. There we must drain
+;; the queue synchronously -- otherwise deferred-package commands are not even
+;; autoloaded and every static check that resolves a command symbol fails.
+(when noninteractive
+  (elpaca-wait))

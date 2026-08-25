@@ -359,3 +359,53 @@ misdiagnosing the hook it had just denied existed as a hung `git grep`.
 Related: [L-005](#l-005--verify-the-gate-not-just-the-tests) (verify the gate, not the
 tests — this is its second half: having verified it, keep what you tell people in sync),
 L-016 and L-019 (both the same shape — unverifiable prose asserting a checkable fact).
+
+## L-021 — The trailing `elpaca-wait` in init.el is load-bearing for batch/headless runs
+
+**From:** the config-audit session, 2026-08-24, removing the final `(elpaca-wait)` at the
+end of `init.el` as a startup-perf win (it forced every package to finish loading before
+`emacs-startup-hook`, negating the module `:defer`/`:after` deferral).
+
+Removing it outright made `just test-ert` fail `rata-test-keybindings-all-commandp` with a
+huge list of "not a command" symbols spanning modules the change never touched
+(`init-python`, `init-rust`, `init-sql`, ...). The cause was not the keybinding sweep also
+in flight: interactively, elpaca's queue drains on the idle loop via `after-init-hook`, but
+in `emacs --batch` there is no idle loop, so nothing gets installed or autoloaded before the
+process inspects the environment and exits. The trailing `elpaca-wait` was the only thing
+draining the queue in headless mode; without it, every deferred-package command symbol is
+unbound at test time.
+
+The fix keeps both properties: `(when noninteractive (elpaca-wait))` — interactive startup
+stays deferred (fast), batch/CI still gets a fully-drained queue.
+
+**Apply:** an `elpaca-wait` that looks like pure interactive-startup cost may be the only
+synchronisation a batch run has. Before deleting one, ask what drains the queue in `--batch`
+(nothing does on its own). Gate on `noninteractive` rather than removing. A green
+`are-verify` *before* such a change and a red one *after*, on files the change never touched,
+is the signature of a lost batch barrier — not a real regression in those files.
+
+## L-022 — Declare a package *after* any dependency that carries a custom elpaca recipe
+
+**From:** the jump-keybindings session, 2026-08-24, adding `consult-lsp` (which depends on
+`lsp-mode`) to `init-completion.el`. `init-completion` loads *before* `init-dev.el`, where
+`lsp-mode` is declared with an explicit recipe (`:files (:defaults "clients/*.*")`). The
+`are-verify relevant` ERT step died with an elpaca *build* error — not a test failure —
+`Elpaca build error: (elpaca lsp-mode ...) "dependent consult-lsp in past queue"`.
+
+Cause: elpaca resolves a package's dependencies when it first *sees* the package. Declaring
+`consult-lsp` first pulled `lsp-mode` into an earlier queue with elpaca's *default* recipe;
+the later explicit recipe in `init-dev.el` then conflicted with the already-queued default.
+The fix was purely ordering: declare `consult-lsp` in `init-dev.el` immediately after the
+`lsp-mode` `use-package`, so the explicit recipe is registered before anything depends on it.
+`:after (consult lsp-mode)` controls *load* order, not *queue/recipe* order — it does not help.
+
+A second, separate symptom on the same run: the very first gate run after adding the package
+failed `rata-test-keybindings-all-commandp` on `consult-lsp-symbols`, because elpaca was
+still fetching/activating the freshly-added package when ERT loaded (cf. L-014). Re-running
+after the build completed passed. Distinguish "not yet installed" (transient, one clean
+re-run fixes it) from "recipe conflict" (deterministic, needs the reorder above).
+
+**Apply:** when a new `:ensure` package depends on another package that has a non-default
+recipe elsewhere in the config, place the new declaration *after* that dependency's
+`use-package`, in load order — not in whichever module feels topical. An elpaca *build*
+error naming a "dependent … in past queue" is this, not a code bug.

@@ -28,9 +28,7 @@
 (use-package marginalia
   :after vertico
   :config
-  (marginalia-mode)
-  :custom
-  (marginalia-annotators '(marginalia-annotators-heavy marginalia-annotators-light nil)))
+  (marginalia-mode))
 
 ;; --- Consult Enhanced Commands ---
 (use-package consult

@@ -18,11 +18,11 @@ A personal GNU Emacs configuration, written entirely in Emacs Lisp, loaded from
 | Question | Answer | Source |
 |---|---|---|
 | Language | Emacs Lisp (+ bash for tooling) | repo contents |
-| Size | 36 modules under `lisp/`, ~5.2k lines of Elisp | `wc -l lisp/*.el init.el early-init.el` |
+| Size | 36 modules under `lisp/`, ~5.8k lines of Elisp | `wc -l lisp/*.el init.el early-init.el` |
 | Package manager | `elpaca`, bootstrapped in `init.el`; `package.el` disabled in `early-init.el` | `init.el`, `early-init.el` |
 | Task runner | `just` (`justfile`) | `justfile` |
 | Tests | ERT (`tests/run-tests.el`), bespoke e2e harness (`tests/claude-loop-e2e.el`) | `tests/` |
-| CI/CD | **none** — no `.github/`, no `.gitlab-ci.yml` | verified absent |
+| CI/CD | GitHub Actions on PR + push to `master` (fast-gate + full-load jobs) | `.github/workflows/ci.yml` |
 | Deployment | **none** — it *is* the deployed artifact; `git pull` is the deploy | repo structure |
 | Server / backend / HTTP API | **none** | verified absent |
 | Database | **none owned.** A SQL *client* (ejc-sql → Snowflake) is configured | `lisp/init-sql.el` |

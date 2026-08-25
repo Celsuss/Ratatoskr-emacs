@@ -1,6 +1,13 @@
 ;;; -*- lexical-binding: t; -*-
 ;;; init-system.el --- System-level defaults (paths, backups, environment)
 
+;; Base customization group for the whole config. Defined in this early core
+;; module (loaded 2nd) so `:group 'rata' defcustoms in later modules
+;; (init-gamedev, init-sql, init-org, ...) never depend on org's load order.
+(defgroup rata nil
+  "Ratatoskr Emacs customizations."
+  :group 'convenience)
+
 ;; Redirect auto-generated files out of user-emacs-directory
 (use-package no-littering
   :demand t
@@ -11,7 +18,10 @@
 (use-package exec-path-from-shell
   :demand t
   :config
-  (when (daemonp)
+  ;; A GUI Emacs launched from a desktop entry (not a login shell) inherits no
+  ;; PATH/env either, so initialise for window-system frames too -- not only
+  ;; the daemon.
+  (when (or (daemonp) (memq window-system '(x pgtk ns mac)))
     (exec-path-from-shell-initialize)))
 
 ;; --- GC Magic Hack (adaptive GC threshold) ---
@@ -81,10 +91,15 @@
           ("*Messages*"        :align below :size 0.25 :popup t))))
 
 ;; --- Popper (popup management) ---
+;; Delineation with shackle: shackle owns PLACEMENT (where a popup lands),
+;; popper owns LIFECYCLE (toggle/cycle/dismiss). The two reference the same
+;; buffers on purpose -- but `popper-display-control' must be nil so popper does
+;; not also try to place windows and fight shackle's rules.
 (use-package popper
   :after general
   :demand t
   :config
+  (setq popper-display-control nil)
   (setq popper-reference-buffers
         '("\\*Messages\\*"
           "\\*Warnings\\*"

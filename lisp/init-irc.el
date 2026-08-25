@@ -94,8 +94,11 @@
   (require 'lui-track-bar)
   (enable-circe-color-nicks)
   (enable-lui-track-bar)
-  (add-hook 'circe-server-connected-hook #'rata-irc-quakenet-auth)
-  :init
+  (add-hook 'circe-server-connected-hook #'rata-irc-quakenet-auth))
+
+;; Global leader keys at top level so they are live from startup (FAIL-0009);
+;; :init runs at module load but did not resolve these reliably.
+(with-eval-after-load 'general
   (rata-leader
     :states '(normal visual)
     "ac"  '(:ignore t :which-key "chat")

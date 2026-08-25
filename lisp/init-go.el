@@ -1,17 +1,26 @@
 ;;; -*- lexical-binding: t; -*-
 ;;; init-go.el --- Go language support
 
+;; treesit-auto (init-lang.el) routes .go files to `go-ts-mode', so all
+;; enablement targets that mode -- not `go-mode', whose hook would never fire.
+;; The go-mode package is kept only for its helper commands (go-import-add,
+;; go-goto-imports), autoloaded via :commands.
 (use-package go-mode
-  :hook (go-mode . lsp-deferred)
-  :commands (go-import-add go-goto-imports)
-  :config
-  (setq go-tab-width 4)
-  ;; Use goimports instead of gofmt (manages imports automatically)
+  :commands (go-import-add go-goto-imports))
+
+(add-hook 'go-ts-mode-hook #'lsp-deferred)
+
+;; Use goimports instead of gofmt (manages imports automatically). Registered
+;; at top level so it does not depend on go-mode's :config ever running.
+(with-eval-after-load 'apheleia
   (setf (alist-get 'go-mode apheleia-mode-alist) 'goimports)
   (setf (alist-get 'go-ts-mode apheleia-mode-alist) 'goimports))
 
+(with-eval-after-load 'go-ts-mode
+  (setq go-ts-mode-indent-offset 4))
+
 (use-package gotest
-  :after (go-mode general)
+  :after general
   :config
   (rata-leader
     :states '(normal visual)
@@ -27,7 +36,7 @@
     "mgI" '(go-goto-imports :which-key "goto imports")))
 
 (use-package go-tag
-  :after (go-mode general)
+  :after general
   :config
   (rata-leader
     :states '(normal visual)

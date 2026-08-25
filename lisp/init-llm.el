@@ -7,29 +7,16 @@
   :config
   (gptel-make-ollama "Ollama"
     :host "localhost:11434"
-    :models '("ollama_chat/qwen3.5-coder:9b-32k" "mistral:latest")
+    ;; Bare Ollama tags -- gptel talks to Ollama's API directly, so no
+    ;; `ollama_chat/' litellm routing prefix (that is only correct for aider).
+    :models '("qwen3.5-coder:9b-32k" "mistral:latest")
     :stream t)
-  (setq gptel-default-mode 'org-mode)
-  (rata-leader
-    :states '(normal visual)
-    "ai"    '(:ignore t :which-key "AI")
-    "aig"   '(:ignore t :which-key "gptel")
-    "aigg"  '(gptel           :which-key "gptel chat")
-    "aigs"  '(gptel-send      :which-key "send to gptel")
-    "aigr"  '(gptel-rewrite   :which-key "rewrite with gptel")
-    "aigm"  '(gptel-menu      :which-key "gptel menu")))
+  (setq gptel-default-mode 'org-mode))
 
 ;; --- ellama (Ollama local) ---
 (use-package ellama
   :after general
   :commands (ellama-chat ellama-ask-about ellama-enhance-code)
-  :init
-  (rata-leader
-    :states '(normal visual)
-    "aie"   '(:ignore t :which-key "ellama")
-    "aiee"  '(ellama-chat         :which-key "ellama chat")
-    "aiea"  '(ellama-ask-about    :which-key "ask about region")
-    "aiec"  '(ellama-enhance-code :which-key "enhance code"))
   :config
   (require 'llm-ollama)
   (setq ellama-provider
@@ -39,12 +26,6 @@
 (use-package aidermacs
   :after general
   :commands (aidermacs-transient-menu aidermacs-open)
-  :init
-  (rata-leader
-    :states '(normal visual)
-    "aia"   '(:ignore t :which-key "aider")
-    "aiaa"  '(aidermacs-transient-menu :which-key "aider menu")
-    "aiao"  '(aidermacs-open           :which-key "open aider"))
   :config
   (setq aidermacs-default-model "ollama_chat/qwen3.5-coder:9b-32k"))
 
@@ -53,10 +34,26 @@
   :after general
   :commands (agent-shell agent-shell-anthropic-start-claude-code)
   :custom
-  (agent-shell-anthropic-claude-acp-command '("claude-code-acp"))
-  :init
+  (agent-shell-anthropic-claude-acp-command '("claude-code-acp")))
+
+;; All AI leader keys at top level so they are live from startup (FAIL-0009);
+;; commands autoload from their packages via each :commands list.
+(with-eval-after-load 'general
   (rata-leader
     :states '(normal visual)
+    "ai"    '(:ignore t :which-key "AI")
+    "aig"   '(:ignore t :which-key "gptel")
+    "aigg"  '(gptel           :which-key "gptel chat")
+    "aigs"  '(gptel-send      :which-key "send to gptel")
+    "aigr"  '(gptel-rewrite   :which-key "rewrite with gptel")
+    "aigm"  '(gptel-menu      :which-key "gptel menu")
+    "aie"   '(:ignore t :which-key "ellama")
+    "aiee"  '(ellama-chat         :which-key "ellama chat")
+    "aiea"  '(ellama-ask-about    :which-key "ask about region")
+    "aiec"  '(ellama-enhance-code :which-key "enhance code")
+    "aia"   '(:ignore t :which-key "aider")
+    "aiaa"  '(aidermacs-transient-menu :which-key "aider menu")
+    "aiao"  '(aidermacs-open           :which-key "open aider")
     "aic"   '(:ignore t :which-key "agent shell")
     "aics"  '(agent-shell                             :which-key "agent shell")
     "aicc"  '(agent-shell-anthropic-start-claude-code  :which-key "claude code")))
