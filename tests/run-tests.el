@@ -764,6 +764,70 @@ operator's calendar rather than about the work."
     (should (string-match-p "verify command failed" line))))
 
 ;;; ============================================================
+;;; 8. Per-machine configuration (local.el) -- D-012
+;;; ============================================================
+
+(ert-deftest rata-test-sql-snowflake-parameters-not-committed ()
+  "The Snowflake identity is absent from the tracked source.
+It lives in the gitignored `local.el\='.  This asserts the property the
+audit check enforces textually, from the loaded config: whatever the
+running Emacs has, the file on disk must not carry it."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "lisp/init-sql.el" user-emacs-directory))
+    (dolist (var '("account" "user" "role" "warehouse" "database" "schema"))
+      (goto-char (point-min))
+      (should (re-search-forward
+               (format "(defvar rata-sql-snowflake-%s nil" var) nil t)))))
+
+(ert-deftest rata-test-sql-snowflake-uri-refuses-partial-config ()
+  "Building a URI from unset parameters is refused, and names what is missing.
+A URI made of nils is accepted here and fails much later, inside a
+Leiningen nREPL boot, where the real cause is invisible."
+  (let ((rata-sql-snowflake-account nil)
+        (rata-sql-snowflake-user nil)
+        (rata-sql-snowflake-role nil)
+        (rata-sql-snowflake-warehouse nil)
+        (rata-sql-snowflake-database nil)
+        (rata-sql-snowflake-schema nil))
+    (let ((err (should-error (rata-sql-snowflake-uri) :type 'user-error)))
+      (should (string-match-p "rata-sql-snowflake-account" (cadr err)))
+      (should (string-match-p "local.el.example" (cadr err)))))
+  ;; One parameter short is still short -- the common case after a partial copy.
+  (let ((rata-sql-snowflake-account "acct")
+        (rata-sql-snowflake-user "u")
+        (rata-sql-snowflake-role "r")
+        (rata-sql-snowflake-warehouse "w")
+        (rata-sql-snowflake-database "d")
+        (rata-sql-snowflake-schema nil))
+    (let ((err (should-error (rata-sql-snowflake-uri) :type 'user-error)))
+      (should (string-match-p "rata-sql-snowflake-schema" (cadr err)))
+      (should-not (string-match-p "rata-sql-snowflake-account" (cadr err)))))
+  ;; Fully configured: a URI, with the parameters in it.
+  (let ((rata-sql-snowflake-account "acct")
+        (rata-sql-snowflake-user "u@example.com")
+        (rata-sql-snowflake-role "r")
+        (rata-sql-snowflake-warehouse "w")
+        (rata-sql-snowflake-database "d")
+        (rata-sql-snowflake-schema "s"))
+    (let ((uri (rata-sql-snowflake-uri)))
+      (should (string-prefix-p "jdbc:snowflake://acct.snowflakecomputing.com/" uri))
+      (should (string-match-p "authenticator=externalbrowser" uri))
+      ;; The user is hexified, so the @ must not survive raw.
+      (should (string-match-p "user=u%40example\\.com" uri)))))
+
+(ert-deftest rata-test-local-example-is-committed ()
+  "`local.el.example\=' exists and is not gitignored.
+It is the checklist a fresh machine works from, so an ignored or missing
+template is the whole failure mode this design exists to prevent."
+  (let ((example (expand-file-name "local.el.example" user-emacs-directory)))
+    (should (file-exists-p example))
+    ;; `git check-ignore --quiet' exits 0 when the path IS ignored, so a
+    ;; committable template is a NON-zero exit.
+    (should-not (zerop (call-process "git" nil nil nil "-C" user-emacs-directory
+                                     "check-ignore" "--no-index" "--quiet"
+                                     "local.el.example")))))
+
+;;; ============================================================
 ;;; Run all tests
 ;;; ============================================================
 

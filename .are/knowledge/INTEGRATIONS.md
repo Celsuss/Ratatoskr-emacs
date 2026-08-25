@@ -18,7 +18,7 @@ credentials and a homelab.
 | Claude Code over ACP | `claude-code-acp` binary | `init-llm.el` (`agent-shell`) | web login | AUR package on Arch; not present on this Ubuntu host |
 | Ollama (local models) | `localhost:11434` | `init-llm.el` (`gptel`, `ellama`, `aidermacs`) | none | local only; models `deepseek-coder`, `mistral`, `nomic-embed-text` |
 | Khoj (self-hosted) | `http://khoj.homelab.local` | `init-khoj.el` | none configured | **indexes `~/workspace/second-brain/org-roam/`** — sends the operator's notes to the homelab host |
-| Snowflake | `tele2.eu-west-1.snowflakecomputing.com` over JDBC | `init-sql.el` | SSO, `authenticator=externalbrowser` | corporate; see [SECRETS_AND_SENSITIVE_DATA.md](SECRETS_AND_SENSITIVE_DATA.md) |
+| Snowflake | `<rata-sql-snowflake-account>.snowflakecomputing.com` over JDBC, set in `local.el` | `init-sql.el` | SSO, `authenticator=externalbrowser` | corporate. nil in the tracked sources since D-012, so `SPC a d s` refuses to build a URI until `local.el` exists; see [SECRETS_AND_SENSITIVE_DATA.md](SECRETS_AND_SENSITIVE_DATA.md) |
 | GitHub | api.github.com | `init-dev.el` (`forge`) | `~/.authinfo.gpg`, `USER^forge` | |
 | Libera.Chat IRC | port 6697, TLS | `init-irc.el` (`circe`) | SASL password from `auth-source` | nick `celsuss` |
 | QuakeNet IRC | port 6667, **no TLS** | `init-irc.el` | none | plaintext by protocol choice |

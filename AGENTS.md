@@ -130,13 +130,39 @@ emacs --batch --eval "(load-file \"~/workspace/Ratatoskr-emacs/lisp/init-evil.el
 - **File Contents:** This file contains the complete, up-to-date, and packed context of all relevant code, optimized in XML format.
 - **Context Refresh:** If you make significant changes or if the context seems stale, run `repomix` to regenerate the `repomix-output.xml` file before proceeding with further analysis.
 
+## Per-machine configuration
+
+Two gitignored files, two different jobs. Do not merge them and do not hand-edit the wrong
+one (D-012 in `.are/memory/DECISIONS.md`):
+
+| File | Written by | Contains |
+|---|---|---|
+| `custom.el` | Custom itself, on every `M-x customize` save | faces, `safe-local-variable-values`, theme trust. Disposable churn — never hand-edit, never sync. |
+| `local.el` | you, by hand | per-machine values that must not reach the public remote: instance hostnames, corporate identity |
+
+**`local.el.example` is committed and is the authoritative checklist** for what a fresh
+checkout needs. A new machine is `cp local.el.example local.el` plus filling in the values.
+
+- Loaded by `init.el` after `custom.el` (a hand-written value beats a stale Custom one) and
+  before the modules, so their `defvar`s see it. Plain `setq` is correct there: `defvar` and
+  `defcustom` both leave an already-bound value alone.
+- **Adding a value that must stay private means adding a commented line to
+  `local.el.example` in the same commit.** `scripts/are-audit.sh` (`local-example-in-sync`)
+  fails if a variable named in the template still carries a real value in the tracked
+  sources, and if the template names a `rata-` variable nothing defines.
+- Tokens and passwords do **not** go here. They live in `~/.authinfo.gpg`, read lazily
+  through `rata-auth-get` (`lisp/init-system.el:50`) so that startup never blocks on GPG.
+- `lisp/init-sql.el` is the worked example: its six Snowflake parameters are `nil` in git and
+  `rata-sql-snowflake-uri` signals a `user-error` naming the unset ones rather than building
+  a URI out of nils.
+
 ## Architecture
 
 The config follows a modular structure: `early-init.el` → `init.el` → modules in `lisp/`.
 
 **Startup sequence:**
 1. `early-init.el` — disables package.el (elpaca replaces it), removes UI chrome, sets `gc-cons-threshold` to max
-2. `init.el` — bootstraps elpaca, resets GC after startup, adds `lisp/` to load-path, loads `custom.el`, then requires all modules via `rata-load-module`
+2. `init.el` — bootstraps elpaca, resets GC after startup, adds `lisp/` to load-path, loads `custom.el` then `local.el` (see **Per-machine configuration** below), then requires all modules via `rata-load-module`
 3. Modules are loaded in strict order (dependencies matter):
 
 ```

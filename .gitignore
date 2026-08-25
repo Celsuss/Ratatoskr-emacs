@@ -42,6 +42,7 @@ transient/history.el
 /elfeed-db/
 /persp-confs/
 /custom.el
+/local.el
 /.org-id-locations
 /projectile-bookmarks.eld
 /.agent-shell/

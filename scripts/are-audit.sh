@@ -217,6 +217,43 @@ if hits="$(grep -rniE '(password|passwd|secret|api[-_]?key|token)[[:space:]]*(=|
     fi
 fi
 
+# --- Check: local-example-in-sync ------------------------------------------------
+# `local.el.example' is committed as the checklist for a fresh machine (D-012), so it
+# has to stay true in both directions: every variable it names must exist, and none of
+# them may still carry a real value in the tracked sources. The second half is the one
+# that matters — it is what stops a corporate hostname from being pasted back into
+# lisp/ where it would reach the public remote again.
+#
+# Only `rata-'-prefixed names are checked for existence; the template may also mention
+# third-party variables (khoj-server-url) that are set through use-package :custom and
+# have no defvar in this tree. The value scan reads the defvar line and the one after
+# it, which is where every value in this repo currently sits.
+echo "=== Check: local-example-in-sync ==="
+example="local.el.example"
+if [ -f "$example" ]; then
+    while IFS= read -r var; do
+        [ -n "$var" ] || continue
+        case "$var" in rata-*) ;; *) continue ;; esac
+        def=$(grep -rhA1 -E "^\((defvar|defcustom) ${var}( |$)" lisp/ init.el early-init.el 2>/dev/null || true)
+        if [ -z "$def" ]; then
+            fail "$example sets '$var', which no defvar or defcustom defines"
+            continue
+        fi
+        # A quoted string in the definition is only allowed if it is a placeholder.
+        value=$(printf '%s' "$def" | sed -n 's/^([^ ]* [^ ]* \(.*\)$/\1/p')
+        case "$value" in
+            *'"'*)
+                case "$value" in
+                    *CHANGE-ME* | *YOUR* | *example*) ;;
+                    *) fail "$var still has a real value in the tracked sources; it belongs in local.el ($example)" ;;
+                esac
+                ;;
+        esac
+    done < <(grep -oE '\(setq [a-zA-Z][a-zA-Z0-9-]*' "$example" | awk '{print $2}' | sort -u)
+else
+    warn "$example is missing — a fresh machine has no checklist (D-012)"
+fi
+
 # --- Check: context-freshness ----------------------------------------------------
 echo "=== Check: context-freshness ==="
 ctx=".are/generated/CURRENT_CONTEXT.md"
