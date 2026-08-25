@@ -193,6 +193,26 @@ if [ "$hooks_path" != ".githooks" ]; then
     warn "core.hooksPath is '${hooks_path:-unset}', so .githooks/pre-commit does not run; $backstop. Fix: just install-hooks (FAIL-0005)"
 fi
 
+# --- Check: hooks-docs-current ---------------------------------------------------
+# The gate's state is machine-readable, so prose restating it drifts. On 2026-08-25
+# `core.hooksPath' was set and both session-entry documents went on saying it was
+# unset; an agent read that, reported the gate as off, and then lost two commit
+# attempts to timeouts because it did not expect a ~3-minute hook to run. Scope is
+# deliberately those two documents -- failure records and knowledge pages keep
+# historical present tense on purpose and must not trip this.
+# Only this direction is checked: the reverse (docs claim installed, it is not) is
+# already surfaced every session by `hooks-installed' above, which prints real state.
+echo "=== Check: hooks-docs-current ==="
+if [ "$hooks_path" = ".githooks" ]; then
+    if hits="$(grep -nE 'core\.hooksPath[^.]{0,60}(unset|not set|not installed|is off)' \
+        AGENTS.md .are/INDEX.md 2>/dev/null)"; then
+        if [ -n "$hits" ]; then
+            echo "$hits"
+            fail "the pre-commit gate is installed, but a session-entry doc still says it is not (FAIL-0005)"
+        fi
+    fi
+fi
+
 # --- Check: stray-files ----------------------------------------------------------
 # FAIL-0007: nothing noticed an accidental untracked file. Warning only — work in progress
 # is normal.

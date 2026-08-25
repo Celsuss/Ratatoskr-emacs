@@ -61,9 +61,14 @@ headless agent with `--permission-mode acceptEdits` and an operator-supplied she
 ### Known open items (do not rediscover these)
 
 `.are/memory/FAILURE_INDEX.md` has the full list. The live ones:
-two checkouts of this repo exist and the docs below point at the stale one (FAIL-0001);
-`core.hooksPath` is unset so the local pre-commit gate is off, though `.github/workflows/ci.yml`
-now gates PRs to master (FAIL-0005).
+two checkouts of this repo exist and the docs below point at the stale one (FAIL-0001).
+
+FAIL-0005 is **closed in this checkout** (2026-08-25): `core.hooksPath` is `.githooks`, so
+`just are-verify full` gates every commit here, and `.github/workflows/ci.yml` gates PRs to
+master. Budget ~3 min for a commit. The cause is permanent, though — `core.hooksPath` is
+per-clone and cannot be committed, so a fresh clone starts ungated until someone runs
+`just install-hooks`. `are-audit`'s `hooks-installed` check warns when that is so; read it
+rather than assuming either state.
 
 ## Commands
 

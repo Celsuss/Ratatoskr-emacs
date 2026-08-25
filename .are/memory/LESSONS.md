@@ -332,3 +332,30 @@ overwritten on the next `M-x customize` save, and `local.el.example` already sai
 
 Related: L-017 and L-018 (both from the same module — its cost has been in the seams
 between this config and upstream, not in either one).
+
+## L-020 — A doc that restates a checked fact outlives the fact
+
+`scripts/are-audit.sh` has checked `core.hooksPath` since ARE bootstrap and reports it
+correctly every session. It was still wrong everywhere it mattered: when the gate was
+installed on 2026-08-25, `AGENTS.md`, `.are/INDEX.md`, `TESTING_STRATEGY.md`, the
+`FAILURE_INDEX` row and `FAIL-0005` itself all went on asserting it was unset — four of
+them in the present tense. An agent read `AGENTS.md`, reported to the operator that the
+local gate was off, and then lost two commit attempts to 90 s and 120 s timeouts,
+misdiagnosing the hook it had just denied existed as a hung `git grep`.
+
+- **The check was never the weak point; the prose beside it was.** A machine-readable fact
+  should be *named* in prose and *reported* by the check — `AGENTS.md` should say "read
+  `are-audit`'s `hooks-installed`", not restate today's verdict. A verdict written into a
+  tracked file has no expiry and nothing recomputes it.
+- **Status lines drift in one direction: toward "still broken".** Every one of these was
+  written while the item was open and none was revisited when it closed. Closing an item
+  means grepping for its every mention, not editing the record that carries its number.
+- **Historical prose is fine; undated present tense is not.** `FAIL-0005`'s symptom block is
+  correct as a 2026-08-19 artifact. What misleads is a bare "is unset" in a document read at
+  the start of every session. Hence `hooks-docs-current` scopes to exactly those two files.
+- **Cost is the tell.** The operator had been told commits were ungated, so a three-minute
+  commit looked like a hang rather than the gate working.
+
+Related: [L-005](#l-005--verify-the-gate-not-just-the-tests) (verify the gate, not the
+tests — this is its second half: having verified it, keep what you tell people in sync),
+L-016 and L-019 (both the same shape — unverifiable prose asserting a checkable fact).
