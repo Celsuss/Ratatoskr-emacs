@@ -238,6 +238,28 @@ The generalisation is about where to put the check, not about models:
   (`a denied WebFetch is tolerated`) read as coverage while certifying the gap. When a
   list decides pass/fail, test the *categories* it is meant to partition, not the entries.
 
+## L-016 — A doc line copied from another repo describes that repo, and nothing notices
+
+`AGENTS.md` opened its navigation section with "Always consult `repomix-output.xml` first".
+No such file has ever existed in this repository: `git rev-list --all --objects | grep -i
+repomix` is empty in both checkouts. The paragraph arrived in `607c905` (2026-05-04) as a
+paste from a Terraform project that does have one — the original wording still said "if you
+make significant changes to the **Terraform files**", and that phrase was later edited out,
+removing the last evidence that the text was foreign.
+
+- **Instructions are dependencies.** A doc that names a file, a target or a path is
+  asserting that it exists. Every other kind of dependency here is checked; prose was not.
+- **The tell is the part that no longer fits.** "Terraform files" in an Emacs config was
+  the diagnosis, and tidying it away made the drift *harder* to see. When you find a line
+  that does not belong, fix the line — do not launder the wording and leave the claim.
+- **Check the mechanical half.** `docs-commands` in `scripts/are-audit.sh` now fails if
+  `just <target>` in the docs is not a real target. It has to match code context only
+  (backtick, org `=verbatim=`, or start of a line) — `\bjust` matched the English "just
+  the" in both docs on the first try.
+- A silent stale instruction costs every session that obeys it. This one sent each agent
+  looking for a file that was never there, and the honest answer — "the pack does not
+  exist here" — was not an option the text allowed.
+
 ## L-017 — "Does not support Evil" in a package's readme is a keymap-shadowing report
 
 `jira.el`'s readme answers "Does it work with Evil Mode?" with "Not supported currently".

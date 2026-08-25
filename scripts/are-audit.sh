@@ -138,6 +138,28 @@ if [ -f justfile ] && [ -f scripts/are-verify.sh ]; then
     done
 fi
 
+# --- Check: docs-commands --------------------------------------------------------
+# L-016: AGENTS.md told every session to "always consult `repomix-output.xml` first" for
+# months. The file had never existed here -- the paragraph was pasted from a Terraform
+# repo that does have one. Nothing looked, because nothing checked that what the docs
+# name is actually reachable. This checks the mechanical half of that: a `just <target>`
+# named in the docs must exist in the justfile.
+echo "=== Check: docs-commands ==="
+if [ -f justfile ]; then
+    for doc in README.org AGENTS.md .are/INDEX.md .are/SYSTEM.md; do
+        [ -f "$doc" ] || continue
+        while IFS= read -r target; do
+            [ -n "$target" ] || continue
+            grep -qE "^${target}( [a-z_]+=?.*)?:" justfile \
+                || fail "$doc names 'just $target', which is not a target in the justfile"
+        # Only code context counts: a backtick/org-verbatim marker, or the start of a
+        # line in a shell block. Bare prose has "just the ..." in it, and English is not
+        # a command. (Matching \bjust reported 'just the' from both docs.)
+        done < <(grep -ohE '(^|[`=])just [a-z][a-z0-9-]+' "$doc" 2>/dev/null \
+            | sed -E 's/^[`=]?just //' | sort -u)
+    done
+fi
+
 # --- Check: docs-paths -----------------------------------------------------------
 # FAIL-0001: README.org and AGENTS.md tell the reader to run a checkout that is not this
 # one. Loud instead of invisible; it does not decide which path is canonical.

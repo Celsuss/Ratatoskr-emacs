@@ -52,3 +52,7 @@ docs/*
 !docs/jira-cheatsheet.org
 # Claude Code local overrides (personal permissions, not shared)
 .claude/settings.local.json
+
+# Repomix pack (generated navigation artifact, per machine)
+/repomix-output.xml
+/repomix-output.md

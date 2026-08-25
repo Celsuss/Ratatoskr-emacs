@@ -126,9 +126,19 @@ emacs --batch --eval "(load-file \"~/workspace/Ratatoskr-emacs/lisp/init-evil.el
 
 ## Repository Context & Navigation
 
-- **Primary Context Source:** Always consult `repomix-output.xml` first when you need to understand the repository structure, review module dependencies, or plan cross-file changes.
-- **File Contents:** This file contains the complete, up-to-date, and packed context of all relevant code, optimized in XML format.
-- **Context Refresh:** If you make significant changes or if the context seems stale, run `repomix` to regenerate the `repomix-output.xml` file before proceeding with further analysis.
+- **Primary source: `just are-context "<task>"`,** then the tables in
+  `.are/knowledge/MODULES.md`. That is the cheap, deterministic path and it is what the
+  ARE rules above require.
+- **`repomix-output.xml` is an optional, per-machine fallback.** It is a generated
+  whole-repo pack (~133k tokens, 59 files) — useful when you genuinely need to see many
+  files at once (a cross-cutting rename, an unfamiliar dependency web), never as a first
+  read. It is gitignored, so it may simply be absent on a given checkout; do not assume it
+  exists, and do not treat a missing pack as a fault.
+  - Set it up once: `just install-repomix` (needs `node`/`npx`; no global install required).
+  - Refresh after significant changes: `just repomix`.
+  - Scope lives in `repomix.config.json`. It deliberately excludes `SPEC.md` (drifted —
+    grep it) and `.are/**` (its own retrieval path is `just are-context`), plus everything
+    `.gitignore` already covers.
 
 ## Per-machine configuration
 

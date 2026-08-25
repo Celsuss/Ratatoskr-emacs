@@ -5,11 +5,11 @@ This is a pointer document: open only the knowledge and records it names.
 
 | | |
 |---|---|
-| Generated | 2026-08-24 13:45 UTC |
+| Generated | 2026-08-25 12:55 UTC |
 | Checkout | `/home/jens/.config/emacs` |
-| Branch | `dev` @ `1a4ca41` |
-| Task | commit pending changes and refresh ARE docs after rebase |
-| Changed paths | 2 |
+| Branch | `dev` @ `e7b74df` |
+| Task | document jira.el usage as an org cheat sheet in docs/, fix two stale doc lines in lisp/init-jira.el |
+| Changed paths | 18 |
 | **Risk tier** | **HIGH** |
 | **Required verification** | **`just are-verify full`** |
 
@@ -17,20 +17,34 @@ This is a pointer document: open only the knowledge and records it names.
 
 | Path | Area | Risk | Verify |
 |---|---|---|---|
+| `AGENTS.md` | docs,conventions | MEDIUM | fast |
+| `.are/generated/CURRENT_CONTEXT.md` | are | MEDIUM | fast |
+| `.are/knowledge/INTEGRATIONS.md` | are | MEDIUM | fast |
+| `.are/knowledge/MODULES.md` | are | MEDIUM | fast |
+| `.are/knowledge/SECRETS_AND_SENSITIVE_DATA.md` | are | MEDIUM | fast |
+| `.are/memory/DECISIONS.md` | are | MEDIUM | fast |
+| `.are/memory/failures/FAIL-0010.md` | are | MEDIUM | fast |
+| `.are/memory/LESSONS.md` | are | MEDIUM | fast |
+| `.gitignore` | packaging | MEDIUM | fast |
+| `init.el` | startup | HIGH | full |
+| `justfile` | verification,tooling | HIGH | full |
+| `lisp/init-jira.el` | integrations,network,secrets | MEDIUM | relevant |
+| `lisp/init-sql.el` | integrations,secrets | HIGH | relevant |
+| `local.el.example` | packaging,secrets | MEDIUM | fast |
+| `repomix.config.json` | packaging,tooling | LOW | fast |
+| `.repomixignore` | packaging,tooling | LOW | fast |
 | `scripts/are-audit.sh` | verification,are | HIGH | fast |
+| `tests/run-tests.el` | verification | HIGH | relevant |
 
-### Unmapped — add rows to `.are/knowledge/MODULES.md`
-
-These paths are not in the path map, so their risk is unknown and this
-context is incomplete. Adding them is part of finishing the task
-(`.are/SYSTEM.md` s3, item 4).
-
-- `"\311\242"`
-
-**Affected areas:** are, verification
+**Affected areas:** are, conventions, docs, integrations, network, packaging, secrets, startup, tooling, verification
 
 ## Knowledge to read
 
+- `.are/knowledge/ARCHITECTURE.md`
+- `.are/knowledge/INTEGRATIONS.md`
+- `.are/knowledge/MODULES.md`
+- `.are/knowledge/SECRETS_AND_SENSITIVE_DATA.md`
+- `.are/knowledge/TESTING_STRATEGY.md`
 - `.are/SYSTEM.md`
 
 Do not read the whole knowledge base. Conventions and per-module reference live in
@@ -39,10 +53,16 @@ Do not read the whole knowledge base. Conventions and per-module reference live 
 ## Relevant failure history
 
 - [`FAIL-0001`](../memory/failures/FAIL-0001.md)
+- [`FAIL-0002`](../memory/failures/FAIL-0002.md)
+- [`FAIL-0003`](../memory/failures/FAIL-0003.md)
 - [`FAIL-0004`](../memory/failures/FAIL-0004.md)
 - [`FAIL-0005`](../memory/failures/FAIL-0005.md)
+- [`FAIL-0006`](../memory/failures/FAIL-0006.md)
 - [`FAIL-0007`](../memory/failures/FAIL-0007.md)
 - [`FAIL-0008`](../memory/failures/FAIL-0008.md)
+- [`FAIL-0009`](../memory/failures/FAIL-0009.md)
+- [`FAIL-0009-probe.el`](../memory/failures/FAIL-0009-probe.el.md)
+- [`FAIL-0010`](../memory/failures/FAIL-0010.md)
 
 ## Rules that apply
 

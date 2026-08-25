@@ -88,6 +88,8 @@ that can actually go wrong in an Emacs configuration are:
 | local.el.example | packaging,secrets | MEDIUM | fast | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | .gitignore | packaging | MEDIUM | fast | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | .gitattributes | packaging | LOW | fast | knowledge/MODULES.md |
+| repomix.config.json | packaging,tooling | LOW | fast | knowledge/MODULES.md |
+| .repomixignore | packaging,tooling | LOW | fast | knowledge/MODULES.md |
 | logo.png | assets | LOW | fast | knowledge/MODULES.md |
 | LICENSE | legal | LOW | fast | knowledge/MODULES.md |
 
