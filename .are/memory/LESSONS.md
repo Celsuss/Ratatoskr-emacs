@@ -449,3 +449,36 @@ over fixtures in `temporary-file-directory`. Two traps in writing such a test: `
 implies `-q`, so it must load `init.el` itself; and `org-agenda` here is advised to append
 every org-roam `:hastodo:` file (`rata-org-agenda-files-advice`), so `rata-org-roam-agenda-files`
 has to be stubbed or the operator's real second-brain tree enters the assertions.
+
+## L-024 — A child frame is not a window: no `display-buffer` rule places it, and lsp-ui measures against the frame
+
+**From:** the lsp-ui-doc session, 2026-08-26. The hover documentation popup appeared in the
+top-left corner of the *frame*, over whichever window happened to be there, rather than in
+the window holding point (`lisp/init-dev.el`).
+
+Two things to not re-derive:
+
+1. **`shackle-rules` and `display-buffer-alist` have no say over a child frame.** They are
+   consulted by `display-buffer`, and a child frame never goes through it. Every popup in
+   this config that "ignores shackle" — lsp-ui-doc, corfu, flycheck-posframe, evil-owl — is
+   a child frame positioned by its own package. Searching `init-system.el` for the cause of
+   a misplaced popup is wasted time; find the package that owns the frame.
+2. **`lsp-ui-doc` positions horizontally against the whole Emacs frame in every mode.**
+   `lsp-ui-doc-alignment 'window` reaches only the `top`/`bottom` positions, and even then
+   only the `right` side: `lsp-ui-doc-side 'left` is a literal `10`-pixel x in
+   `lsp-ui-doc--move-frame`, and `at-point` puts x at the symbol's own column. With the
+   defaults (`position 'top`, `alignment 'frame`, `max-width 150`) the popup's x is
+   `(max (- (frame-pixel-width) width char-w) 10)` — a popup as wide as the frame hits the
+   `10` floor, which is why "top-right by default" presents as top-left.
+
+**Apply:** "put this popup where point is" is an advice, not a setting. Take `at-point` for
+the vertical placement (it is already window-relative and dodges the current line), and
+override x with an `:around` on `lsp-ui-doc--mv-at-point` reading
+`(nth 2 (window-edges nil t nil t))` — the same frame-relative pixel measurement upstream
+takes for its own START-X, so the two agree about the coordinate space.
+`rata-lsp-ui-doc--align-right` in `lisp/init-dev.el` is the worked example, and
+`rata-test-lsp-ui-doc-aligns-to-window-right` in `tests/run-tests.el` is the executable form
+of this lesson: it stubs `window-edges`/`frame-pixel-width` and fails for any implementation
+that measures against the frame. Verification is genuinely split here — placement arithmetic
+is testable headlessly, the child frame itself is in the `gui` NOT TESTED bucket, so the
+visual result still has to be looked at.

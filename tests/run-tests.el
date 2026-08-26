@@ -1054,6 +1054,34 @@ report a horizon one day short."
                  (+ (org-today) offset))))))
 
 ;;; ============================================================
+;;; 10. LSP doc popup placement
+;;; ============================================================
+
+(ert-deftest rata-test-lsp-ui-doc-aligns-to-window-right ()
+  "The lsp-ui-doc child frame hugs the current window's right edge.
+
+Regression test for the popup landing in the corner of the *frame*: a
+child frame is not a window, so no `display-buffer' rule constrains it,
+and every one of lsp-ui's own placement knobs measures against the frame.
+`window-edges' and `frame-pixel-width' are stubbed so this runs headless."
+  (let ((orig (lambda (&rest _) (cons 1234 500))))
+    ;; Point in the right half of a split: x=1000..1600 of a 2000px frame.
+    (cl-letf (((symbol-function 'window-edges) (lambda (&rest _) '(1000 40 1600 900)))
+              ((symbol-function 'frame-pixel-width) (lambda (&rest _) 2000)))
+      ;; A 400px popup ends at the window's right edge, and the vertical
+      ;; coordinate is whatever upstream decided.
+      (should (equal (rata-lsp-ui-doc--align-right orig nil 400 100 1000 40)
+                     (cons 1200 500)))
+      ;; Wider than the window: clamped to the frame's left edge, never negative.
+      (should (equal (rata-lsp-ui-doc--align-right orig nil 1800 100 1000 40)
+                     (cons 0 500))))
+    ;; Point in the left half: the popup must not cross into the other window.
+    (cl-letf (((symbol-function 'window-edges) (lambda (&rest _) '(0 40 600 900)))
+              ((symbol-function 'frame-pixel-width) (lambda (&rest _) 2000)))
+      (should (equal (rata-lsp-ui-doc--align-right orig nil 400 100 0 40)
+                     (cons 200 500))))))
+
+;;; ============================================================
 ;;; Run all tests
 ;;; ============================================================
 
