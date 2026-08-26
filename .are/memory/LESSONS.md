@@ -521,3 +521,60 @@ structural: `rata-elfeed-views` had already drifted into dead code duplicated by
 drift, and generating the *commands* at module top level while binding the *keys* in
 `use-package`'s `:config` is what keeps them testable — a mode-scoped keymap genuinely needs
 `:config`, a command does not, and putting both there would have reproduced FAIL-0009.
+
+## L-026 — Config-derived state is a third copy, and a config-vs-code test cannot see it
+
+**From:** [`FAIL-0011`](failures/FAIL-0011.md), 2026-08-26 — the session immediately after
+the one that produced L-025. `feeds.org` was correct, `rata-elfeed-views` was correct, all
+four `rata-test-elfeed-*` tests were green, and 22 of 36 elfeed views returned an empty
+list.
+
+**Mechanism.** Elfeed applies a feed's tags to an entry **once, at fetch time**
+(`elfeed.el:312,337`), then stores them on the entry in `elfeed-db/index`. `elfeed-feeds` —
+which elfeed-org rebuilds from `feeds.org` on every `M-x elfeed` — therefore only governs
+entries that have not arrived yet. Editing the tag vocabulary is not retroactive, and 8833
+existing entries kept the old symbols. The views that still worked were exactly the ones
+whose tag predated the change; that pattern is what made it look like a filter-string bug
+rather than a database one.
+
+**The generalisation, which is the part worth keeping.** L-025 said: when code filters on
+strings in a data file, assert in a test that every string the code names occurs in the
+file. That is necessary and it is not sufficient. If anything *materialises* that config
+into persistent state — a database row, a cache, a generated file, an index — then there is
+a **third** copy, it was written under an older version of the config, and no test that
+compares the two source files can see it. The failure mode is silent by construction: the
+stale copy is internally consistent, it just answers an older question.
+
+**Apply.**
+
+1. When you change a vocabulary that persisted state was written from, ship the **backfill
+   in the same change** as the vocabulary. Look for it upstream first — elfeed already had
+   `elfeed-apply-autotags-now` and it had simply never been wired in here; the fix was two
+   calls, not a tagging engine.
+2. Prefer running the backfill automatically over documenting that it must be run. Measure
+   the cost before deciding: this one is 0.02 s to retag 8833 entries and 0.11 s to
+   serialise a 3.5 MB index, so `elfeed-search-mode-hook` needs no once-per-session guard.
+   A manual entry point (`SPC a r t`) stays useful for the case of editing `feeds.org` in a
+   running Emacs.
+3. Test the **wiring**, not the state. `rata-test-elfeed-retag-wired` asserts the command
+   exists, is on the hook, is reachable from its key, and that both upstream functions it
+   calls still exist. The suite cannot assert against the operator's database — it can
+   assert that something applies the contract to it.
+4. When a filter can return "no matches" and "nothing matched because the data predates
+   your query" identically, that ambiguity is the bug's hiding place. Reach for the actual
+   store early: one histogram of `elfeed-entry-tags` over the live index named the cause
+   outright, after reasoning about filter strings had produced nothing.
+
+**Diagnostic worth keeping** — read the operator's real database without loading the config
+or touching the network:
+
+```sh
+emacs -Q --batch -L elpaca/builds/elfeed --eval '(progn
+  (require (quote elfeed-db))
+  (setq elfeed-db-directory "/home/jens/.config/emacs/elfeed-db")
+  (elfeed-db-load)
+  (let ((h (make-hash-table :test (quote eq))))
+    (with-elfeed-db-visit (e f)
+      (dolist (tg (elfeed-entry-tags e)) (puthash tg (1+ (gethash tg h 0)) h)))
+    (maphash (lambda (k v) (princ (format "%6d  %s\n" v k))) h)))'
+```

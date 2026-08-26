@@ -1198,6 +1198,32 @@ it is unreachable from any view but `+unread'."
       (ert-fail (concat "feeds.org tag convention violations:\n"
                         (mapconcat #'identity (nreverse failures) "\n"))))))
 
+(ert-deftest rata-test-elfeed-retag-wired ()
+  "Something must apply the feeds.org tags to entries already in the db.
+
+Elfeed stamps a feed's tags onto an entry once, at fetch time.  So the
+three tests above can pass — every view's tag really does exist in
+feeds.org — while 22 of 36 views return zero entries, because the
+backlog was fetched under the previous tag vocabulary.  That is what
+happened after the tag-axis rework: the contract they check is between
+two files, and nobody was checking it against the database.
+
+`rata-elfeed-retag' closes that gap, so it has to stay reachable and its
+two upstream entry points have to keep existing across package updates."
+  (should (commandp 'rata-elfeed-retag))
+  (should (memq 'rata-elfeed-retag elfeed-search-mode-hook))
+  ;; `lookup-key' returns an integer for an incomplete prefix, so compare the
+  ;; command rather than just testing for non-nil.
+  (should (eq (rata-test--leader-lookup "SPC a r t") 'rata-elfeed-retag))
+  ;; The retag is two upstream calls and nothing else; a rename in either
+  ;; package would make it fail at the point of use, in a command the user
+  ;; only presses when a filter already looks wrong.
+  (skip-unless (require 'elfeed nil t))
+  (should (fboundp 'elfeed-apply-autotags-now))
+  (should (fboundp 'elfeed-db-save))
+  (skip-unless (require 'elfeed-org nil t))
+  (should (fboundp 'rmh-elfeed-org-process-advice)))
+
 ;;; ============================================================
 ;;; Run all tests
 ;;; ============================================================

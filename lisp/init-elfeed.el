@@ -36,14 +36,19 @@
     ("F" "firehose"   "Firehose"          "@3-days-ago +unread +firehose")
     ("S" "slow"       "Slow Burners"      "@1-year-ago +unread +slow")
     ("L" "deep"       "Long-form"         "@1-year-ago +unread +deep")
-    ;; Content type.
-    ("c" "corp"       "Corp Eng Blogs"    "@6-months-ago +unread +corp")
+    ;; Content type.  `corp' is "written by a company, not a person": Netflix,
+    ;; Airbnb, Uber, Databricks, Tailscale, Hugging Face, Google Research,
+    ;; OpenAI, Answer.AI, Project Zero.
+    ("c" "corp"       "Company Blogs"     "@6-months-ago +unread +corp")
     ("r" "release"    "Releases"          "@3-months-ago +unread +release")
     ("A" "aggregator" "Aggregators"       "@2-weeks-ago +unread +aggregator")
     (nil "comic"      "Comics"            "@1-month-ago +unread +comic")
     ;; Topic — cuts across sections, which is the whole point.
     ("i" "llm"        "AI & LLM"          "@6-months-ago +unread +llm")
-    ("k" "k8s"        "Kubernetes"        "@6-months-ago +unread +k8s")
+    ;; Arch gets a year: both archlinux.org feeds together are low volume
+    ;; (~23 entries inside a year), so a 6-month window reads as empty.
+    ("x" "arch"       "Arch Linux"        "@1-year-ago +unread +arch")
+    (nil "k8s"        "Kubernetes"        "@6-months-ago +unread +k8s")
     (nil "rust"       "Rust"              "@1-year-ago +unread +rust")
     (nil "python"     "Python"            "@1-year-ago +unread +python")
     (nil "golang"     "Go"                "@1-year-ago +unread +golang")
@@ -125,12 +130,33 @@ not have to grow every time the tag vocabulary does."
     (setq rata-elfeed-update-timer
           (run-at-time nil 1800 #'elfeed-update))))
 
+(defun rata-elfeed-retag ()
+  "Apply the current `rata-elfeed-feeds-file' tags to entries already in the db.
+Elfeed stamps a feed's tags onto an entry once, when the entry is first
+fetched, and never revisits it.  Editing feeds.org therefore only affects
+future entries: a newly added axis matches nothing until this runs, which
+is a filter that silently returns an empty list rather than an error.
+
+Additive — a tag no longer declared for a feed is left in place."
+  (interactive)
+  (require 'elfeed)
+  (require 'elfeed-org)
+  ;; Re-read feeds.org first, so a tag edit made since the last `elfeed' is
+  ;; picked up.  This is the same entry point elfeed-org advises onto `elfeed'.
+  (rmh-elfeed-org-process-advice)
+  (elfeed-apply-autotags-now)
+  (elfeed-db-save))
+
 (use-package elfeed
   :ensure t
   :after general
   :commands (elfeed elfeed-update elfeed-search-set-filter)
   :hook (elfeed-search-mode . elfeed-update)
   :hook (elfeed-search-mode . rata-elfeed-start-update-timer)
+  ;; Backfill the tags feeds.org declares onto the entries already in the db.
+  ;; Order against `elfeed-update' above does not matter: entries arriving from
+  ;; that update are tagged by the new-entry path anyway.
+  :hook (elfeed-search-mode . rata-elfeed-retag)
   :custom
   (elfeed-search-filter "@6-months-ago +unread -news")
   (elfeed-db-directory (expand-file-name "elfeed-db/" user-emacs-directory))
@@ -148,7 +174,8 @@ not have to grow every time the tag vocabulary does."
   "ar"  '(:ignore t :which-key "rss")
   "aro" '(elfeed                   :which-key "open elfeed")
   "aru" '(elfeed-update            :which-key "update feeds")
-  "ars" '(elfeed-search-set-filter :which-key "set filter"))
+  "ars" '(elfeed-search-set-filter :which-key "set filter")
+  "art" '(rata-elfeed-retag        :which-key "retag from feeds.org"))
 
 (use-package elfeed-org
   :ensure t
