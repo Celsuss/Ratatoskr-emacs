@@ -482,3 +482,42 @@ of this lesson: it stubs `window-edges`/`frame-pixel-width` and fails for any im
 that measures against the frame. Verification is genuinely split here — placement arithmetic
 is testable headlessly, the child frame itself is in the `gui` NOT TESTED bucket, so the
 visual result still has to be looked at.
+
+## L-025 — A data file that code filters on is code, and its every failure mode is silent
+
+**From:** the feeds.org retagging session, 2026-08-26. `feeds.org` gained three tag axes
+(content type, topic, cadence) and a per-feed slug on all 94 entries; `init-elfeed.el` was
+rewritten to generate its filter commands and keys from `rata-elfeed-views`.
+
+Three things to not re-derive:
+
+1. **`feeds.org` was classified LOW / `fast` while the code reading it was MEDIUM.** Twelve
+   of its tags are string literals in `init-elfeed.el`, so a rename in the "data" file
+   breaks the "code" file — and the break is *invisible*: elfeed answers a filter that
+   matches nothing with an empty entry list, which looks exactly like having read
+   everything. The root `:elfeed:` tag is worse. It has no reference anywhere in this
+   repo's Elisp — it matches `elfeed-org`'s default `rmh-elfeed-org-tree-id`, which is
+   never set here — so grep finds nothing to protect it, and removing it hides all 94
+   feeds with no error at all. `feeds.org` is now MEDIUM / `relevant`.
+2. **Org tags are `[[:alnum:]_@#%]` only, and they fail closed on the whole group.** A
+   hyphen does not produce a malformed tag; it stops the trailing `:a:b:` being read as a
+   tag group at all, so the feed silently inherits only its section's tags. This is why the
+   existing tag is `tech_radar`. Tags are also interned symbols and case-sensitive: the
+   pre-existing `:Ntietz:` could never be matched by typing `+ntietz`.
+3. **The `f`-prefix filter keys were invisible to the test suite.** They go through
+   `general-define-key`, and `rata-test--walk-form` (`tests/run-tests.el:82`) only descends
+   into `rata-leader` forms. So the 14 keys had no `commandp` coverage of any kind — the
+   FAIL-0009 blind spot, one keymap over.
+
+**Apply:** when code filters on strings living in a data file, the contract needs an
+executable check, not a comment — parse the data file in a test and assert every string the
+code names actually occurs. `rata-test-elfeed-view-tags-exist-in-feeds-org`,
+`rata-test-elfeed-root-tag-present`, `rata-test-elfeed-views-well-formed` and
+`rata-test-feeds-org-tag-conventions` in `tests/run-tests.el` are the worked example; each
+was confirmed to fail against a deliberately mutated `feeds.org` before being kept, because
+a contract test that cannot go red is worse than no test. The second half of the lesson is
+structural: `rata-elfeed-views` had already drifted into dead code duplicated by hand into
+13 defuns and 13 keybindings. Generating the commands and keys from the one list removes the
+drift, and generating the *commands* at module top level while binding the *keys* in
+`use-package`'s `:config` is what keeps them testable — a mode-scoped keymap genuinely needs
+`:config`, a command does not, and putting both there would have reproduced FAIL-0009.

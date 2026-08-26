@@ -85,7 +85,7 @@ that can actually go wrong in an Emacs configuration are:
 | docs/* | docs,are | LOW | fast | SYSTEM.md |
 | SPEC.md | docs,historical | LOW | fast | memory/DECISIONS.md |
 | snippets/* | editing | LOW | fast | knowledge/MODULES.md |
-| feeds.org | integrations,network | LOW | fast | knowledge/INTEGRATIONS.md |
+| feeds.org | integrations,network | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | local.el.example | packaging,secrets | MEDIUM | fast | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | .gitignore | packaging | MEDIUM | fast | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | .gitattributes | packaging | LOW | fast | knowledge/MODULES.md |

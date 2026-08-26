@@ -1082,6 +1082,123 @@ and every one of lsp-ui's own placement knobs measures against the frame.
                      (cons 200 500))))))
 
 ;;; ============================================================
+;;; Elfeed — the feeds.org tag contract
+;;; ============================================================
+;;
+;; `feeds.org' is a data file and `init-elfeed.el' is code, and the tags are an
+;; undeclared contract between them.  Every failure mode here is silent: a
+;; renamed tag makes a view return zero entries, and a broken root tag makes
+;; *every* feed vanish, both without an error.  The existing keybinding tests
+;; cannot see any of it — `rata-test--walk-form' only inspects `rata-leader'
+;; forms, and the elfeed filter keys go through `general-define-key'.
+
+(defun rata-test--feeds-org-path ()
+  "Return the path of the feeds file elfeed actually reads."
+  (if (boundp 'rata-elfeed-feeds-file)
+      rata-elfeed-feeds-file
+    (expand-file-name "feeds.org" user-emacs-directory)))
+
+(defconst rata-test--org-tag-group-re
+  "^\\*+ .*?[ \t]+\\(:[[:alnum:]_@#%:]+:\\)[ \t]*$"
+  "Match an org headline carrying a trailing tag group, group 1 = the tags.")
+
+(defun rata-test--feeds-org-tags ()
+  "Return every org tag used on a headline in feeds.org, as a list of strings."
+  (let (tags)
+    (with-temp-buffer
+      (insert-file-contents (rata-test--feeds-org-path))
+      (goto-char (point-min))
+      (while (re-search-forward rata-test--org-tag-group-re nil t)
+        (dolist (tag (split-string (match-string 1) ":" t))
+          (cl-pushnew tag tags :test #'string=))))
+    tags))
+
+(defun rata-test--view-filter-tags (filter)
+  "Return the +TAG terms of elfeed FILTER, minus the ubiquitous `unread'.
+Date (@), feed (=) and title (~) terms are not tags and are skipped."
+  (let (tags)
+    (dolist (term (split-string filter "[ \t]+" t))
+      (when (and (string-prefix-p "+" term)
+                 (not (string= term "+unread")))
+        (push (substring term 1) tags)))
+    tags))
+
+(ert-deftest rata-test-elfeed-root-tag-present ()
+  "feeds.org must carry the tag `elfeed-org' looks for.
+`rmh-elfeed-org-tree-id' is never set in this config, so the default
+\"elfeed\" applies.  Remove or rename that tag on the top headline and
+every feed disappears with no error and no empty-list warning — the
+highest-consequence, lowest-visibility break in the whole module."
+  (let ((root (if (boundp 'rmh-elfeed-org-tree-id) rmh-elfeed-org-tree-id "elfeed")))
+    (should (member root (rata-test--feeds-org-tags)))))
+
+(ert-deftest rata-test-elfeed-view-tags-exist-in-feeds-org ()
+  "Every tag a `rata-elfeed-views' filter names must exist in feeds.org.
+A view whose tag matches nothing is not an error in elfeed — it is an
+empty entry list, indistinguishable from having read everything."
+  (let ((known (rata-test--feeds-org-tags))
+        failures)
+    (pcase-dolist (`(,_key ,slug ,_label ,filter) rata-elfeed-views)
+      (dolist (tag (rata-test--view-filter-tags filter))
+        (unless (member tag known)
+          (push (format "view `%s': +%s matches no feed in %s"
+                        slug tag (file-name-nondirectory
+                                  (rata-test--feeds-org-path)))
+                failures))))
+    (when failures
+      (ert-fail (concat "Elfeed views filtering on nonexistent tags:\n"
+                        (mapconcat #'identity (nreverse failures) "\n"))))))
+
+(ert-deftest rata-test-elfeed-views-well-formed ()
+  "`rata-elfeed-views' keys and slugs are unique and every view is a command.
+The generated commands are bound with `general-define-key', which
+`rata-test-keybindings-all-commandp' does not parse, so this is the only
+thing standing between a typo'd slug and a dead `f' key."
+  (let (keys slugs failures)
+    (pcase-dolist (`(,key ,slug ,label ,filter) rata-elfeed-views)
+      (should (stringp slug))
+      (should (stringp label))
+      (should (stringp filter))
+      (when key
+        (when (member key keys)
+          (push (format "duplicate key %S (slug `%s')" key slug) failures))
+        (push key keys))
+      (when (member slug slugs)
+        (push (format "duplicate slug `%s'" slug) failures))
+      (push slug slugs)
+      (let ((sym (rata-elfeed--view-symbol slug)))
+        (unless (commandp sym t)
+          (push (format "`%s' is not a command" sym) failures))))
+    (should (commandp 'rata-elfeed-filter-view t))
+    (when failures
+      (ert-fail (concat "Malformed elfeed views:\n"
+                        (mapconcat #'identity (nreverse failures) "\n"))))))
+
+(ert-deftest rata-test-feeds-org-tag-conventions ()
+  "feeds.org tags are lowercase and use only characters org accepts.
+Org tags are `[[:alnum:]_@#%]' only, so a hyphen silently stops the whole
+group being read as tags; and elfeed interns them, so `:Ntietz:' can
+never be matched by typing `+ntietz'.  Also: every feed carries tags, or
+it is unreachable from any view but `+unread'."
+  (let (failures)
+    (dolist (tag (rata-test--feeds-org-tags))
+      (unless (string-match-p "\\`[[:alnum:]_@#%]+\\'" tag)
+        (push (format "tag %S uses a character org does not accept in a tag" tag)
+              failures))
+      (unless (string= tag (downcase tag))
+        (push (format "tag %S is not lowercase" tag) failures)))
+    (with-temp-buffer
+      (insert-file-contents (rata-test--feeds-org-path))
+      (goto-char (point-min))
+      (while (re-search-forward "^\\*+ +\\(\\[\\[.*\\)$" nil t)
+        (let ((line (match-string 0)))
+          (unless (string-match-p ":[[:alnum:]_@#%:]+:[ \t]*\\'" line)
+            (push (format "untagged feed: %s" (match-string 1)) failures)))))
+    (when failures
+      (ert-fail (concat "feeds.org tag convention violations:\n"
+                        (mapconcat #'identity (nreverse failures) "\n"))))))
+
+;;; ============================================================
 ;;; Run all tests
 ;;; ============================================================
 

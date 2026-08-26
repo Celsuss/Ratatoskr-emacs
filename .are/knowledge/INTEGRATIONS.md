@@ -26,7 +26,7 @@ credentials and a homelab.
 | Hugo dev server | `localhost:1313` | `init-org.el` | none | `start-process "hugo"` |
 | reveal.js CDN | `cdn.jsdelivr.net/npm/reveal.js@4.6.1` | `init-present.el` | none | `rata-reveal-install-local` clones a local copy instead |
 | reveal.js repo | `github.com/hakimel/reveal.js.git` | `init-present.el` | none | on-demand clone |
-| RSS/Atom feeds | 93 URLs | `init-elfeed.el` + `feeds.org` | none | auto-refreshed every 30 min |
+| RSS/Atom feeds | 94 URLs | `init-elfeed.el` + `feeds.org` | none | auto-refreshed every 30 min. Feed *tags* are a contract: `rata-elfeed-views` filters on them and elfeed-org needs the root `:elfeed:` tag. Guarded by `rata-test-elfeed-*` |
 | tree-sitter grammar repos | 10 GitHub repos | `init-lang.el` | none | `just install-grammars` **downloads and compiles C** |
 | Maven Central | via Leiningen | `init-sql.el` | none | resolves `snowflake-jdbc` 3.28.0 into `~/.m2` on first connect |
 | elpaca package sources | 132 declared, 197 built (incl. transitive) | `init-pkg.el` / every module | none | see §3 |
