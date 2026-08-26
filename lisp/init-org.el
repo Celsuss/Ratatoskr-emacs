@@ -15,6 +15,26 @@
   :type 'directory
   :group 'rata)
 
+;; --- Work agenda calendar span ---
+;; The "w" work agenda opens with a dated `agenda' block covering this many days
+;; from today.  Its backlog block below discards everything the calendar already
+;; shows, so the horizon has to be computable at agenda-build time.
+
+(defcustom rata-org-work-agenda-span 14
+  "Number of days the calendar block of the \"w\" work agenda shows."
+  :type 'integer
+  :group 'rata)
+
+(defun rata-org-work-agenda-horizon ()
+  "Return the last date the work agenda calendar covers, as YYYY-MM-DD.
+The backlog block of the \"w\" agenda discards everything the calendar
+already shows, so deadlines past this date need a group of their own.
+Goes through `org-time-from-absolute' rather than adding 86400-second
+days, so a DST boundary inside the span cannot shift the horizon by a day."
+  (format-time-string
+   "%Y-%m-%d"
+   (org-time-from-absolute (+ (org-today) (1- rata-org-work-agenda-span)))))
+
 (defun rata-org-capture-fleeting ()
   "Capture a fleeting note to inbox.org."
   (interactive)
@@ -452,16 +472,48 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
                       (:name "Project ideas" :tag "project" :order 9)
                       (:name "Projects" :auto-property "PROJECT" :order 10)))))))
 
+          ;; A `tags-todo' block has no date axis, so the best it could do was a
+          ;; "Due Soon" bucket.  The dated `agenda' block below is what prints the
+          ;; day headers; the tag search underneath is now the undated backlog.
           ("w" "Work Focus"
-           ((tags-todo "work"
-                       ((org-agenda-overriding-header "Work Tasks")
+           ((agenda ""
+                    ((org-agenda-overriding-header "Work Agenda")
+                     (org-agenda-span rata-org-work-agenda-span)
+                     (org-agenda-start-day nil)          ; start on today...
+                     (org-agenda-start-on-weekday nil)   ; ...not on the week's Monday
+                     (org-agenda-show-all-dates t)       ; print every date, even empty ones
+                     ;; Each deadline already appears on its own day inside the span;
+                     ;; the default 14-day prewarning would repeat it under today too.
+                     (org-deadline-warning-days 0)
+                     ;; No super-agenda grouping here - the plain date blocks are the point.
+                     (org-super-agenda-groups nil)))
+            (tags-todo "work"
+                       ((org-agenda-overriding-header "Work Backlog")
                         (org-super-agenda-groups
-                         '((:name "Overdue" :deadline past :face error :order 1)
-                           (:name "Today" :time-grid t :scheduled today :deadline today :order 2)
-                           (:name "Due Today" :deadline today :order 3)
-                           (:name "Due Soon" :deadline future :order 4)
-                           (:name "Important" :priority "A" :order 5)
-                           (:name "Other Projects & Tasks" :order 99)))))))
+                         ;; Groups are applied in list order, so "Due later" must
+                         ;; claim its items before :discard removes everything dated.
+                         ;; Selectors inside one group are OR'ed, so the :discard
+                         ;; drops an item with either a SCHEDULED or a DEADLINE.
+                         ;; Backquoted because block settings are evaluated at
+                         ;; agenda-build time (org-agenda-run-series), so `g' in the
+                         ;; agenda recomputes the horizon.
+                         `((:name "Due later"
+                                  :deadline (after ,(rata-org-work-agenda-horizon))
+                                  :order 1)
+                           (:discard (:scheduled t :deadline t))
+                           (:name "Important" :priority "A" :order 2)
+                           ;; `:anything' is what names the catch-all.  A group
+                           ;; carrying only :name and :order selects nothing, so
+                           ;; the leftovers would fall into org-super-agenda's own
+                           ;; "Other items" section instead.
+                           (:name "Other Projects & Tasks" :anything t :order 99))))))
+           ;; Global settings.  A tag filter is a property of the whole view and is
+           ;; documented as unreliable when defined for a single block of a block
+           ;; agenda.  It matches the :work: tag work_tasks.org supplies by
+           ;; inheritance (its #+filetags and the `* Tasks :work:' parent), which
+           ;; agenda lines carry only because `org-agenda-use-tag-inheritance'
+           ;; includes `agenda' - setting that to nil would silently empty this view.
+           ((org-agenda-tag-filter-preset '("+work"))))
 
           ("p" "Project Dashboard"
            ((tags "project+level=1"

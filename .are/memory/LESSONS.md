@@ -409,3 +409,43 @@ re-run fixes it) from "recipe conflict" (deterministic, needs the reorder above)
 recipe elsewhere in the config, place the new declaration *after* that dependency's
 `use-package`, in load order — not in whichever module feels topical. An elpaca *build*
 error naming a "dependent … in past queue" is this, not a code bug.
+
+---
+
+## L-023 — A block agenda's tag filter belongs in the command's global slot, and a `:name`-only super-agenda group names nothing
+
+**From:** the work-agenda session, 2026-08-26, giving the `"w"` command a dated `agenda`
+block so deadlines appear under day headers instead of in a flat "Due Soon" bucket
+(`lisp/init-org.el`).
+
+Three things in `org-agenda-custom-commands` fail *silently* — the view still opens, it is
+just wrong — and all three were found only by rendering the agenda and reading the output:
+
+1. **`org-agenda-tag-filter-preset` must sit in the entry's 4th element**, the general
+   settings slot shared by every block. Its own docstring (`org-agenda.el:3834`) says that
+   defining it for one block of a block agenda "will not work reliably". `org-agenda-run-series`
+   `eval`s the general props once (`org-agenda.el:3347`) and binds them across all blocks.
+2. **A super-agenda group carrying only `:name` and `:order` selects nothing.** The
+   `(:name "Other Projects & Tasks" :order 99)` that had been in this config since it was
+   written was inert: the leftovers fell into org-super-agenda's own catch-all, printed as
+   `org-super-agenda-unmatched-name` — "Other items". `:anything t` is what claims them under
+   the intended name. `"p"` and `"d"` still have inert copies of this shape.
+3. **Groups are applied in list order, `:order` only sorts the output.** A `:discard` placed
+   before a group swallows that group's items. Here `(:discard (:scheduled t :deadline t))`
+   had to come *after* "Due later", or deadlines beyond the calendar's horizon appeared in
+   neither block. Selectors *inside* one group are OR'ed, not AND'ed
+   (`org-super-agenda.el:1222`); AND needs the explicit `:and` selector.
+
+Two facts worth not re-deriving: block *and* general settings are `eval`ed at agenda-build
+time (`org-agenda.el:3347,3371`), so a backquoted value form recomputes on every `g`. And a
+deadline's prewarning is only ever shown on **today's** line, never repeated across the span
+(`org-agenda-get-deadlines`, the `((not today?) (throw :skip nil))` branch) — so a long span
+does not multiply prewarnings, and `org-deadline-warning-days 0` in a block removes just the
+one echo under today.
+
+**Apply:** treat any change to `org-agenda-custom-commands` as untested until the agenda has
+been *rendered*. `just test-work-agenda` (`tests/work-agenda-render.el`) does that headlessly
+over fixtures in `temporary-file-directory`. Two traps in writing such a test: `--batch`
+implies `-q`, so it must load `init.el` itself; and `org-agenda` here is advised to append
+every org-roam `:hastodo:` file (`rata-org-agenda-files-advice`), so `rata-org-roam-agenda-files`
+has to be stubbed or the operator's real second-brain tree enters the assertions.

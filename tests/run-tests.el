@@ -946,6 +946,114 @@ as though the token were wrong.  L-018."
                  "https://acme.atlassian.net")))
 
 ;;; ============================================================
+;;; 9. Work agenda is dated
+;;; ============================================================
+;;
+;; The "w" agenda gained a dated `agenda' block so that deadlines appear under
+;; day headers instead of in a flat "Due Soon" bucket.  Both halves of that fail
+;; silently -- the view still opens, just wrong -- so they are asserted here:
+;;
+;;   * lose the `agenda' block in a later edit and the date headers go with it;
+;;   * put `org-agenda-tag-filter-preset' in a block instead of the command's
+;;     global settings slot and the filter is unreliable by documentation
+;;     (org-agenda.el:3834), which shows up as foreign tasks in a work view.
+;;
+;; Read from source rather than from the live variable: `org-super-agenda' is
+;; deferred `:after org', so `org-agenda-custom-commands' still holds its default
+;; in a batch Emacs that has not opened an agenda.
+
+(require 'cl-lib)
+
+(defun rata-test--find-setq-value (form variable)
+  "Return the quoted value of a (setq VARIABLE \\='(...)) form nested in FORM.
+Walks car and cdr separately: the module source contains dotted pairs
+\(`:hook (org-mode . auto-fill-mode)'), which a list walker chokes on."
+  (cond
+   ((not (consp form)) nil)
+   ((and (eq (car-safe form) 'setq) (eq (nth 1 form) variable))
+    (cadr (nth 2 form)))
+   (t (or (rata-test--find-setq-value (car form) variable)
+          (rata-test--find-setq-value (cdr form) variable)))))
+
+(defun rata-test--org-agenda-custom-commands ()
+  "Return `org-agenda-custom-commands' as written in lisp/init-org.el."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "lisp/init-org.el" user-emacs-directory))
+    (goto-char (point-min))
+    (let (form value)
+      (while (setq form (ignore-errors (read (current-buffer))))
+        (unless value
+          (setq value (rata-test--find-setq-value form 'org-agenda-custom-commands))))
+      value)))
+
+(ert-deftest rata-test-work-agenda-has-dated-block ()
+  "The work agenda leads with an `agenda' block, so it prints day headers.
+A `tags-todo' block has no date axis; that is why the view could only
+bucket things as \"Due Soon\" before."
+  (let* ((entry (assoc "w" (rata-test--org-agenda-custom-commands)))
+         (blocks (nth 2 entry)))
+    (should entry)
+    (should (memq 'agenda (mapcar #'car blocks)))
+    ;; The dashboard's dated block is the pattern this copied -- keep it too.
+    (should (memq 'agenda (mapcar #'car (nth 2 (assoc "d" (rata-test--org-agenda-custom-commands))))))))
+
+(ert-deftest rata-test-work-agenda-filter-is-global ()
+  "`org-agenda-tag-filter-preset\=' sits in the command's global settings slot.
+Its docstring (org-agenda.el:3834) is explicit that defining it for one
+block of a block agenda \"will not work reliably\"."
+  (let* ((entry (assoc "w" (rata-test--org-agenda-custom-commands)))
+         (global (nth 3 entry)))
+    (should (assq 'org-agenda-tag-filter-preset global))
+    (should (equal (eval (cadr (assq 'org-agenda-tag-filter-preset global)) t)
+                   '("+work")))
+    ;; ...and nowhere else: a per-block copy is the failure this guards.
+    (dolist (block (nth 2 entry))
+      (should-not (assq 'org-agenda-tag-filter-preset (nth 2 block))))))
+
+(ert-deftest rata-test-work-agenda-backlog-keeps-far-deadlines ()
+  "The backlog discards dated items only after \"Due later\" has claimed its own.
+org-super-agenda applies groups in list order, so a `:discard' placed
+first would swallow every deadline -- including the ones beyond the
+calendar's horizon, which then appear in neither block."
+  (skip-unless (require 'org nil t))
+  (let* ((entry (assoc "w" (rata-test--org-agenda-custom-commands)))
+         (backlog (cl-find 'tags-todo (nth 2 entry) :key #'car))
+         (groups (eval (cadr (assq 'org-super-agenda-groups (nth 2 backlog))) t))
+         (due-later (cl-position-if (lambda (g) (equal (plist-get g :name) "Due later"))
+                                    groups))
+         (discard (cl-position-if (lambda (g) (plist-member g :discard)) groups)))
+    (should due-later)
+    (should discard)
+    (should (< due-later discard))
+    ;; Selectors inside one group are OR'ed (org-super-agenda.el:1222), so this
+    ;; one discard drops an item carrying either a SCHEDULED or a DEADLINE.
+    (let ((selectors (plist-get (nth discard groups) :discard)))
+      (should (plist-member selectors :scheduled))
+      (should (plist-member selectors :deadline)))
+    ;; The boundary has to line up with the calendar: "Due later" must start the
+    ;; day after the last day the `agenda' block shows, or a deadline falls
+    ;; through the gap between the two blocks.
+    (should (equal (plist-get (nth due-later groups) :deadline)
+                   `(after ,(rata-org-work-agenda-horizon))))))
+
+(ert-deftest rata-test-work-agenda-horizon-is-calendrical ()
+  "The horizon is exactly the calendar's last day, DST or no DST.
+Computed by absolute day number rather than by adding 86400-second days,
+which would land on 23:00 the previous day across a DST boundary and
+report a horizon one day short."
+  (skip-unless (require 'org nil t))
+  (should (= (org-time-string-to-absolute (rata-org-work-agenda-horizon))
+             (+ (org-today) (1- rata-org-work-agenda-span))))
+  (let ((rata-org-work-agenda-span 1))
+    (should (= (org-time-string-to-absolute (rata-org-work-agenda-horizon))
+               (org-today))))
+  ;; A whole year of start dates, each side of both European DST switches.
+  (dolist (offset (number-sequence 0 364))
+    (let ((rata-org-work-agenda-span (1+ offset)))
+      (should (= (org-time-string-to-absolute (rata-org-work-agenda-horizon))
+                 (+ (org-today) offset))))))
+
+;;; ============================================================
 ;;; Run all tests
 ;;; ============================================================
 

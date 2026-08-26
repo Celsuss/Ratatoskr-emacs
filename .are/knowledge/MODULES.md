@@ -72,6 +72,7 @@ that can actually go wrong in an Emacs configuration are:
 | lisp/init-snippets.el | editing | LOW | relevant | knowledge/MODULES.md |
 | tests/run-tests.el | verification | HIGH | relevant | knowledge/TESTING_STRATEGY.md |
 | tests/claude-loop-e2e.el | verification | HIGH | fast | knowledge/CLAUDE_LOOP.md |
+| tests/work-agenda-render.el | verification,notes | HIGH | relevant | knowledge/TESTING_STRATEGY.md |
 | scripts/lint.sh | verification | HIGH | fast | knowledge/TESTING_STRATEGY.md |
 | scripts/are-*.sh | verification,are | HIGH | fast | SYSTEM.md |
 | justfile | verification,tooling | HIGH | full | knowledge/TESTING_STRATEGY.md |
