@@ -337,7 +337,14 @@ init-present → init-dashboard
 ### Import/Require Patterns
 - Core modules loaded in `init.el` via `(rata-load-module 'init-category)`
 - Package dependencies handled within `use-package` blocks
-- Use `eval-when-compile` for compile-time dependencies
+- Use `eval-when-compile` for compile-time *declarations* — `(defvar some-var)` stubs — and
+  `declare-function` for functions owned by a package that loads later. **Never `require` a
+  package there.** `eval-when-compile` is plain `progn` in interpreted code, and the modules
+  in `lisp/` are loaded as source, so a "compile-time" require runs on every startup; requiring
+  org that early pulls Emacs's built-in Org before elpaca activates the newer one and every org
+  package then warns about a version mismatch. `lisp/init-present.el` is the model. See
+  [`FAIL-0012`](.are/memory/failures/FAIL-0012.md) and L-028. `just batch-strict` (inside
+  `are-verify full`) fails on the resulting startup warnings
 
 ### UI/UX Principles
 - Minimalist: Disable toolbars, scrollbars, menu bars by default

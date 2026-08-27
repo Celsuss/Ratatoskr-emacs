@@ -87,8 +87,8 @@ fi
 
 # --- full -------------------------------------------------------------------------
 if [ "$LEVEL" = "full" ]; then
-    run "batch-startup" "init runs to completion; NOT that modules loaded (see ERT)" -- \
-        just batch
+    run "batch-startup" "init completes with no load-order warning; NOT that modules loaded (ERT)" -- \
+        just batch-strict
 fi
 
 # --- Report -----------------------------------------------------------------------

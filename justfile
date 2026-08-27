@@ -42,6 +42,11 @@ load file:
 batch:
     {{emacs_bin}} --init-directory {{init_dir}} --batch -l early-init.el -l init.el
 
+# Batch init, failing on load-order warnings that a green exit code hides
+# (FAIL-0012). This is what `are-verify full' runs, not plain `batch'.
+batch-strict:
+    ./scripts/check-startup.sh
+
 # Delete all compiled artifacts, packages, and history
 clean:
     @echo "Cleaning runtime artifacts..."

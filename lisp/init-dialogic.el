@@ -32,10 +32,33 @@
 ;; string so that inline org markup inside a turn (~code~, links, emphasis)
 ;; still goes through the normal transcoders.
 
+;; NB: no `require' of org, org-element or ox here — not even inside
+;; `eval-when-compile'.  `eval-when-compile' is plain `progn' when a file is
+;; *interpreted*, and the modules in lisp/ are loaded as source (no .elc is
+;; committed), so a compile-time require in this file is a load-time require.
+;; Requiring org during init pulls Emacs's built-in Org before elpaca activates
+;; the newer one, and every org package afterwards warns about the version
+;; mismatch.  Byte-compiler noise is silenced with declarations instead, the
+;; same way `init-present.el' does it.  See FAIL-0012.
 (eval-when-compile
-  (require 'org)
-  (require 'org-element)
-  (require 'ox))
+  (defvar org-outline-regexp-bol)
+  (defvar org-structure-template-alist)
+  (defvar org-export-filter-parse-tree-functions))
+
+(declare-function org-element-create "org-element-ast")
+(declare-function org-element-contents "org-element-ast")
+(declare-function org-element-property "org-element-ast")
+(declare-function org-element-put-property "org-element-ast")
+(declare-function org-element-type "org-element-ast")
+(declare-function org-element-insert-before "org-element-ast")
+(declare-function org-element-extract "org-element-ast")
+(declare-function org-element-extract-element "org-element")
+(declare-function org-element-interpret-data "org-element")
+(declare-function org-element-map "org-element")
+(declare-function org-export-derived-backend-p "ox")
+(declare-function org-string-nw-p "org-macs")
+(declare-function org-get-heading "org")
+(declare-function org-outline-level "org")
 
 (defgroup rata-dialogic nil
   "Dialogic formatting for blog posts."

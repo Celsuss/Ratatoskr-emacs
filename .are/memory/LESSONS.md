@@ -615,3 +615,46 @@ Why it is worth a lesson rather than a shrug:
 
 Related: L-025 (a silent filter is a code path), L-026 (a count that cannot distinguish
 "none" from "unreachable").
+
+## L-028 — `eval-when-compile` is `progn` when interpreted, so it is not a place to put a `require`
+
+`AGENTS.md` said, under Import/Require Patterns, "Use `eval-when-compile` for compile-time
+dependencies". Following that literally in a new module shipped FAIL-0012:
+
+```elisp
+(eval-when-compile          ; reads as "only while compiling"
+  (require 'org))           ; actually runs on every startup
+```
+
+In *interpreted* code `eval-when-compile` is equivalent to `progn` (Emacs Lisp manual, "Eval
+During Compile"). No `.elc` is committed for `lisp/` and `rata-load-module` loads source, so
+that form is an unconditional `(require 'org)` during init — early enough to beat elpaca's
+activation and drag in Emacs's built-in Org, after which every org package warns about a
+version mismatch.
+
+What to do instead, which `init-present.el` was already doing:
+
+- `(declare-function foo "the-file")` for functions — silences the compiler, loads nothing.
+- `(eval-when-compile (defvar some-var))` for variables — a bare `defvar` is inert.
+- Only ever `require` a feature there if it is built in *and already loaded* at that point
+  (`cl-lib`, `subr-x`). A package is never that.
+
+Two general points worth more than the specific trap:
+
+1. **A form whose name describes when it runs may be lying about one of its two modes.**
+   The compiled and interpreted paths of this config differ, and only one of them is
+   exercised by `just compile`. Whenever behaviour could depend on which one is live,
+   test the interpreted path — that is the one the operator runs.
+2. **The one-line probe is the whole test.** `(featurep 'org)` after loading a single module
+   in `emacs -Q` names the problem in a second, and is the reason the fix could be verified
+   in both directions rather than assumed:
+
+   ```sh
+   emacs -Q --batch --eval '(progn (add-to-list (quote load-path) (expand-file-name "lisp"))
+     (load (expand-file-name "lisp/init-dialogic.el"))
+     (message "org=%S" (featurep (quote org))))'
+   ```
+
+Related: L-003 (a green step whose scope is not stated will be over-read) — this one survived
+`are-verify full` because `just batch` exits 0 with a warning buffer full of damage, which
+`just batch-strict` now catches.
