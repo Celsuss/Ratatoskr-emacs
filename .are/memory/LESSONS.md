@@ -578,3 +578,40 @@ emacs -Q --batch -L elpaca/builds/elfeed --eval '(progn
       (dolist (tg (elfeed-entry-tags e)) (puthash tg (1+ (gethash tg h 0)) h)))
     (maphash (lambda (k v) (princ (format "%6d  %s\n" v k))) h)))'
 ```
+
+## L-027 — In an Emacs regexp `^` is an anchor in three places only; everywhere else it is a literal caret
+
+`lisp/init-dialogic.el` needs one regexp that spans a whole org block so the audit can count
+dialogue blocks and the word count can drop them. The obvious spelling is wrong:
+
+```elisp
+;; Matches nothing. Ever.
+(concat "^[ \t]*#\\+begin_dialogue\n\\(\\(?:.\\|\n\\)*?\\)^[ \t]*#\\+end_dialogue")
+```
+
+`^` is special only at the very start of the pattern, or directly after `\(`, `\(?:` or
+`\|`. Written bare in the middle of a pattern it matches a literal `^` character, which no
+org buffer contains. The correct spelling wraps it: `\\(?:^[ \t]*\\)`.
+
+Why it is worth a lesson rather than a shrug:
+
+1. **The failure is silent and reads as data.** `re-search-forward` returned nil, so the
+   audit reported `blocks=0` for a buffer holding two blocks and the prose word count
+   silently included every line of dialogue. Nothing errored. A report of zero is
+   indistinguishable from a correct report of zero — the same shape as L-026's
+   "no matches" vs "nothing could match".
+2. **Bisecting the regexp found it in one command; reasoning about it found nothing.**
+   Five variants down a list, `re-search-forward` in a temp buffer named the exact token
+   that broke it. That is the cheap move whenever a regexp "should" match:
+
+   ```sh
+   emacs -Q --batch --eval '(with-temp-buffer (insert "...") (goto-char (point-min))
+     (message "%S" (re-search-forward "..." nil t)))'
+   ```
+3. **The check that catches it is trivial and belongs in the suite.**
+   `rata-test-dialogic-block-regexp-anchors` asserts the regexp matches a block at all,
+   plus the indented and empty cases. Any multi-line pattern built by `concat` deserves
+   the same one-line assertion, because the only symptom otherwise is a plausible number.
+
+Related: L-025 (a silent filter is a code path), L-026 (a count that cannot distinguish
+"none" from "unreachable").

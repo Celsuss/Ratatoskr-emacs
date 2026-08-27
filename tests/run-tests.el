@@ -187,7 +187,8 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC b b" . consult-buffer)
     ("SPC f f" . find-file)
     ("SPC j d" . xref-find-definitions)
-    ("SPC J j" . jira-issues))
+    ("SPC J j" . jira-issues)
+    ("SPC o b d d" . rata-dialogic-insert-block))
   "Leader keys that must resolve immediately after init, with their commands.
 Not exhaustive — a contract for the keys most likely to be broken by the
 failure mode in .are/memory/failures/FAIL-0009.md.  Extend it when a
@@ -1223,6 +1224,125 @@ two upstream entry points have to keep existing across package updates."
   (should (fboundp 'elfeed-db-save))
   (skip-unless (require 'elfeed-org nil t))
   (should (fboundp 'rmh-elfeed-org-process-advice)))
+
+;;; ============================================================
+;;; Test — dialogic formatting (lisp/init-dialogic.el)
+;;; ============================================================
+
+(ert-deftest rata-test-dialogic-block-regexp-anchors ()
+  "The whole-block regexp must actually match a block.
+
+Regression test for a silent failure, not a hypothetical one.  In an Emacs
+regexp `^' is an anchor only at the start of the pattern or directly after
+`\\(', `\\(?:' or `\\|'; written bare in the middle of a pattern it is a
+literal caret.  The first version of `rata-dialogic--block-regexp' spelled
+the closing delimiter `...^[ \t]*#\\+end_dialogue', which matched nothing,
+so the audit cheerfully reported zero dialogue blocks in a buffer holding
+two and the word count included every turn."
+  (let ((re (rata-dialogic--block-regexp)))
+    (let ((block "#+begin_dialogue\n- A :: one\n- Me :: two\n#+end_dialogue"))
+      (should (string-match re block))
+      ;; Group 1 is the body and nothing but the body.
+      (should (equal (match-string 1 block) "- A :: one\n- Me :: two\n")))
+    ;; Indented block, and an empty one.
+    (should (string-match-p re "  #+begin_dialogue\n  - A :: one\n  #+end_dialogue"))
+    (should (string-match-p re "#+begin_dialogue\n#+end_dialogue"))
+    ;; The same trap in the any-block regexp used by the word count.
+    (should (string-match-p rata-dialogic--any-block-regexp
+                            "#+begin_src sql\nselect 1\n#+end_src"))))
+
+(ert-deftest rata-test-dialogic-parse-turns ()
+  "Turns parse into (SPEAKER . TEXT), with wrapped lines folded in."
+  (should (equal (rata-dialogic-parse-turns
+                  "- Skeptic :: Line one\n  wrapped on.\n- Me :: Reply.")
+                 '(("Skeptic" . "Line one wrapped on.") ("Me" . "Reply."))))
+  ;; An empty turn is still a turn — that is what the insert command writes.
+  (should (equal (rata-dialogic-parse-turns "- Newcomer :: ")
+                 '(("Newcomer" . ""))))
+  (should (null (rata-dialogic-parse-turns "")))
+  ;; A line with no `::' before any turn is ignored rather than fatal.
+  (should (equal (rata-dialogic-parse-turns "stray text\n- Me :: ok")
+                 '(("Me" . "ok")))))
+
+(ert-deftest rata-test-dialogic-insert-and-bounds ()
+  "Inserting a block produces a parseable block that `--block-bounds' finds."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Head\n\nProse.")
+    (rata-dialogic-insert-block "Skeptic")
+    (insert "Does this hold?")
+    (should (rata-dialogic--block-bounds))
+    (rata-dialogic-insert-turn "Newcomer")
+    (insert "And this?")
+    (let ((body (progn
+                  (string-match (rata-dialogic--block-regexp) (buffer-string))
+                  (match-string 1 (buffer-string)))))
+      (should (equal (mapcar #'car (rata-dialogic-parse-turns body))
+                     (list "Skeptic" rata-dialogic-self-name "Newcomer"))))
+    ;; The block must not be glued to the prose above it: ox-hugo would
+    ;; otherwise fold it into that paragraph.
+    (should (string-match-p "Prose\\.\n\n#\\+begin_dialogue" (buffer-string)))))
+
+(ert-deftest rata-test-dialogic-audit-counts ()
+  "The audit counts blocks and turns per heading and excludes block text."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Top\n\nintro.\n\n** Sub A\n\n"
+            (mapconcat #'identity (make-list 20 "word") " ") "\n\n"
+            "#+begin_dialogue\n- Skeptic :: One?\n- Me :: Yes.\n#+end_dialogue\n\n"
+            "#+begin_dialogue\n- Ghost :: Two?\n#+end_dialogue\n\n"
+            "#+begin_src sql\nselect count(*) from many words here\n#+end_src\n\n"
+            "** Sub B\n\nshort.\n")
+    (let* ((rows (rata-dialogic-audit-data))
+           (sub-a (seq-find (lambda (r) (equal (plist-get r :heading) "Sub A")) rows)))
+      (should (= 3 (length rows)))
+      (should (= 2 (plist-get sub-a :blocks)))
+      (should (= 3 (plist-get sub-a :turns)))
+      ;; Exactly the 20 prose words: neither the turns nor the SQL count.
+      (should (= 20 (plist-get sub-a :words)))
+      (should (equal '("Skeptic" "Me" "Ghost") (plist-get sub-a :speakers)))
+      ;; Both notes fire: over the per-heading cap, and a speaker off-cast.
+      (let ((notes (rata-dialogic--audit-notes sub-a)))
+        (should (= 2 (length notes)))
+        (should (seq-find (lambda (n) (string-match-p "too chatty" n)) notes))
+        (should (seq-find (lambda (n) (string-match-p "Ghost" n)) notes))))))
+
+(ert-deftest rata-test-dialogic-exports-styled-html ()
+  "A dialogue block must export as one <p> per turn inside a styled div.
+
+Three things are asserted because three different mistakes are possible and
+each is silent in the Org buffer:
+
+  1. the wrapper div survives (ox-hugo supplies it for any special block);
+  2. inline Org markup inside a turn is still transcoded, which is why the
+     parse tree is rewritten rather than the exported string;
+  3. the turns are separated by a blank line.  Without `:post-blank' on the
+     generated paragraphs, Markdown reads the whole exchange as a single
+     paragraph and every speaker lands in the same <p>.
+
+The Blackfriday description-list syntax that ox-hugo would emit by default
+\(\"Term\\n: description\") must NOT appear: this site renders with goldmark,
+which has no definition-list extension, so those turns would show up as
+literal \"Skeptic : ...\" text."
+  (skip-unless (require 'ox-hugo nil t))
+  (let ((out (org-export-string-as
+              (concat "before\n\n"
+                      "#+begin_dialogue\n"
+                      "- Skeptic :: What about ~code~ here?\n"
+                      "- Me :: Fine.\n"
+                      "#+end_dialogue\n")
+              'hugo t)))
+    (should (string-match-p "<div class=\"dialogue\">" out))
+    ;; Both the shared class and the per-speaker one, so CSS can style the
+    ;; author's replies apart from an interruption.
+    (should (string-match-p
+             "<span class=\"dialogue-who dialogue-who--skeptic\">Skeptic</span>" out))
+    (should (string-match-p
+             "<span class=\"dialogue-who dialogue-who--me\">Me</span>" out))
+    (should (string-match-p "`code`" out))
+    (should-not (string-match-p "~code~" out))
+    (should (string-match-p "Skeptic</span>[^\n]*\n\n<span" out))
+    (should-not (string-match-p "^: " out))))
 
 ;;; ============================================================
 ;;; Run all tests
