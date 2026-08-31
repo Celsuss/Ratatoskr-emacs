@@ -405,6 +405,29 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
            :empty-lines-before 1
            :empty-lines-after 1)))
 
+  ;; Show a heading node's parent context in completion. A heading with its
+  ;; own :ID: is a first-class org-roam node, but by default it renders in
+  ;; `org-roam-node-find' as just the heading text ("Deriving modes"), losing
+  ;; which note it lives in. This custom accessor prefixes the file #+title and
+  ;; any intermediate outline path, so the same node reads "Elisp modes >
+  ;; Deriving modes". Adjacent duplicate segments are dropped so a top-level
+  ;; heading whose text matches the file title is not shown twice.
+  (cl-defmethod org-roam-node-rata-hierarchy ((node org-roam-node))
+    "Return NODE's title prefixed with its file title and outline path.
+File-level nodes (level 0) show only their title."
+    (let* ((level (or (org-roam-node-level node) 0))
+           (parts (if (zerop level)
+                      (list (org-roam-node-title node))
+                    (append (when (org-roam-node-file-title node)
+                              (list (org-roam-node-file-title node)))
+                            (org-roam-node-olp node)
+                            (list (org-roam-node-title node))))))
+      (string-join (delete-dups parts) " > ")))
+
+  (setq org-roam-node-display-template
+        (concat "${rata-hierarchy:*} "
+                (propertize "${tags:20}" 'face 'org-tag)))
+
   (org-roam-db-autosync-mode))
 
 ;; --- Org Roam QL ---
@@ -735,6 +758,14 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
     "ob"  '(:ignore t :which-key "blog/hugo")
     "obe" '(org-hugo-export-wim-to-md :which-key "export to hugo")
     "obp" '(rata-hugo-preview         :which-key "preview post")
-    "tw"  '(writegood-mode :which-key "writegood")))
+    "tw"  '(writegood-mode :which-key "writegood"))
+  ;; Insert org content under the "insert" group (parent declared in
+  ;; init-snippets.el). `org-id-get-create' adds the :PROPERTIES: drawer with an
+  ;; :ID:, which is what promotes the current heading to a first-class org-roam
+  ;; node (autosync indexes it on save).
+  (rata-leader
+    :states '(normal visual)
+    "io"  '(:ignore t :which-key "org")
+    "iop" '(org-id-get-create :which-key "id property (roam node)")))
 
 (provide 'init-org)

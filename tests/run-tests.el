@@ -188,7 +188,8 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC f f" . find-file)
     ("SPC j d" . xref-find-definitions)
     ("SPC J j" . jira-issues)
-    ("SPC o b d d" . rata-dialogic-insert-block))
+    ("SPC o b d d" . rata-dialogic-insert-block)
+    ("SPC i o p" . org-id-get-create))
   "Leader keys that must resolve immediately after init, with their commands.
 Not exhaustive — a contract for the keys most likely to be broken by the
 failure mode in .are/memory/failures/FAIL-0009.md.  Extend it when a
