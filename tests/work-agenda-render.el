@@ -43,11 +43,19 @@
 ;; Named explicitly rather than by globbing elpaca/builds: a glob would put ~200
 ;; unrelated directories on `load-path' and any breakage there would surface here
 ;; as a mystery.  This is org-super-agenda's Package-Requires plus org itself.
+;;
+;; A named package whose build dir is absent is skipped, not fatal.  `compat' is
+;; in org-super-agenda's Package-Requires but is never `require'd, and on Emacs
+;; >= 29 elpaca does not install it at all -- so erroring on its missing build dir
+;; failed a checkout that was in fact complete, with a misleading "run `just run'"
+;; that never helped.  The `require' forms below are the real gate: they fail
+;; loudly and by name if a package that is actually needed is missing.
 (dolist (pkg '("org" "org-super-agenda" "compat" "s" "dash" "ht" "ts"))
   (let ((dir (expand-file-name (concat "elpaca/builds/" pkg) user-emacs-directory)))
     (if (file-directory-p dir)
         (add-to-list 'load-path dir)
-      (error "work-agenda-render: %s is not built; run `just run' once first" dir))))
+      (message "work-agenda-render: %s not built; skipping (require fails below if truly needed)"
+               pkg))))
 
 (require 'org)
 (require 'org-agenda)
