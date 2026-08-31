@@ -375,6 +375,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 
 * Habits
 - [ ] Commit Dotfiles/Emacs Tweaks
+- [ ] Coding
 - [ ] Clear Inbox
 - [ ] Workout
 - [ ] Chinese Study
