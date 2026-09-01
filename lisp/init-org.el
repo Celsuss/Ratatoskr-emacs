@@ -238,6 +238,10 @@ When present the file is included in org-agenda via the :hastodo: query."
 
 (use-package org-roam
   :after (org general)
+  ;; `org-roam-alias-add' / `-remove' carry no ;;;###autoload cookie upstream,
+  ;; so `rata-roam-alias-add-to-file' below would hit a void-function before
+  ;; anything else had loaded org-roam.
+  :commands (org-roam-alias-add org-roam-alias-remove)
   :custom
   (org-roam-directory (file-truename rata-org-roam-dir))
   (org-roam-completion-everywhere t)
@@ -439,6 +443,24 @@ File-level nodes (level 0) show only their title."
                 (propertize "${tags:20}" 'face 'org-tag)))
 
   (org-roam-db-autosync-mode))
+
+;; --- Roam node editing ---
+
+(defun rata-roam-alias-add-to-file (alias)
+  "Add ALIAS to the file-level org-roam node of the current buffer.
+
+`org-roam-alias-add' targets the node *at point*, and in this config a
+heading is frequently a node in its own right (`SPC i o p' promotes one).
+Adding an alias for the note therefore has to widen and start from
+`point-min' rather than trust wherever the cursor happens to sit."
+  (interactive "sAlias: ")
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Not an Org buffer"))
+  (save-excursion
+    (save-restriction
+      (widen)
+      (goto-char (point-min))
+      (org-roam-alias-add alias))))
 
 ;; --- Org Roam QL ---
 
@@ -761,7 +783,7 @@ File-level nodes (level 0) show only their title."
   (rata-leader
     :states '(normal visual)
     "io"  '(:ignore t :which-key "org")
-    "iop" '(org-id-get-create :which-key "id property (roam node)")))
->>>>>>> 4f0efe70a584b93e9ac57f6f5f271475aba6559d
+    "iop" '(org-id-get-create :which-key "id property (roam node)")
+    "ioa" '(rata-roam-alias-add-to-file :which-key "roam alias")))
 
 (provide 'init-org)

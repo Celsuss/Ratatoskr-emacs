@@ -716,3 +716,32 @@ remedy over one that merely sorts the row.
 
 Related: L-011 / FAIL-0009 (the leader-key instance), L-025 (a data file that code filters
 on is code, and its every failure mode is silent).
+
+## L-030 — Legal syntax after `provide` is a blind spot in every gate this repo has
+
+The stray `>>>>>>> <sha>` that `b510337` left in `lisp/init-org.el` (FAIL-0013) survived
+lint, compile, the ERT suite and a clean `are-verify fast`. Two independent properties made
+that possible, and both generalise past conflict markers.
+
+**Garbage that parses is invisible to a reader-based test.** `tests/run-tests.el` walks each
+module with `read`, and treats a parse error as a warning it prints and moves on from. But
+`>>>>>>>` is an ordinary symbol and `4f0efe70…` is another; nothing was malformed, so there
+was nothing to warn about. Any check built on "does it read?" answers a narrower question
+than it appears to: reading succeeds for a large space of text that is not the code anyone
+meant to write.
+
+**`provide` at the top of the tail makes `featurep` a lie.** The marker sat after
+`(provide 'init-org)`, so the feature registered and *then* the load aborted on
+`void-variable`. `rata-load-module` demoted that to a line in `*init-errors*`. A module can
+therefore be present, `featurep`-true and half-executed at the same time — and if the
+aborting form had been higher in the file, everything below it would have vanished exactly
+the way FAIL-0009's dead leader keys did, with the same absence of any signal.
+
+The operational rule: **for a defect that is a property of the bytes on disk rather than of
+behaviour, write a repo-wide `are-audit` check, not a test.** A test has to load the file,
+and loading is what hides this class. `no-conflict-markers` joins `stray-files` and
+`docs-paths` for that reason. Verify it in both directions when you add it — plant the
+defect, watch it fail, remove it, watch it pass (L-009 / FAIL-0008).
+
+Related: L-011 / FAIL-0009 (silently dead configuration below the failure point), FAIL-0003
+(compile exits 0 regardless), FAIL-0007 (the other repo-hygiene audit check).

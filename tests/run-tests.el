@@ -191,7 +191,8 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC o b d d" . rata-dialogic-insert-block)
     ("SPC o b e" . org-hugo-export-wim-to-md)
     ("SPC o b s" . rata-blog-status)
-    ("SPC i o p" . org-id-get-create))
+    ("SPC i o p" . org-id-get-create)
+    ("SPC i o a" . rata-roam-alias-add-to-file))
   "Leader keys that must resolve immediately after init, with their commands.
 Not exhaustive — a contract for the keys most likely to be broken by the
 failure mode in .are/memory/failures/FAIL-0009.md.  Extend it when a

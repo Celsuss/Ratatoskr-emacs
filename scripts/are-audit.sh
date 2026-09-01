@@ -316,6 +316,30 @@ if hits="$(grep -rniE "(set|configure|put)[^.]{0,40}\`?custom\.el" \
     fi
 fi
 
+# --- Check: no-conflict-markers --------------------------------------------------
+# A merge conflict marker can be committed and survive every gate here: `lint' does
+# not read Elisp, and `>>>>>>> <sha>' parses as two ordinary symbols, so the reader
+# in tests/run-tests.el sees no parse error either. It only shows up at runtime, as
+# a void-variable that aborts the module load after `provide' has already run — so
+# `featurep' says the module is fine while half of it never executed. Cost:
+# lisp/init-org.el carried one from merge b510337.
+echo "=== Check: no-conflict-markers ==="
+# Two paths are exempt because quoting a marker verbatim is their job: this script,
+# which has to contain the patterns to search for them, and the failure records, which
+# reproduce the offending bytes as evidence. Both are prose or tooling, never loaded as
+# configuration, so a *real* conflict in one is a cosmetic defect rather than a module
+# that half-executes. Everything else — including LESSONS.md — stays in scope, so a
+# lesson that discusses markers must keep them inline rather than at column 0.
+lt="<<<<<<<"; gt=">>>>>>>"; eq="======="
+if hits="$(git ls-files -z -- '*.el' '*.sh' '*.md' '*.org' '*.yml' '*.yaml' 'justfile' \
+    | xargs -0 grep -nE "^($lt|$gt) |^$eq\$" -- 2>/dev/null \
+    | grep -vE '^(scripts/are-audit\.sh|\.are/memory/failures/)')"; then
+    if [ -n "$hits" ]; then
+        echo "$hits"
+        fail "a tracked file contains an unresolved merge conflict marker"
+    fi
+fi
+
 # --- Check: context-freshness ----------------------------------------------------
 echo "=== Check: context-freshness ==="
 ctx=".are/generated/CURRENT_CONTEXT.md"
