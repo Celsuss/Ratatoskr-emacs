@@ -64,7 +64,7 @@ Skips keyword arguments (:states, :keymaps, etc.) and their values."
           (setq skip-next nil))
          ((keywordp item)
           (when (memq item '(:states :keymaps :prefix :prefix-map
-                             :non-normal-prefix :global-prefix :infix))
+				     :non-normal-prefix :global-prefix :infix))
             (setq skip-next t)))
          ((stringp item)
           (when-let ((next (cadr items)))
@@ -190,7 +190,8 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC J j" . jira-issues)
     ("SPC o b d d" . rata-dialogic-insert-block)
     ("SPC o b e" . org-hugo-export-wim-to-md)
-    ("SPC o b s" . rata-blog-status))
+    ("SPC o b s" . rata-blog-status)
+    ("SPC i o p" . org-id-get-create))
   "Leader keys that must resolve immediately after init, with their commands.
 Not exhaustive — a contract for the keys most likely to be broken by the
 failure mode in .are/memory/failures/FAIL-0009.md.  Extend it when a
@@ -571,13 +572,13 @@ carries the `result' event the loop makes every decision from."
                           0))
     ;; Exit 0 but the task said it could not do it.
     (should (eq 'blocked (car (classify '(:result ((subtype . "success"))
-                                          :report blocked
-                                          :report-reason "no such API")
+						  :report blocked
+						  :report-reason "no such API")
                                         0))))
     (should (equal "no such API"
                    (cdr (classify '(:result ((subtype . "success"))
-                                    :report blocked
-                                    :report-reason "no such API")
+					    :report blocked
+					    :report-reason "no such API")
                                   0))))
     ;; Limits and errors.
     (should (eq 'max-turns (car (classify '(:result ((subtype . "error_max_turns"))) 1))))
@@ -603,7 +604,7 @@ carries the `result' event the loop makes every decision from."
                                          . (((tool_name . "Bash")
                                              (tool_input
                                               . ((command . "python3 hello.py")))))))
-                               :report done)
+				       :report done)
                              0)))
       (should (eq 'unverified (car verdict)))
       (should (string-match-p "never run" (cdr verdict)))
@@ -612,15 +613,15 @@ carries the `result' event the loop makes every decision from."
     ;; Self-reported, and it wins the wording over the inferred version.
     (should (equal '(unverified . "could not run pytest")
                    (classify '(:result ((subtype . "success"))
-                               :report unverified
-                               :report-reason "could not run pytest")
+				       :report unverified
+				       :report-reason "could not run pytest")
                              0)))
     ;; Opting out restores the old tolerance.
     (let ((rata-claude-loop-verification-denial-tools nil))
       (should-not (classify '(:result ((subtype . "success")
                                        (permission_denials
                                         . (((tool_name . "Bash")))))
-                              :report done)
+				      :report done)
                             0)))
     ;; A denied Edit is the stronger finding and keeps its own kind.
     (should (eq 'denied

@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Pre-commit hook: run full ARE verification before allowing a commit.
+# Pre-commit hook: run fast ARE verification before allowing a commit.
 # Install with: just install-hooks
 #
-# `just are-verify full` is a superset of `just test`: it adds the claude-loop e2e suite
-# (3 s, covers the only CRITICAL module, previously ungated — see
-# .are/memory/failures/FAIL-0004.md) and the ARE audit. Roughly 3 minutes total.
+# `just are-verify fast` (~4 s) loads NO packages: lint + claude-loop-e2e + are-audit. It
+# is deliberately light so the local commit gate stays fast and does not depend on a
+# fully-built elpaca environment (a partial checkout otherwise blocks unrelated commits).
 #
-# `just test` itself is deliberately unchanged, so existing docs and habits stay correct
-# (.are/memory/DECISIONS.md D-004).
+# The heavier gate lives where it is cheap: `.github/workflows/ci.yml` runs the full suite
+# on PRs to master. Run `just are-verify full` yourself before pushing anything that could
+# affect startup or module load order (see .are/memory/failures/FAIL-0012.md).
 #
-# If 3 minutes per commit is too slow, switch this to `just are-verify fast` (~4 s) and run
-# `just are-verify full` deliberately before pushing.
+# `just test` is unchanged, so existing docs and habits stay correct (DECISIONS.md D-004).
 
 set -euo pipefail
 
-echo "Running pre-commit checks (ARE full verification)..."
-just are-verify full
+echo "Running pre-commit checks (ARE fast verification)..."
+just are-verify fast
 
 echo "All checks passed."
