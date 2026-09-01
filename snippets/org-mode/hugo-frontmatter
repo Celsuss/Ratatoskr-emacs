@@ -2,10 +2,15 @@
 # name: hugo-frontmatter
 # key: hugo
 # --
-#+hugo_base_dir: ~/workspace/second-brain/hugo/
-#+hugo_section: ${1:posts}
-#+hugo_auto_set_lastmod: t
-#+hugo_tags: ${2:tag}
-#+hugo_draft: ${3:true}
+#+filetags: :blog:
+#+hugo_base_dir: ../hugo/
+#+hugo_tags: ${1:tag}
+
+* ${2:Post title}
+:properties:
+:export_hugo_section: /posts/
+:export_file_name: ${3:post-slug}
+:export_hugo_draft: ${4:true}
+:end:
 
 $0

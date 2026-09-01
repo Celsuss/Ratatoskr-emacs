@@ -61,7 +61,7 @@ Not in the repo, not covered by any test, and modules here can read or transmit 
 | Data | Path | Who touches it |
 |---|---|---|
 | org-roam second brain | `~/workspace/second-brain/org-roam/` | `init-org.el` (read/write), `init-present.el` (read + HTML export), `init-khoj.el` (**transmits to `khoj.homelab.local` for indexing**) |
-| Hugo site | `~/workspace/second-brain/hugo/` | `init-org.el` (`ox-hugo` export) |
+| Hugo site | `~/workspace/second-brain/hugo/` | `init-blog.el` (`ox-hugo` export, `rata-hugo-dir`) |
 | Credentials | `~/.authinfo.gpg`, `~/.ansible-vault-pass` | `auth-source`, ansible-vault |
 | Editor state | `var/`, `etc/` — recentf, history, elfeed db, SQL scratch, persp | `no-littering`; gitignored |
 | Buffer contents sent to models | wherever the operator is editing | `init-llm.el` — `gptel`/`ellama`/`aidermacs` all point at **local Ollama**, so this stays on the machine; `init-claude-loop.el` and `agent-shell` send to Anthropic |

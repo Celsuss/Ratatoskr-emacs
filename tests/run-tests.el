@@ -188,7 +188,9 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC f f" . find-file)
     ("SPC j d" . xref-find-definitions)
     ("SPC J j" . jira-issues)
-    ("SPC o b d d" . rata-dialogic-insert-block))
+    ("SPC o b d d" . rata-dialogic-insert-block)
+    ("SPC o b e" . org-hugo-export-wim-to-md)
+    ("SPC o b s" . rata-blog-status))
   "Leader keys that must resolve immediately after init, with their commands.
 Not exhaustive — a contract for the keys most likely to be broken by the
 failure mode in .are/memory/failures/FAIL-0009.md.  Extend it when a
@@ -1343,6 +1345,171 @@ literal \"Skeptic : ...\" text."
     (should-not (string-match-p "~code~" out))
     (should (string-match-p "Skeptic</span>[^\n]*\n\n<span" out))
     (should-not (string-match-p "^: " out))))
+
+;;; ============================================================
+;;; Test — blog export (lisp/init-blog.el)
+;;; ============================================================
+
+(defun rata-test--find-plist-with-name (form name)
+  "Return the first plist inside FORM whose :name is NAME."
+  (cond
+   ((not (consp form)) nil)
+   ((and (keywordp (car form)) (equal (plist-get form :name) name)) form)
+   (t (or (rata-test--find-plist-with-name (car form) name)
+          (rata-test--find-plist-with-name (cdr form) name)))))
+
+(ert-deftest rata-test-blog-tag-matches-agenda-group ()
+  "`rata-blog-tag' must equal the tag the \"Blog Posts\" agenda group selects on.
+
+Regression test for the bug init-blog.el was written to fix.  The
+org-super-agenda group `(:name \"Blog Posts\" :tag \"blog\")' has been in
+init-org.el since the agenda was written, but no capture template ever
+applied a :blog: filetag — so the group matched nothing and rendered as an
+absent section.  That is the same shape of silent dead wiring as a leader
+key bound in a deferred `:config' (FAIL-0009): the config is present, the
+thing it refers to is not, and nothing complains.  Both ends are now
+written down, so lock them together."
+  (let ((group (rata-test--find-plist-with-name
+                (rata-test--org-agenda-custom-commands) "Blog Posts")))
+    (should group)
+    (should (equal (plist-get group :tag) rata-blog-tag))))
+
+(ert-deftest rata-test-blog-capture-template-tags-and-names ()
+  "The \"blog-post\" capture template must tag the note and name the export.
+
+Two separate silent failures: without `:blog:' in #+filetags: the post is
+invisible to `rata-blog-files' and to the agenda group above; without a
+value on :export_file_name: ox-hugo does not treat the subtree as a post
+at all and `org-hugo-export-wim-to-md' falls through to the whole file."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "lisp/init-org.el" user-emacs-directory))
+    (let ((source (buffer-string)))
+      ;; The template body, verbatim from the source.
+      (should (string-match-p "\"b\" \"blog-post\"" source))
+      (should (string-match-p "#\\+filetags: :blog:" source))
+      (should (string-match-p ":export_file_name: \\${slug}" source))
+      (should-not (string-match-p ":export_file_name:$" source)))))
+
+(ert-deftest rata-test-blog-parse-targets ()
+  "`rata-blog--parse-targets' must resolve a post to its markdown file.
+
+Pure path arithmetic, so it runs in batch without touching the operator's
+notes.  The cases are the three shapes that actually occur in the roam
+tree: a subtree naming both section and file (every existing post), a
+subtree naming only the file, and a note that names neither."
+  (let ((rata-hugo-dir "/tmp/rata-test-site/")
+        (rata-blog-section "/posts/")
+        (dir "/tmp/rata-test-roam/"))
+    ;; 1. the shape blog-dbt.org uses: relative base dir + section + name.
+    (should (equal
+             (rata-blog--parse-targets
+              (concat "#+title: DBT blog post\n"
+                      "#+hugo_base_dir: ../hugo/\n"
+                      "\n* Why i like dbt\n"
+                      ":properties:\n"
+                      ":export_hugo_section: /posts/\n"
+                      ":export_file_name: why-i-like-dbt\n"
+                      ":end:\n")
+              dir "20230718-dbt")
+             '(("why-i-like-dbt" "/tmp/hugo/content/posts/why-i-like-dbt.md" t))))
+    ;; 2. no section on the subtree — falls back to `rata-blog-section'; no
+    ;; base dir keyword — falls back to `rata-hugo-dir', which is the point of
+    ;; setting `org-hugo-base-dir' globally.
+    (should (equal
+             (rata-blog--parse-targets
+              ":properties:\n:export_file_name: solo\n:end:\n" dir "note")
+             '(("solo" "/tmp/rata-test-site/content/posts/solo.md" t))))
+    ;; 3. an empty :export_file_name: (what the old capture template wrote)
+    ;; falls back to the note's slug rather than producing ".md", and is
+    ;; flagged NOT-named: ox-hugo will not export it at all, so `rata-blog-status'
+    ;; must say `unnamed' rather than `never' — the latter reads as "run the
+    ;; export again", which cannot work.
+    (should (equal
+             (rata-blog--parse-targets
+              ":properties:\n:export_file_name:\n:end:\n" dir "the-slug")
+             '(("the-slug" "/tmp/rata-test-site/content/posts/the-slug.md" nil))))
+    ;; 4. a note with no export property at all is still placed, so
+    ;; `rata-blog-status' can report it as never exported rather than omit it.
+    (should (equal (rata-blog--parse-targets "#+title: x\n" dir "plain")
+                   '(("plain" "/tmp/rata-test-site/content/posts/plain.md" nil))))
+    ;; 5. two posts in one note both resolve — `rata-blog-export-all' passes
+    ;; ALL-SUBTREES to ox-hugo for exactly this case.
+    (should (equal
+             (mapcar #'car
+                     (rata-blog--parse-targets
+                      (concat ":properties:\n:export_file_name: one\n:end:\n"
+                              ":properties:\n:export_file_name: two\n:end:\n")
+                      dir "note"))
+             '("one" "two")))))
+
+(ert-deftest rata-test-blog-files-requires-org-roam ()
+  "`rata-blog-files' must load org-roam, not gate on whether it is loaded.
+
+Found by running `rata-blog-status' in a session where org-roam had not
+been pulled in yet: the original `(when (fboundp \='org-roam-db-query) ...)'
+guard — copied from `rata-org-roam-agenda-files', which only ever runs from
+advice on `org-agenda' and so is always called with org-roam live —
+returned nil, and the status buffer printed \"No notes tagged :blog:\" while
+the database held ten of them.
+
+That is L-029 again: an absence a reader cannot tell apart from an empty
+result.  A user-facing entry point may not answer a question it did not
+actually ask, so this asserts the shape of the source rather than the
+behaviour, which is identical in the test environment where org-roam is
+always loaded."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "lisp/init-blog.el" user-emacs-directory))
+    (goto-char (point-min))
+    (let ((start (progn (should (re-search-forward "^(defun rata-blog-files ()" nil t))
+                        (match-beginning 0)))
+          (end (progn (should (re-search-forward "^(defun rata-blog--md-path" nil t))
+                      (match-beginning 0))))
+      (let ((body (buffer-substring-no-properties start end)))
+        (should (string-match-p "(require 'org-roam)" body))
+        ;; Match the code pattern, not the bare word: the docstring names
+        ;; `fboundp' to explain why it is wrong here.
+        (should-not (string-match-p "(fboundp '?#?'?org-roam-db-query)" body))
+        (should-not (string-match-p "(when (fboundp" body))))))
+
+(ert-deftest rata-test-blog-unnamed-post-is-not-reported-as-pending ()
+  "A post with an empty :EXPORT_FILE_NAME: must read `unnamed', not `never'.
+
+Found on real data: `20260117021529-blog_post_my_emacs_workflow.org' carries
+the empty property the old capture template wrote.  `rata-blog-status' first
+listed it as `never' next to a plausible target path — but ox-hugo skips a
+subtree whose export name is empty, so no amount of `SPC o b E' would ever
+produce that file.  Reporting a state that implies a working remedy is the
+L-029 shape once more, so the two cases are kept apart."
+  (let* ((rata-hugo-dir "/tmp/rata-test-site/")
+         (rata-blog-section "/posts/")
+         (named (car (rata-blog--parse-targets
+                      ":properties:\n:export_file_name: real-name\n:end:\n"
+                      "/tmp/x/" "slug")))
+         (unnamed (car (rata-blog--parse-targets
+                        ":properties:\n:export_file_name:\n:end:\n"
+                        "/tmp/x/" "slug"))))
+    (should (nth 2 named))
+    (should-not (nth 2 unnamed))
+    ;; No markdown exists for either, so the only thing separating them is the
+    ;; flag — which is the point.
+    (should (eq (rata-blog--target-state "/nonexistent.org" unnamed) 'unnamed))
+    (should (eq (rata-blog--target-state "/nonexistent.org" named) 'never))))
+
+(ert-deftest rata-test-blog-state-classification ()
+  "`rata-blog--state' must distinguish never-exported from stale."
+  (let* ((tmp (make-temp-file "rata-blog-" t))
+         (note (expand-file-name "note.org" tmp))
+         (md (expand-file-name "note.md" tmp)))
+    (unwind-protect
+        (progn
+          (write-region "x" nil note)
+          (should (eq (rata-blog--state note md) 'never))
+          (write-region "y" nil md)
+          (should (eq (rata-blog--state note md) 'exported))
+          ;; Touch the note into the future: an edited note with an old export.
+          (set-file-times note (time-add (current-time) 60))
+          (should (eq (rata-blog--state note md) 'stale)))
+      (delete-directory tmp t))))
 
 ;;; ============================================================
 ;;; Run all tests

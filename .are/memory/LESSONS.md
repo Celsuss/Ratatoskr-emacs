@@ -658,3 +658,61 @@ Two general points worth more than the specific trap:
 Related: L-003 (a green step whose scope is not stated will be over-read) — this one survived
 `are-verify full` because `just batch` exits 0 with a warning buffer full of damage, which
 `just batch-strict` now catches.
+
+## L-029 — A consumer with no producer is as silently dead as a key with no binding
+
+`lisp/init-org.el` has carried an org-super-agenda group `(:name "Blog Posts" :tag "blog"
+:order 9)` since the agenda was written. No capture template ever applied a `:blog:`
+filetag, and nothing else in the config did either. The group therefore matched nothing,
+and org-super-agenda renders an empty group by omitting it — so the agenda looked correct.
+The tag existed only on the *consuming* side.
+
+The same asymmetry had a second instance in the same file: the `blog-post` template wrote
+`:export_file_name:` with an **empty value**, and ox-hugo treats a subtree as a post only
+when that property has one. `SPC o b e` on a freshly captured post silently fell through
+to whole-file export instead of failing.
+
+The class, which is FAIL-0009 (`SPC p f` bound in a deferred `:config`) wearing different
+clothes:
+
+> When one side of a contract is written in configuration and the other side is supposed
+> to be written by a *human action later*, nothing checks that the action ever happens,
+> and the failure renders as absence — an empty agenda group, an unexported post, a key
+> that does nothing — which is indistinguishable from "there is nothing to show".
+
+What to do about it:
+
+- **Grep for the producer whenever you write a consumer.** A `:tag`, a filetag, a
+  `:where (= tags:tag ...)` query, a `EXPORT_*` property — each is a name that something
+  else must *apply*, and the query is the cheap half to write and the useless half alone.
+- **Bind the two ends in a test that reads the source**, not the running state, so it
+  holds in batch: `rata-test-blog-tag-matches-agenda-group` parses
+  `org-agenda-custom-commands` out of `init-org.el` and asserts the group's `:tag` equals
+  `rata-blog-tag`; `rata-test-blog-capture-template-tags-and-names` asserts the template
+  actually writes that filetag and a non-empty export name.
+- **Prefer a command that makes the absence visible.** `rata-blog-status` (`SPC o b s`)
+  exists because the discovery here was arithmetic no human was doing: 8 notes carried
+  Hugo export properties, 3 markdown files existed, and nothing in the editor could say
+  so. A count that a person has to compute by hand is a count nobody computes.
+
+**The fix reproduced the bug twice before it was done**, which is the strongest evidence
+that this is a class and not an incident:
+
+1. `rata-blog-files` copied `rata-org-roam-agenda-files`'s `(when (fboundp
+   'org-roam-db-query) ...)` guard. That guard is correct in its original home — that
+   function only ever runs from advice on `org-agenda`, so org-roam is always live — and
+   wrong in a *user-facing entry point*, where org-roam may not be loaded yet. `SPC o b s`
+   then printed "No notes tagged :blog:" while the database held ten. Guarded by
+   `rata-test-blog-files-requires-org-roam`.
+2. `rata-blog-status` reported a post with an empty `:EXPORT_FILE_NAME:` as `never`,
+   beside a plausible target path. ox-hugo skips such a subtree entirely, so `never` —
+   which reads as "run the export again" — named a remedy that cannot work. It now reads
+   `unnamed`. Guarded by `rata-test-blog-unnamed-post-is-not-reported-as-pending`.
+
+The generalisation: **a guard or a status value copied from elsewhere carries its original
+preconditions, not its new ones.** Before reusing either, ask what the caller knows at the
+point of the copy that the new caller does not — and prefer a state that names the actual
+remedy over one that merely sorts the row.
+
+Related: L-011 / FAIL-0009 (the leader-key instance), L-025 (a data file that code filters
+on is code, and its every failure mode is silent).

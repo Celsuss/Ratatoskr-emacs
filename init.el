@@ -146,6 +146,7 @@ normally for a full backtrace.  Otherwise, catch and log them to
 ;; (rata-load-module 'init-mcp)      ; experimental — uncomment when stable
 (rata-load-module 'init-persp)
 (rata-load-module 'init-org)
+(rata-load-module 'init-blog)      ; org-roam -> hugo blog export
 (rata-load-module 'init-dialogic)  ; dialogic formatting for blog posts
 (rata-load-module 'init-present)   ; org-re-reveal slide export
 (rata-load-module 'init-dashboard)

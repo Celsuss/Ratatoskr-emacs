@@ -10,11 +10,6 @@
   :type 'directory
   :group 'rata)
 
-(defcustom rata-hugo-dir (expand-file-name "~/workspace/second-brain/hugo/")
-  "Hugo blog directory."
-  :type 'directory
-  :group 'rata)
-
 ;; --- Work agenda calendar span ---
 ;; The "w" work agenda opens with a dated `agenda' block covering this many days
 ;; from today.  Its backlog block below discards everything the calendar already
@@ -285,6 +280,20 @@ Describe the outcome of this project.
                                  :unnarrowed t)
 
 
+                                ;; NB: the :blog: filetag must match
+                                ;; `rata-blog-tag' in init-blog.el, which
+                                ;; selects posts by it, and the "Blog Posts"
+                                ;; org-super-agenda group below, which groups
+                                ;; on it.  Without the tag a post is
+                                ;; indistinguishable from any other note in the
+                                ;; flat roam tree and that group stays empty.
+                                ;; :export_file_name: must carry a value:
+                                ;; ox-hugo exports a subtree only when it has
+                                ;; one, so an empty property means SPC o b e
+                                ;; silently falls through to the whole file.
+                                ;; snippets/org-mode/hugo-frontmatter is the
+                                ;; same shape for a note captured some other
+                                ;; way; keep the two in step.
                                 ("b" "blog-post" plain
                                  "\n
 One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
@@ -292,13 +301,14 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 * ${title}
 :properties:
 :export_hugo_section: /posts/
-:export_file_name:
+:export_file_name: ${slug}
 :end:"
 
                                  :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
                                                     ,(concat "#+title: ${title}\n"
                                                              "#+author: " user-full-name "\n"
                                                              "#+date: %U\n"
+                                                             "#+filetags: :blog:\n"
                                                              "#+hugo_base_dir: ../hugo/\n"
                                                              "\n"))
                                  :unnarrowed t)
@@ -664,28 +674,13 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 (use-package org-transclusion
   :after (org general))
 
-;; --- ox-hugo (org to Hugo markdown export) ---
-
-(defun rata-hugo-preview ()
-  "Start Hugo server for previewing blog posts."
-  (interactive)
-  (let ((default-directory rata-hugo-dir))
-    (if (get-buffer "*hugo-server*")
-        (browse-url "http://localhost:1313")
-      (start-process "hugo-server" "*hugo-server*" "hugo" "server" "-D")
-      (run-at-time 2 nil (lambda () (browse-url "http://localhost:1313"))))))
-
-(use-package ox-hugo
-  :after (ox general)
-  :commands (org-hugo-export-wim-to-md))
-
 ;; --- Writegood Mode ---
 (use-package writegood-mode
   :hook ((org-mode      . writegood-mode)
          (markdown-mode . writegood-mode))
   :commands (writegood-mode))
 
-;; --- All org/roam/hugo leader keys, hoisted to top level so they are live
+;; --- All org/roam leader keys, hoisted to top level so they are live
 ;; from startup rather than only after each package's :config runs (FAIL-0009 /
 ;; L-011). Every command autoloads from its package via :commands / autoload. ---
 (with-eval-after-load 'general
@@ -731,9 +726,6 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
     "ortR" '(org-transclusion-remove-all     :which-key "remove all")
     "orte" '(org-transclusion-live-sync-start :which-key "edit source")
     "ortm" '(org-transclusion-mode           :which-key "toggle mode")
-    "ob"  '(:ignore t :which-key "blog/hugo")
-    "obe" '(org-hugo-export-wim-to-md :which-key "export to hugo")
-    "obp" '(rata-hugo-preview         :which-key "preview post")
     "tw"  '(writegood-mode :which-key "writegood")))
 
 (provide 'init-org)
