@@ -40,7 +40,9 @@ that can actually go wrong in an Emacs configuration are:
 | lisp/init-sql.el | integrations,secrets | HIGH | relevant | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | lisp/init-dev.el | tooling,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-org.el | notes,operator-data | MEDIUM | relevant | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
+| lisp/init-blog.el | notes,operator-data | MEDIUM | relevant | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | lisp/init-present.el | notes,operator-data | MEDIUM | relevant | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
+| lisp/init-dialogic.el | notes,operator-data | MEDIUM | relevant | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | lisp/init-khoj.el | integrations,operator-data | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-llm.el | integrations,operator-data | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-irc.el | integrations,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
@@ -72,6 +74,7 @@ that can actually go wrong in an Emacs configuration are:
 | lisp/init-snippets.el | editing | LOW | relevant | knowledge/MODULES.md |
 | tests/run-tests.el | verification | HIGH | relevant | knowledge/TESTING_STRATEGY.md |
 | tests/claude-loop-e2e.el | verification | HIGH | fast | knowledge/CLAUDE_LOOP.md |
+| tests/work-agenda-render.el | verification,notes | HIGH | relevant | knowledge/TESTING_STRATEGY.md |
 | scripts/lint.sh | verification | HIGH | fast | knowledge/TESTING_STRATEGY.md |
 | scripts/are-*.sh | verification,are | HIGH | fast | SYSTEM.md |
 | justfile | verification,tooling | HIGH | full | knowledge/TESTING_STRATEGY.md |
@@ -84,7 +87,7 @@ that can actually go wrong in an Emacs configuration are:
 | docs/* | docs,are | LOW | fast | SYSTEM.md |
 | SPEC.md | docs,historical | LOW | fast | memory/DECISIONS.md |
 | snippets/* | editing | LOW | fast | knowledge/MODULES.md |
-| feeds.org | integrations,network | LOW | fast | knowledge/INTEGRATIONS.md |
+| feeds.org | integrations,network | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | local.el.example | packaging,secrets | MEDIUM | fast | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | .gitignore | packaging | MEDIUM | fast | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | .gitattributes | packaging | LOW | fast | knowledge/MODULES.md |

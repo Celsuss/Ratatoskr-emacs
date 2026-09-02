@@ -42,6 +42,11 @@ load file:
 batch:
     {{emacs_bin}} --init-directory {{init_dir}} --batch -l early-init.el -l init.el
 
+# Batch init, failing on load-order warnings that a green exit code hides
+# (FAIL-0012). This is what `are-verify full' runs, not plain `batch'.
+batch-strict:
+    ./scripts/check-startup.sh
+
 # Delete all compiled artifacts, packages, and history
 clean:
     @echo "Cleaning runtime artifacts..."
@@ -168,6 +173,15 @@ test-ert:
         -l ert \
         -l tests/run-tests.el
 
+# Render the "w" work agenda over org fixtures and assert on the visible lines.
+# Separate from `test-ert': it puts org-super-agenda on load-path by hand, because
+# elpaca never activates an `:after org' package in batch. Fixtures live in
+# temporary-file-directory — this touches nothing under second-brain.
+test-work-agenda:
+    {{emacs_bin}} --init-directory {{init_dir}} --batch \
+        -l ert \
+        -l tests/work-agenda-render.el
+
 # Runs real processes and timers, so it is kept out of `test'.
 # Drive the claude-loop state machine against a stub CLI (no API calls).
 # It IS in `are-verify fast': it needs no packages and takes 3s. See FAIL-0004.
@@ -177,7 +191,7 @@ test-claude-loop:
 # Run all tests (lint + compile + startup + ERT)
 # Left exactly as it was on purpose — README, AGENTS.md and habit refer to it.
 # The pre-commit gate runs `are-verify full', which is a superset. See DECISIONS D-004.
-test: lint compile batch test-ert
+test: lint compile batch test-ert test-work-agenda
 
 # --- ARE (Autonomous Reliability Engineering) -------------------------------
 # Entry point: .are/INDEX.md   Operating manual: .are/SYSTEM.md

@@ -10,10 +10,25 @@
   :type 'directory
   :group 'rata)
 
-(defcustom rata-hugo-dir (expand-file-name "~/workspace/second-brain/hugo/")
-  "Hugo blog directory."
-  :type 'directory
+;; --- Work agenda calendar span ---
+;; The "w" work agenda opens with a dated `agenda' block covering this many days
+;; from today.  Its backlog block below discards everything the calendar already
+;; shows, so the horizon has to be computable at agenda-build time.
+
+(defcustom rata-org-work-agenda-span 14
+  "Number of days the calendar block of the \"w\" work agenda shows."
+  :type 'integer
   :group 'rata)
+
+(defun rata-org-work-agenda-horizon ()
+  "Return the last date the work agenda calendar covers, as YYYY-MM-DD.
+The backlog block of the \"w\" agenda discards everything the calendar
+already shows, so deadlines past this date need a group of their own.
+Goes through `org-time-from-absolute' rather than adding 86400-second
+days, so a DST boundary inside the span cannot shift the horizon by a day."
+  (format-time-string
+   "%Y-%m-%d"
+   (org-time-from-absolute (+ (org-today) (1- rata-org-work-agenda-span)))))
 
 (defun rata-org-capture-fleeting ()
   "Capture a fleeting note to inbox.org."
@@ -223,6 +238,10 @@ When present the file is included in org-agenda via the :hastodo: query."
 
 (use-package org-roam
   :after (org general)
+  ;; `org-roam-alias-add' / `-remove' carry no ;;;###autoload cookie upstream,
+  ;; so `rata-roam-alias-add-to-file' below would hit a void-function before
+  ;; anything else had loaded org-roam.
+  :commands (org-roam-alias-add org-roam-alias-remove)
   :custom
   (org-roam-directory (file-truename rata-org-roam-dir))
   (org-roam-completion-everywhere t)
@@ -265,6 +284,20 @@ Describe the outcome of this project.
                                  :unnarrowed t)
 
 
+                                ;; NB: the :blog: filetag must match
+                                ;; `rata-blog-tag' in init-blog.el, which
+                                ;; selects posts by it, and the "Blog Posts"
+                                ;; org-super-agenda group below, which groups
+                                ;; on it.  Without the tag a post is
+                                ;; indistinguishable from any other note in the
+                                ;; flat roam tree and that group stays empty.
+                                ;; :export_file_name: must carry a value:
+                                ;; ox-hugo exports a subtree only when it has
+                                ;; one, so an empty property means SPC o b e
+                                ;; silently falls through to the whole file.
+                                ;; snippets/org-mode/hugo-frontmatter is the
+                                ;; same shape for a note captured some other
+                                ;; way; keep the two in step.
                                 ("b" "blog-post" plain
                                  "\n
 One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
@@ -272,13 +305,14 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 * ${title}
 :properties:
 :export_hugo_section: /posts/
-:export_file_name:
+:export_file_name: ${slug}
 :end:"
 
                                  :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
                                                     ,(concat "#+title: ${title}\n"
                                                              "#+author: " user-full-name "\n"
                                                              "#+date: %U\n"
+                                                             "#+filetags: :blog:\n"
                                                              "#+hugo_base_dir: ../hugo/\n"
                                                              "\n"))
                                  :unnarrowed t)
@@ -355,6 +389,7 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 
 * Habits
 - [ ] Commit Dotfiles/Emacs Tweaks
+- [ ] Coding
 - [ ] Clear Inbox
 - [ ] Workout
 - [ ] Chinese Study
@@ -384,7 +419,48 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
            :empty-lines-before 1
            :empty-lines-after 1)))
 
+  ;; Show a heading node's parent context in completion. A heading with its
+  ;; own :ID: is a first-class org-roam node, but by default it renders in
+  ;; `org-roam-node-find' as just the heading text ("Deriving modes"), losing
+  ;; which note it lives in. This custom accessor prefixes the file #+title and
+  ;; any intermediate outline path, so the same node reads "Elisp modes >
+  ;; Deriving modes". Adjacent duplicate segments are dropped so a top-level
+  ;; heading whose text matches the file title is not shown twice.
+  (cl-defmethod org-roam-node-rata-hierarchy ((node org-roam-node))
+    "Return NODE's title prefixed with its file title and outline path.
+File-level nodes (level 0) show only their title."
+    (let* ((level (or (org-roam-node-level node) 0))
+           (parts (if (zerop level)
+                      (list (org-roam-node-title node))
+                    (append (when (org-roam-node-file-title node)
+                              (list (org-roam-node-file-title node)))
+                            (org-roam-node-olp node)
+                            (list (org-roam-node-title node))))))
+      (string-join (delete-dups parts) " > ")))
+
+  (setq org-roam-node-display-template
+        (concat "${rata-hierarchy:*} "
+                (propertize "${tags:20}" 'face 'org-tag)))
+
   (org-roam-db-autosync-mode))
+
+;; --- Roam node editing ---
+
+(defun rata-roam-alias-add-to-file (alias)
+  "Add ALIAS to the file-level org-roam node of the current buffer.
+
+`org-roam-alias-add' targets the node *at point*, and in this config a
+heading is frequently a node in its own right (`SPC i o p' promotes one).
+Adding an alias for the note therefore has to widen and start from
+`point-min' rather than trust wherever the cursor happens to sit."
+  (interactive "sAlias: ")
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Not an Org buffer"))
+  (save-excursion
+    (save-restriction
+      (widen)
+      (goto-char (point-min))
+      (org-roam-alias-add alias))))
 
 ;; --- Org Roam QL ---
 
@@ -452,16 +528,48 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
                       (:name "Project ideas" :tag "project" :order 9)
                       (:name "Projects" :auto-property "PROJECT" :order 10)))))))
 
+          ;; A `tags-todo' block has no date axis, so the best it could do was a
+          ;; "Due Soon" bucket.  The dated `agenda' block below is what prints the
+          ;; day headers; the tag search underneath is now the undated backlog.
           ("w" "Work Focus"
-           ((tags-todo "work"
-                       ((org-agenda-overriding-header "Work Tasks")
+           ((agenda ""
+                    ((org-agenda-overriding-header "Work Agenda")
+                     (org-agenda-span rata-org-work-agenda-span)
+                     (org-agenda-start-day nil)          ; start on today...
+                     (org-agenda-start-on-weekday nil)   ; ...not on the week's Monday
+                     (org-agenda-show-all-dates t)       ; print every date, even empty ones
+                     ;; Each deadline already appears on its own day inside the span;
+                     ;; the default 14-day prewarning would repeat it under today too.
+                     (org-deadline-warning-days 0)
+                     ;; No super-agenda grouping here - the plain date blocks are the point.
+                     (org-super-agenda-groups nil)))
+            (tags-todo "work"
+                       ((org-agenda-overriding-header "Work Backlog")
                         (org-super-agenda-groups
-                         '((:name "Overdue" :deadline past :face error :order 1)
-                           (:name "Today" :time-grid t :scheduled today :deadline today :order 2)
-                           (:name "Due Today" :deadline today :order 3)
-                           (:name "Due Soon" :deadline future :order 4)
-                           (:name "Important" :priority "A" :order 5)
-                           (:name "Other Projects & Tasks" :order 99)))))))
+                         ;; Groups are applied in list order, so "Due later" must
+                         ;; claim its items before :discard removes everything dated.
+                         ;; Selectors inside one group are OR'ed, so the :discard
+                         ;; drops an item with either a SCHEDULED or a DEADLINE.
+                         ;; Backquoted because block settings are evaluated at
+                         ;; agenda-build time (org-agenda-run-series), so `g' in the
+                         ;; agenda recomputes the horizon.
+                         `((:name "Due later"
+                                  :deadline (after ,(rata-org-work-agenda-horizon))
+                                  :order 1)
+                           (:discard (:scheduled t :deadline t))
+                           (:name "Important" :priority "A" :order 2)
+                           ;; `:anything' is what names the catch-all.  A group
+                           ;; carrying only :name and :order selects nothing, so
+                           ;; the leftovers would fall into org-super-agenda's own
+                           ;; "Other items" section instead.
+                           (:name "Other Projects & Tasks" :anything t :order 99))))))
+           ;; Global settings.  A tag filter is a property of the whole view and is
+           ;; documented as unreliable when defined for a single block of a block
+           ;; agenda.  It matches the :work: tag work_tasks.org supplies by
+           ;; inheritance (its #+filetags and the `* Tasks :work:' parent), which
+           ;; agenda lines carry only because `org-agenda-use-tag-inheritance'
+           ;; includes `agenda' - setting that to nil would silently empty this view.
+           ((org-agenda-tag-filter-preset '("+work"))))
 
           ("p" "Project Dashboard"
            ((tags "project+level=1"
@@ -612,28 +720,13 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
 (use-package org-transclusion
   :after (org general))
 
-;; --- ox-hugo (org to Hugo markdown export) ---
-
-(defun rata-hugo-preview ()
-  "Start Hugo server for previewing blog posts."
-  (interactive)
-  (let ((default-directory rata-hugo-dir))
-    (if (get-buffer "*hugo-server*")
-        (browse-url "http://localhost:1313")
-      (start-process "hugo-server" "*hugo-server*" "hugo" "server" "-D")
-      (run-at-time 2 nil (lambda () (browse-url "http://localhost:1313"))))))
-
-(use-package ox-hugo
-  :after (ox general)
-  :commands (org-hugo-export-wim-to-md))
-
 ;; --- Writegood Mode ---
 (use-package writegood-mode
   :hook ((org-mode      . writegood-mode)
          (markdown-mode . writegood-mode))
   :commands (writegood-mode))
 
-;; --- All org/roam/hugo leader keys, hoisted to top level so they are live
+;; --- All org/roam leader keys, hoisted to top level so they are live
 ;; from startup rather than only after each package's :config runs (FAIL-0009 /
 ;; L-011). Every command autoloads from its package via :commands / autoload. ---
 (with-eval-after-load 'general
@@ -682,6 +775,15 @@ One of my [[id:b0b348f1-7824-4a8c-af56-46ad9372071f][blog post]]s.
     "ob"  '(:ignore t :which-key "blog/hugo")
     "obe" '(org-hugo-export-wim-to-md :which-key "export to hugo")
     "obp" '(rata-hugo-preview         :which-key "preview post")
-    "tw"  '(writegood-mode :which-key "writegood")))
+    "tw"  '(writegood-mode :which-key "writegood"))
+  ;; Insert org content under the "insert" group (parent declared in
+  ;; init-snippets.el). `org-id-get-create' adds the :PROPERTIES: drawer with an
+  ;; :ID:, which is what promotes the current heading to a first-class org-roam
+  ;; node (autosync indexes it on save).
+  (rata-leader
+    :states '(normal visual)
+    "io"  '(:ignore t :which-key "org")
+    "iop" '(org-id-get-create :which-key "id property (roam node)")
+    "ioa" '(rata-roam-alias-add-to-file :which-key "roam alias")))
 
 (provide 'init-org)

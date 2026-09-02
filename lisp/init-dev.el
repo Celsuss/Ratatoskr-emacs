@@ -45,13 +45,42 @@
   :commands (consult-lsp-symbols consult-lsp-file-symbols consult-lsp-diagnostics))
 
 ;; --- LSP UI ---
+;; lsp-ui-doc renders into a child frame, not a window, so `shackle-rules' and
+;; `display-buffer-alist' have no say in where it lands.  Its own placement is
+;; frame-relative in every mode (`lsp-ui-doc-alignment' only reaches the
+;; `top'/`bottom' positions, and `lsp-ui-doc-side' is a literal x of 10 for
+;; `left'), which is why the default `top'/`frame' pair parks a wide popup in
+;; the corner of the *frame* -- over whatever window happens to be there rather
+;; than the one holding point.  `at-point' gets the vertical placement right;
+;; the advice below fixes the horizontal one.
+(defun rata-lsp-ui-doc--align-right (orig frame width height start-x start-y)
+  "Pin the lsp-ui-doc child frame to the right text edge of the current window.
+Keeps ORIG's vertical placement (just above the symbol at point, below it
+when there is no room) and replaces only the horizontal one, which upstream
+measures against the whole Emacs frame.
+FRAME, WIDTH, HEIGHT, START-X and START-Y are ORIG's arguments."
+  (let ((y (cdr (funcall orig frame width height start-x start-y)))
+        ;; Body (text-area) right edge of the window holding point, in pixels
+        ;; relative to the frame -- the same measurement `lsp-ui-doc--move-frame'
+        ;; takes for START-X, so the two agree about the coordinate space.
+        (right (nth 2 (window-edges nil t nil t))))
+    ;; Put the popup's right edge on the window's right edge.  RIGHT is
+    ;; frame-relative and never exceeds the frame's width, so the only clamp
+    ;; needed is for a popup wider than the window: `max' slides it back onto
+    ;; the frame rather than off the left of it.
+    (cons (max 0 (- right width)) y)))
+
 (use-package lsp-ui
   :after lsp-mode
   :hook (lsp-mode . lsp-ui-mode)
   :custom
   (lsp-ui-doc-enable t)
   (lsp-ui-doc-show-with-cursor t)
-  (lsp-ui-sideline-enable t))
+  (lsp-ui-doc-position 'at-point)   ; window-relative vertical anchor
+  (lsp-ui-doc-max-width 80)         ; 150 columns is what made it span the frame
+  (lsp-ui-sideline-enable t)
+  :config
+  (advice-add 'lsp-ui-doc--mv-at-point :around #'rata-lsp-ui-doc--align-right))
 
 ;; --- Flycheck ---
 (use-package flycheck

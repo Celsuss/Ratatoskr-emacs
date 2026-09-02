@@ -64,7 +64,7 @@ Skips keyword arguments (:states, :keymaps, etc.) and their values."
           (setq skip-next nil))
          ((keywordp item)
           (when (memq item '(:states :keymaps :prefix :prefix-map
-                             :non-normal-prefix :global-prefix :infix))
+				     :non-normal-prefix :global-prefix :infix))
             (setq skip-next t)))
          ((stringp item)
           (when-let ((next (cadr items)))
@@ -187,7 +187,17 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC b b" . consult-buffer)
     ("SPC f f" . find-file)
     ("SPC j d" . xref-find-definitions)
-    ("SPC J j" . jira-issues))
+    ("SPC J j" . jira-issues)
+    ("SPC o b d d" . rata-dialogic-insert-block)
+    ("SPC o b e" . org-hugo-export-wim-to-md)
+    ("SPC o b s" . rata-blog-status)
+    ("SPC i o p" . org-id-get-create)
+    ("SPC i o a" . rata-roam-alias-add-to-file)
+    ;; agent-shell's context senders are not autoloaded upstream, so these
+    ;; resolve only while their symbols stay in init-llm.el's :commands list.
+    ("SPC a i c f" . rata-agent-shell-send-file)
+    ("SPC a i c r" . agent-shell-send-region)
+    ("SPC a i c d" . agent-shell-send-dwim))
   "Leader keys that must resolve immediately after init, with their commands.
 Not exhaustive — a contract for the keys most likely to be broken by the
 failure mode in .are/memory/failures/FAIL-0009.md.  Extend it when a
@@ -568,13 +578,13 @@ carries the `result' event the loop makes every decision from."
                           0))
     ;; Exit 0 but the task said it could not do it.
     (should (eq 'blocked (car (classify '(:result ((subtype . "success"))
-                                          :report blocked
-                                          :report-reason "no such API")
+						  :report blocked
+						  :report-reason "no such API")
                                         0))))
     (should (equal "no such API"
                    (cdr (classify '(:result ((subtype . "success"))
-                                    :report blocked
-                                    :report-reason "no such API")
+					    :report blocked
+					    :report-reason "no such API")
                                   0))))
     ;; Limits and errors.
     (should (eq 'max-turns (car (classify '(:result ((subtype . "error_max_turns"))) 1))))
@@ -600,7 +610,7 @@ carries the `result' event the loop makes every decision from."
                                          . (((tool_name . "Bash")
                                              (tool_input
                                               . ((command . "python3 hello.py")))))))
-                               :report done)
+				       :report done)
                              0)))
       (should (eq 'unverified (car verdict)))
       (should (string-match-p "never run" (cdr verdict)))
@@ -609,15 +619,15 @@ carries the `result' event the loop makes every decision from."
     ;; Self-reported, and it wins the wording over the inferred version.
     (should (equal '(unverified . "could not run pytest")
                    (classify '(:result ((subtype . "success"))
-                               :report unverified
-                               :report-reason "could not run pytest")
+				       :report unverified
+				       :report-reason "could not run pytest")
                              0)))
     ;; Opting out restores the old tolerance.
     (let ((rata-claude-loop-verification-denial-tools nil))
       (should-not (classify '(:result ((subtype . "success")
                                        (permission_denials
                                         . (((tool_name . "Bash")))))
-                              :report done)
+				      :report done)
                             0)))
     ;; A denied Edit is the stronger finding and keeps its own kind.
     (should (eq 'denied
@@ -944,6 +954,569 @@ as though the token were wrong.  L-018."
                  "https://acme.atlassian.net"))
   (should (equal (directory-file-name "https://acme.atlassian.net")
                  "https://acme.atlassian.net")))
+
+;;; ============================================================
+;;; 9. Work agenda is dated
+;;; ============================================================
+;;
+;; The "w" agenda gained a dated `agenda' block so that deadlines appear under
+;; day headers instead of in a flat "Due Soon" bucket.  Both halves of that fail
+;; silently -- the view still opens, just wrong -- so they are asserted here:
+;;
+;;   * lose the `agenda' block in a later edit and the date headers go with it;
+;;   * put `org-agenda-tag-filter-preset' in a block instead of the command's
+;;     global settings slot and the filter is unreliable by documentation
+;;     (org-agenda.el:3834), which shows up as foreign tasks in a work view.
+;;
+;; Read from source rather than from the live variable: `org-super-agenda' is
+;; deferred `:after org', so `org-agenda-custom-commands' still holds its default
+;; in a batch Emacs that has not opened an agenda.
+
+(require 'cl-lib)
+
+(defun rata-test--find-setq-value (form variable)
+  "Return the quoted value of a (setq VARIABLE \\='(...)) form nested in FORM.
+Walks car and cdr separately: the module source contains dotted pairs
+\(`:hook (org-mode . auto-fill-mode)'), which a list walker chokes on."
+  (cond
+   ((not (consp form)) nil)
+   ((and (eq (car-safe form) 'setq) (eq (nth 1 form) variable))
+    (cadr (nth 2 form)))
+   (t (or (rata-test--find-setq-value (car form) variable)
+          (rata-test--find-setq-value (cdr form) variable)))))
+
+(defun rata-test--org-agenda-custom-commands ()
+  "Return `org-agenda-custom-commands' as written in lisp/init-org.el."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "lisp/init-org.el" user-emacs-directory))
+    (goto-char (point-min))
+    (let (form value)
+      (while (setq form (ignore-errors (read (current-buffer))))
+        (unless value
+          (setq value (rata-test--find-setq-value form 'org-agenda-custom-commands))))
+      value)))
+
+(ert-deftest rata-test-work-agenda-has-dated-block ()
+  "The work agenda leads with an `agenda' block, so it prints day headers.
+A `tags-todo' block has no date axis; that is why the view could only
+bucket things as \"Due Soon\" before."
+  (let* ((entry (assoc "w" (rata-test--org-agenda-custom-commands)))
+         (blocks (nth 2 entry)))
+    (should entry)
+    (should (memq 'agenda (mapcar #'car blocks)))
+    ;; The dashboard's dated block is the pattern this copied -- keep it too.
+    (should (memq 'agenda (mapcar #'car (nth 2 (assoc "d" (rata-test--org-agenda-custom-commands))))))))
+
+(ert-deftest rata-test-work-agenda-filter-is-global ()
+  "`org-agenda-tag-filter-preset\=' sits in the command's global settings slot.
+Its docstring (org-agenda.el:3834) is explicit that defining it for one
+block of a block agenda \"will not work reliably\"."
+  (let* ((entry (assoc "w" (rata-test--org-agenda-custom-commands)))
+         (global (nth 3 entry)))
+    (should (assq 'org-agenda-tag-filter-preset global))
+    (should (equal (eval (cadr (assq 'org-agenda-tag-filter-preset global)) t)
+                   '("+work")))
+    ;; ...and nowhere else: a per-block copy is the failure this guards.
+    (dolist (block (nth 2 entry))
+      (should-not (assq 'org-agenda-tag-filter-preset (nth 2 block))))))
+
+(ert-deftest rata-test-work-agenda-backlog-keeps-far-deadlines ()
+  "The backlog discards dated items only after \"Due later\" has claimed its own.
+org-super-agenda applies groups in list order, so a `:discard' placed
+first would swallow every deadline -- including the ones beyond the
+calendar's horizon, which then appear in neither block."
+  (skip-unless (require 'org nil t))
+  (let* ((entry (assoc "w" (rata-test--org-agenda-custom-commands)))
+         (backlog (cl-find 'tags-todo (nth 2 entry) :key #'car))
+         (groups (eval (cadr (assq 'org-super-agenda-groups (nth 2 backlog))) t))
+         (due-later (cl-position-if (lambda (g) (equal (plist-get g :name) "Due later"))
+                                    groups))
+         (discard (cl-position-if (lambda (g) (plist-member g :discard)) groups)))
+    (should due-later)
+    (should discard)
+    (should (< due-later discard))
+    ;; Selectors inside one group are OR'ed (org-super-agenda.el:1222), so this
+    ;; one discard drops an item carrying either a SCHEDULED or a DEADLINE.
+    (let ((selectors (plist-get (nth discard groups) :discard)))
+      (should (plist-member selectors :scheduled))
+      (should (plist-member selectors :deadline)))
+    ;; The boundary has to line up with the calendar: "Due later" must start the
+    ;; day after the last day the `agenda' block shows, or a deadline falls
+    ;; through the gap between the two blocks.
+    (should (equal (plist-get (nth due-later groups) :deadline)
+                   `(after ,(rata-org-work-agenda-horizon))))))
+
+(ert-deftest rata-test-work-agenda-horizon-is-calendrical ()
+  "The horizon is exactly the calendar's last day, DST or no DST.
+Computed by absolute day number rather than by adding 86400-second days,
+which would land on 23:00 the previous day across a DST boundary and
+report a horizon one day short."
+  (skip-unless (require 'org nil t))
+  (should (= (org-time-string-to-absolute (rata-org-work-agenda-horizon))
+             (+ (org-today) (1- rata-org-work-agenda-span))))
+  (let ((rata-org-work-agenda-span 1))
+    (should (= (org-time-string-to-absolute (rata-org-work-agenda-horizon))
+               (org-today))))
+  ;; A whole year of start dates, each side of both European DST switches.
+  (dolist (offset (number-sequence 0 364))
+    (let ((rata-org-work-agenda-span (1+ offset)))
+      (should (= (org-time-string-to-absolute (rata-org-work-agenda-horizon))
+                 (+ (org-today) offset))))))
+
+;;; ============================================================
+;;; 10. LSP doc popup placement
+;;; ============================================================
+
+(ert-deftest rata-test-lsp-ui-doc-aligns-to-window-right ()
+  "The lsp-ui-doc child frame hugs the current window's right edge.
+
+Regression test for the popup landing in the corner of the *frame*: a
+child frame is not a window, so no `display-buffer' rule constrains it,
+and every one of lsp-ui's own placement knobs measures against the frame.
+`window-edges' and `frame-pixel-width' are stubbed so this runs headless."
+  (let ((orig (lambda (&rest _) (cons 1234 500))))
+    ;; Point in the right half of a split: x=1000..1600 of a 2000px frame.
+    (cl-letf (((symbol-function 'window-edges) (lambda (&rest _) '(1000 40 1600 900)))
+              ((symbol-function 'frame-pixel-width) (lambda (&rest _) 2000)))
+      ;; A 400px popup ends at the window's right edge, and the vertical
+      ;; coordinate is whatever upstream decided.
+      (should (equal (rata-lsp-ui-doc--align-right orig nil 400 100 1000 40)
+                     (cons 1200 500)))
+      ;; Wider than the window: clamped to the frame's left edge, never negative.
+      (should (equal (rata-lsp-ui-doc--align-right orig nil 1800 100 1000 40)
+                     (cons 0 500))))
+    ;; Point in the left half: the popup must not cross into the other window.
+    (cl-letf (((symbol-function 'window-edges) (lambda (&rest _) '(0 40 600 900)))
+              ((symbol-function 'frame-pixel-width) (lambda (&rest _) 2000)))
+      (should (equal (rata-lsp-ui-doc--align-right orig nil 400 100 0 40)
+                     (cons 200 500))))))
+
+;;; ============================================================
+;;; Elfeed — the feeds.org tag contract
+;;; ============================================================
+;;
+;; `feeds.org' is a data file and `init-elfeed.el' is code, and the tags are an
+;; undeclared contract between them.  Every failure mode here is silent: a
+;; renamed tag makes a view return zero entries, and a broken root tag makes
+;; *every* feed vanish, both without an error.  The existing keybinding tests
+;; cannot see any of it — `rata-test--walk-form' only inspects `rata-leader'
+;; forms, and the elfeed filter keys go through `general-define-key'.
+
+(defun rata-test--feeds-org-path ()
+  "Return the path of the feeds file elfeed actually reads."
+  (if (boundp 'rata-elfeed-feeds-file)
+      rata-elfeed-feeds-file
+    (expand-file-name "feeds.org" user-emacs-directory)))
+
+(defconst rata-test--org-tag-group-re
+  "^\\*+ .*?[ \t]+\\(:[[:alnum:]_@#%:]+:\\)[ \t]*$"
+  "Match an org headline carrying a trailing tag group, group 1 = the tags.")
+
+(defun rata-test--feeds-org-tags ()
+  "Return every org tag used on a headline in feeds.org, as a list of strings."
+  (let (tags)
+    (with-temp-buffer
+      (insert-file-contents (rata-test--feeds-org-path))
+      (goto-char (point-min))
+      (while (re-search-forward rata-test--org-tag-group-re nil t)
+        (dolist (tag (split-string (match-string 1) ":" t))
+          (cl-pushnew tag tags :test #'string=))))
+    tags))
+
+(defun rata-test--view-filter-tags (filter)
+  "Return the +TAG terms of elfeed FILTER, minus the ubiquitous `unread'.
+Date (@), feed (=) and title (~) terms are not tags and are skipped."
+  (let (tags)
+    (dolist (term (split-string filter "[ \t]+" t))
+      (when (and (string-prefix-p "+" term)
+                 (not (string= term "+unread")))
+        (push (substring term 1) tags)))
+    tags))
+
+(ert-deftest rata-test-elfeed-root-tag-present ()
+  "feeds.org must carry the tag `elfeed-org' looks for.
+`rmh-elfeed-org-tree-id' is never set in this config, so the default
+\"elfeed\" applies.  Remove or rename that tag on the top headline and
+every feed disappears with no error and no empty-list warning — the
+highest-consequence, lowest-visibility break in the whole module."
+  (let ((root (if (boundp 'rmh-elfeed-org-tree-id) rmh-elfeed-org-tree-id "elfeed")))
+    (should (member root (rata-test--feeds-org-tags)))))
+
+(ert-deftest rata-test-elfeed-view-tags-exist-in-feeds-org ()
+  "Every tag a `rata-elfeed-views' filter names must exist in feeds.org.
+A view whose tag matches nothing is not an error in elfeed — it is an
+empty entry list, indistinguishable from having read everything."
+  (let ((known (rata-test--feeds-org-tags))
+        failures)
+    (pcase-dolist (`(,_key ,slug ,_label ,filter) rata-elfeed-views)
+      (dolist (tag (rata-test--view-filter-tags filter))
+        (unless (member tag known)
+          (push (format "view `%s': +%s matches no feed in %s"
+                        slug tag (file-name-nondirectory
+                                  (rata-test--feeds-org-path)))
+                failures))))
+    (when failures
+      (ert-fail (concat "Elfeed views filtering on nonexistent tags:\n"
+                        (mapconcat #'identity (nreverse failures) "\n"))))))
+
+(ert-deftest rata-test-elfeed-views-well-formed ()
+  "`rata-elfeed-views' keys and slugs are unique and every view is a command.
+The generated commands are bound with `general-define-key', which
+`rata-test-keybindings-all-commandp' does not parse, so this is the only
+thing standing between a typo'd slug and a dead `f' key."
+  (let (keys slugs failures)
+    (pcase-dolist (`(,key ,slug ,label ,filter) rata-elfeed-views)
+      (should (stringp slug))
+      (should (stringp label))
+      (should (stringp filter))
+      (when key
+        (when (member key keys)
+          (push (format "duplicate key %S (slug `%s')" key slug) failures))
+        (push key keys))
+      (when (member slug slugs)
+        (push (format "duplicate slug `%s'" slug) failures))
+      (push slug slugs)
+      (let ((sym (rata-elfeed--view-symbol slug)))
+        (unless (commandp sym t)
+          (push (format "`%s' is not a command" sym) failures))))
+    (should (commandp 'rata-elfeed-filter-view t))
+    (when failures
+      (ert-fail (concat "Malformed elfeed views:\n"
+                        (mapconcat #'identity (nreverse failures) "\n"))))))
+
+(ert-deftest rata-test-feeds-org-tag-conventions ()
+  "feeds.org tags are lowercase and use only characters org accepts.
+Org tags are `[[:alnum:]_@#%]' only, so a hyphen silently stops the whole
+group being read as tags; and elfeed interns them, so `:Ntietz:' can
+never be matched by typing `+ntietz'.  Also: every feed carries tags, or
+it is unreachable from any view but `+unread'."
+  (let (failures)
+    (dolist (tag (rata-test--feeds-org-tags))
+      (unless (string-match-p "\\`[[:alnum:]_@#%]+\\'" tag)
+        (push (format "tag %S uses a character org does not accept in a tag" tag)
+              failures))
+      (unless (string= tag (downcase tag))
+        (push (format "tag %S is not lowercase" tag) failures)))
+    (with-temp-buffer
+      (insert-file-contents (rata-test--feeds-org-path))
+      (goto-char (point-min))
+      (while (re-search-forward "^\\*+ +\\(\\[\\[.*\\)$" nil t)
+        (let ((line (match-string 0)))
+          (unless (string-match-p ":[[:alnum:]_@#%:]+:[ \t]*\\'" line)
+            (push (format "untagged feed: %s" (match-string 1)) failures)))))
+    (when failures
+      (ert-fail (concat "feeds.org tag convention violations:\n"
+                        (mapconcat #'identity (nreverse failures) "\n"))))))
+
+(ert-deftest rata-test-elfeed-retag-wired ()
+  "Something must apply the feeds.org tags to entries already in the db.
+
+Elfeed stamps a feed's tags onto an entry once, at fetch time.  So the
+three tests above can pass — every view's tag really does exist in
+feeds.org — while 22 of 36 views return zero entries, because the
+backlog was fetched under the previous tag vocabulary.  That is what
+happened after the tag-axis rework: the contract they check is between
+two files, and nobody was checking it against the database.
+
+`rata-elfeed-retag' closes that gap, so it has to stay reachable and its
+two upstream entry points have to keep existing across package updates."
+  (should (commandp 'rata-elfeed-retag))
+  (should (memq 'rata-elfeed-retag elfeed-search-mode-hook))
+  ;; `lookup-key' returns an integer for an incomplete prefix, so compare the
+  ;; command rather than just testing for non-nil.
+  (should (eq (rata-test--leader-lookup "SPC a r t") 'rata-elfeed-retag))
+  ;; The retag is two upstream calls and nothing else; a rename in either
+  ;; package would make it fail at the point of use, in a command the user
+  ;; only presses when a filter already looks wrong.
+  (skip-unless (require 'elfeed nil t))
+  (should (fboundp 'elfeed-apply-autotags-now))
+  (should (fboundp 'elfeed-db-save))
+  (skip-unless (require 'elfeed-org nil t))
+  (should (fboundp 'rmh-elfeed-org-process-advice)))
+
+;;; ============================================================
+;;; Test — dialogic formatting (lisp/init-dialogic.el)
+;;; ============================================================
+
+(ert-deftest rata-test-dialogic-block-regexp-anchors ()
+  "The whole-block regexp must actually match a block.
+
+Regression test for a silent failure, not a hypothetical one.  In an Emacs
+regexp `^' is an anchor only at the start of the pattern or directly after
+`\\(', `\\(?:' or `\\|'; written bare in the middle of a pattern it is a
+literal caret.  The first version of `rata-dialogic--block-regexp' spelled
+the closing delimiter `...^[ \t]*#\\+end_dialogue', which matched nothing,
+so the audit cheerfully reported zero dialogue blocks in a buffer holding
+two and the word count included every turn."
+  (let ((re (rata-dialogic--block-regexp)))
+    (let ((block "#+begin_dialogue\n- A :: one\n- Me :: two\n#+end_dialogue"))
+      (should (string-match re block))
+      ;; Group 1 is the body and nothing but the body.
+      (should (equal (match-string 1 block) "- A :: one\n- Me :: two\n")))
+    ;; Indented block, and an empty one.
+    (should (string-match-p re "  #+begin_dialogue\n  - A :: one\n  #+end_dialogue"))
+    (should (string-match-p re "#+begin_dialogue\n#+end_dialogue"))
+    ;; The same trap in the any-block regexp used by the word count.
+    (should (string-match-p rata-dialogic--any-block-regexp
+                            "#+begin_src sql\nselect 1\n#+end_src"))))
+
+(ert-deftest rata-test-dialogic-parse-turns ()
+  "Turns parse into (SPEAKER . TEXT), with wrapped lines folded in."
+  (should (equal (rata-dialogic-parse-turns
+                  "- Skeptic :: Line one\n  wrapped on.\n- Me :: Reply.")
+                 '(("Skeptic" . "Line one wrapped on.") ("Me" . "Reply."))))
+  ;; An empty turn is still a turn — that is what the insert command writes.
+  (should (equal (rata-dialogic-parse-turns "- Newcomer :: ")
+                 '(("Newcomer" . ""))))
+  (should (null (rata-dialogic-parse-turns "")))
+  ;; A line with no `::' before any turn is ignored rather than fatal.
+  (should (equal (rata-dialogic-parse-turns "stray text\n- Me :: ok")
+                 '(("Me" . "ok")))))
+
+(ert-deftest rata-test-dialogic-insert-and-bounds ()
+  "Inserting a block produces a parseable block that `--block-bounds' finds."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Head\n\nProse.")
+    (rata-dialogic-insert-block "Skeptic")
+    (insert "Does this hold?")
+    (should (rata-dialogic--block-bounds))
+    (rata-dialogic-insert-turn "Newcomer")
+    (insert "And this?")
+    (let ((body (progn
+                  (string-match (rata-dialogic--block-regexp) (buffer-string))
+                  (match-string 1 (buffer-string)))))
+      (should (equal (mapcar #'car (rata-dialogic-parse-turns body))
+                     (list "Skeptic" rata-dialogic-self-name "Newcomer"))))
+    ;; The block must not be glued to the prose above it: ox-hugo would
+    ;; otherwise fold it into that paragraph.
+    (should (string-match-p "Prose\\.\n\n#\\+begin_dialogue" (buffer-string)))))
+
+(ert-deftest rata-test-dialogic-audit-counts ()
+  "The audit counts blocks and turns per heading and excludes block text."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Top\n\nintro.\n\n** Sub A\n\n"
+            (mapconcat #'identity (make-list 20 "word") " ") "\n\n"
+            "#+begin_dialogue\n- Skeptic :: One?\n- Me :: Yes.\n#+end_dialogue\n\n"
+            "#+begin_dialogue\n- Ghost :: Two?\n#+end_dialogue\n\n"
+            "#+begin_src sql\nselect count(*) from many words here\n#+end_src\n\n"
+            "** Sub B\n\nshort.\n")
+    (let* ((rows (rata-dialogic-audit-data))
+           (sub-a (seq-find (lambda (r) (equal (plist-get r :heading) "Sub A")) rows)))
+      (should (= 3 (length rows)))
+      (should (= 2 (plist-get sub-a :blocks)))
+      (should (= 3 (plist-get sub-a :turns)))
+      ;; Exactly the 20 prose words: neither the turns nor the SQL count.
+      (should (= 20 (plist-get sub-a :words)))
+      (should (equal '("Skeptic" "Me" "Ghost") (plist-get sub-a :speakers)))
+      ;; Both notes fire: over the per-heading cap, and a speaker off-cast.
+      (let ((notes (rata-dialogic--audit-notes sub-a)))
+        (should (= 2 (length notes)))
+        (should (seq-find (lambda (n) (string-match-p "too chatty" n)) notes))
+        (should (seq-find (lambda (n) (string-match-p "Ghost" n)) notes))))))
+
+(ert-deftest rata-test-dialogic-exports-styled-html ()
+  "A dialogue block must export as one <p> per turn inside a styled div.
+
+Three things are asserted because three different mistakes are possible and
+each is silent in the Org buffer:
+
+  1. the wrapper div survives (ox-hugo supplies it for any special block);
+  2. inline Org markup inside a turn is still transcoded, which is why the
+     parse tree is rewritten rather than the exported string;
+  3. the turns are separated by a blank line.  Without `:post-blank' on the
+     generated paragraphs, Markdown reads the whole exchange as a single
+     paragraph and every speaker lands in the same <p>.
+
+The Blackfriday description-list syntax that ox-hugo would emit by default
+\(\"Term\\n: description\") must NOT appear: this site renders with goldmark,
+which has no definition-list extension, so those turns would show up as
+literal \"Skeptic : ...\" text."
+  (skip-unless (require 'ox-hugo nil t))
+  (let ((out (org-export-string-as
+              (concat "before\n\n"
+                      "#+begin_dialogue\n"
+                      "- Skeptic :: What about ~code~ here?\n"
+                      "- Me :: Fine.\n"
+                      "#+end_dialogue\n")
+              'hugo t)))
+    (should (string-match-p "<div class=\"dialogue\">" out))
+    ;; Both the shared class and the per-speaker one, so CSS can style the
+    ;; author's replies apart from an interruption.
+    (should (string-match-p
+             "<span class=\"dialogue-who dialogue-who--skeptic\">Skeptic</span>" out))
+    (should (string-match-p
+             "<span class=\"dialogue-who dialogue-who--me\">Me</span>" out))
+    (should (string-match-p "`code`" out))
+    (should-not (string-match-p "~code~" out))
+    (should (string-match-p "Skeptic</span>[^\n]*\n\n<span" out))
+    (should-not (string-match-p "^: " out))))
+
+;;; ============================================================
+;;; Test — blog export (lisp/init-blog.el)
+;;; ============================================================
+
+(defun rata-test--find-plist-with-name (form name)
+  "Return the first plist inside FORM whose :name is NAME."
+  (cond
+   ((not (consp form)) nil)
+   ((and (keywordp (car form)) (equal (plist-get form :name) name)) form)
+   (t (or (rata-test--find-plist-with-name (car form) name)
+          (rata-test--find-plist-with-name (cdr form) name)))))
+
+(ert-deftest rata-test-blog-tag-matches-agenda-group ()
+  "`rata-blog-tag' must equal the tag the \"Blog Posts\" agenda group selects on.
+
+Regression test for the bug init-blog.el was written to fix.  The
+org-super-agenda group `(:name \"Blog Posts\" :tag \"blog\")' has been in
+init-org.el since the agenda was written, but no capture template ever
+applied a :blog: filetag — so the group matched nothing and rendered as an
+absent section.  That is the same shape of silent dead wiring as a leader
+key bound in a deferred `:config' (FAIL-0009): the config is present, the
+thing it refers to is not, and nothing complains.  Both ends are now
+written down, so lock them together."
+  (let ((group (rata-test--find-plist-with-name
+                (rata-test--org-agenda-custom-commands) "Blog Posts")))
+    (should group)
+    (should (equal (plist-get group :tag) rata-blog-tag))))
+
+(ert-deftest rata-test-blog-capture-template-tags-and-names ()
+  "The \"blog-post\" capture template must tag the note and name the export.
+
+Two separate silent failures: without `:blog:' in #+filetags: the post is
+invisible to `rata-blog-files' and to the agenda group above; without a
+value on :export_file_name: ox-hugo does not treat the subtree as a post
+at all and `org-hugo-export-wim-to-md' falls through to the whole file."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "lisp/init-org.el" user-emacs-directory))
+    (let ((source (buffer-string)))
+      ;; The template body, verbatim from the source.
+      (should (string-match-p "\"b\" \"blog-post\"" source))
+      (should (string-match-p "#\\+filetags: :blog:" source))
+      (should (string-match-p ":export_file_name: \\${slug}" source))
+      (should-not (string-match-p ":export_file_name:$" source)))))
+
+(ert-deftest rata-test-blog-parse-targets ()
+  "`rata-blog--parse-targets' must resolve a post to its markdown file.
+
+Pure path arithmetic, so it runs in batch without touching the operator's
+notes.  The cases are the three shapes that actually occur in the roam
+tree: a subtree naming both section and file (every existing post), a
+subtree naming only the file, and a note that names neither."
+  (let ((rata-hugo-dir "/tmp/rata-test-site/")
+        (rata-blog-section "/posts/")
+        (dir "/tmp/rata-test-roam/"))
+    ;; 1. the shape blog-dbt.org uses: relative base dir + section + name.
+    (should (equal
+             (rata-blog--parse-targets
+              (concat "#+title: DBT blog post\n"
+                      "#+hugo_base_dir: ../hugo/\n"
+                      "\n* Why i like dbt\n"
+                      ":properties:\n"
+                      ":export_hugo_section: /posts/\n"
+                      ":export_file_name: why-i-like-dbt\n"
+                      ":end:\n")
+              dir "20230718-dbt")
+             '(("why-i-like-dbt" "/tmp/hugo/content/posts/why-i-like-dbt.md" t))))
+    ;; 2. no section on the subtree — falls back to `rata-blog-section'; no
+    ;; base dir keyword — falls back to `rata-hugo-dir', which is the point of
+    ;; setting `org-hugo-base-dir' globally.
+    (should (equal
+             (rata-blog--parse-targets
+              ":properties:\n:export_file_name: solo\n:end:\n" dir "note")
+             '(("solo" "/tmp/rata-test-site/content/posts/solo.md" t))))
+    ;; 3. an empty :export_file_name: (what the old capture template wrote)
+    ;; falls back to the note's slug rather than producing ".md", and is
+    ;; flagged NOT-named: ox-hugo will not export it at all, so `rata-blog-status'
+    ;; must say `unnamed' rather than `never' — the latter reads as "run the
+    ;; export again", which cannot work.
+    (should (equal
+             (rata-blog--parse-targets
+              ":properties:\n:export_file_name:\n:end:\n" dir "the-slug")
+             '(("the-slug" "/tmp/rata-test-site/content/posts/the-slug.md" nil))))
+    ;; 4. a note with no export property at all is still placed, so
+    ;; `rata-blog-status' can report it as never exported rather than omit it.
+    (should (equal (rata-blog--parse-targets "#+title: x\n" dir "plain")
+                   '(("plain" "/tmp/rata-test-site/content/posts/plain.md" nil))))
+    ;; 5. two posts in one note both resolve — `rata-blog-export-all' passes
+    ;; ALL-SUBTREES to ox-hugo for exactly this case.
+    (should (equal
+             (mapcar #'car
+                     (rata-blog--parse-targets
+                      (concat ":properties:\n:export_file_name: one\n:end:\n"
+                              ":properties:\n:export_file_name: two\n:end:\n")
+                      dir "note"))
+             '("one" "two")))))
+
+(ert-deftest rata-test-blog-files-requires-org-roam ()
+  "`rata-blog-files' must load org-roam, not gate on whether it is loaded.
+
+Found by running `rata-blog-status' in a session where org-roam had not
+been pulled in yet: the original `(when (fboundp \='org-roam-db-query) ...)'
+guard — copied from `rata-org-roam-agenda-files', which only ever runs from
+advice on `org-agenda' and so is always called with org-roam live —
+returned nil, and the status buffer printed \"No notes tagged :blog:\" while
+the database held ten of them.
+
+That is L-029 again: an absence a reader cannot tell apart from an empty
+result.  A user-facing entry point may not answer a question it did not
+actually ask, so this asserts the shape of the source rather than the
+behaviour, which is identical in the test environment where org-roam is
+always loaded."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "lisp/init-blog.el" user-emacs-directory))
+    (goto-char (point-min))
+    (let ((start (progn (should (re-search-forward "^(defun rata-blog-files ()" nil t))
+                        (match-beginning 0)))
+          (end (progn (should (re-search-forward "^(defun rata-blog--md-path" nil t))
+                      (match-beginning 0))))
+      (let ((body (buffer-substring-no-properties start end)))
+        (should (string-match-p "(require 'org-roam)" body))
+        ;; Match the code pattern, not the bare word: the docstring names
+        ;; `fboundp' to explain why it is wrong here.
+        (should-not (string-match-p "(fboundp '?#?'?org-roam-db-query)" body))
+        (should-not (string-match-p "(when (fboundp" body))))))
+
+(ert-deftest rata-test-blog-unnamed-post-is-not-reported-as-pending ()
+  "A post with an empty :EXPORT_FILE_NAME: must read `unnamed', not `never'.
+
+Found on real data: `20260117021529-blog_post_my_emacs_workflow.org' carries
+the empty property the old capture template wrote.  `rata-blog-status' first
+listed it as `never' next to a plausible target path — but ox-hugo skips a
+subtree whose export name is empty, so no amount of `SPC o b E' would ever
+produce that file.  Reporting a state that implies a working remedy is the
+L-029 shape once more, so the two cases are kept apart."
+  (let* ((rata-hugo-dir "/tmp/rata-test-site/")
+         (rata-blog-section "/posts/")
+         (named (car (rata-blog--parse-targets
+                      ":properties:\n:export_file_name: real-name\n:end:\n"
+                      "/tmp/x/" "slug")))
+         (unnamed (car (rata-blog--parse-targets
+                        ":properties:\n:export_file_name:\n:end:\n"
+                        "/tmp/x/" "slug"))))
+    (should (nth 2 named))
+    (should-not (nth 2 unnamed))
+    ;; No markdown exists for either, so the only thing separating them is the
+    ;; flag — which is the point.
+    (should (eq (rata-blog--target-state "/nonexistent.org" unnamed) 'unnamed))
+    (should (eq (rata-blog--target-state "/nonexistent.org" named) 'never))))
+
+(ert-deftest rata-test-blog-state-classification ()
+  "`rata-blog--state' must distinguish never-exported from stale."
+  (let* ((tmp (make-temp-file "rata-blog-" t))
+         (note (expand-file-name "note.org" tmp))
+         (md (expand-file-name "note.md" tmp)))
+    (unwind-protect
+        (progn
+          (write-region "x" nil note)
+          (should (eq (rata-blog--state note md) 'never))
+          (write-region "y" nil md)
+          (should (eq (rata-blog--state note md) 'exported))
+          ;; Touch the note into the future: an edited note with an old export.
+          (set-file-times note (time-add (current-time) 60))
+          (should (eq (rata-blog--state note md) 'stale)))
+      (delete-directory tmp t))))
 
 ;;; ============================================================
 ;;; Run all tests

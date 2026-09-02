@@ -44,6 +44,11 @@ changed paths.** Override upward freely; overriding downward needs a stated reas
   the repo: `init-org`, `init-present`, `init-dev`, `init-completion`, `init-ui`,
   `init-dashboard`, `init-persp`, `init-llm`, `init-khoj`, `init-irc`, `init-elfeed`,
   `init-lang`, `init-gamedev`, `init-k8s`, `init-ansible`.
+- `feeds.org` — a data file that is also `init-elfeed.el`'s input contract. A renamed
+  tag makes a filter view return zero entries, and dropping the root `:elfeed:` tag
+  hides all 94 feeds; neither raises an error. Guarded by
+  `rata-test-elfeed-*` in `tests/run-tests.el`, which is why the tier is MEDIUM and
+  not HIGH. See L-025.
 - `AGENTS.md`, `CLAUDE.md`, `.are/*`, `.claude/*`, `.gitignore` — instructions and
   packaging. Wrong here means every future session is wrong.
 
@@ -53,7 +58,10 @@ changed paths.** Override upward freely; overriding downward needs a stated reas
   `init-cmake`, `init-terraform`, `init-just`, `init-docker`, `init-markdown`,
   `init-yaml`, `init-jupyter`, `init-helm`, `init-pkgbuild`, `init-casual`,
   `init-snippets`, `init-mcp`).
-- `snippets/`, `feeds.org`, `README.org`, `SPEC.md`, `LICENSE`, `logo.png`.
+- `snippets/`, `README.org`, `SPEC.md`, `LICENSE`, `logo.png`.
+- **Not `feeds.org`.** It looks like a data file, but its org tags are the input
+  contract of `init-elfeed.el` and every way of breaking them is silent — see the
+  MEDIUM entry above and L-025.
 
 ## Escalators — apply on top of the path tier
 

@@ -64,8 +64,12 @@ headless agent with `--permission-mode acceptEdits` and an operator-supplied she
 two checkouts of this repo exist and the docs below point at the stale one (FAIL-0001).
 
 FAIL-0005 is **closed in this checkout** (2026-08-25): `core.hooksPath` is `.githooks`, so
-`just are-verify full` gates every commit here, and `.github/workflows/ci.yml` gates PRs to
-master. Budget ~3 min for a commit. The cause is permanent, though — `core.hooksPath` is
+every commit here is gated, and `.github/workflows/ci.yml` gates PRs to master. The hook
+runs **`just are-verify fast`** (~4 s), not `full` — it loads no packages on purpose, so a
+partially built elpaca cannot block an unrelated commit. Budget seconds for a commit, and
+do **not** read a green hook as module health: run `just are-verify relevant` or `full`
+yourself before pushing anything that could affect startup or load order (FAIL-0012). The
+cause is permanent, though — `core.hooksPath` is
 per-clone and cannot be committed, so a fresh clone starts ungated until someone runs
 `just install-hooks`. `are-audit`'s `hooks-installed` check warns when that is so; read it
 rather than assuming either state.
@@ -187,7 +191,7 @@ init-cmake → init-terraform → init-just → init-docker → init-markdown �
 init-yaml → init-ansible → init-jupyter → init-helm → init-pkgbuild →
 init-casual → init-sql → init-k8s → init-gamedev → init-snippets →
 init-llm → init-claude-loop → init-khoj → init-irc → init-elfeed → init-jira →
-init-persp → init-org →
+init-persp → init-org → init-blog → init-dialogic →
 init-present → init-dashboard
 ```
 
@@ -256,7 +260,54 @@ init-present → init-dashboard
   remote. The three Jira modes are put in **emacs state** via `evil-set-initial-state` —
   upstream does not support evil, and its keymaps live in `tabulated-list-mode` and
   `magit-section-mode` children, which evil shadows. See L-017 in `.are/memory/LESSONS.md`.
-- `init-org.el` — org-agenda with org-super-agenda, org-roam, org-transclusion, ox-hugo
+- `init-org.el` — org-agenda with org-super-agenda, org-roam, org-transclusion. Owns the
+  org-roam capture templates, including `blog-post` (key `b`) — whose `:blog:` filetag and
+  non-empty `:export_file_name:` are a contract with `init-blog.el` and with the
+  `(:name "Blog Posts" :tag "blog")` org-super-agenda group in this same file. Hugo export
+  itself lives in `init-blog.el`.
+- `init-blog.el` — org-roam → Hugo export via `ox-hugo` under `SPC o b`. Posts are org-roam
+  nodes in the flat roam root identified by the `rata-blog-tag` (`:blog:`) filetag, not by
+  directory — the same design as `init-present.el`, and `rata-blog-files`,
+  `rata-blog-add-header` and `rata-blog-export-all` deliberately mirror
+  `rata-reveal-deck-files` / `-add-header` / `-export-all` rather than inventing a second
+  idiom. Three things are load-bearing. **The tag has to be applied as well as queried:**
+  before this module the agenda's "Blog Posts" group and nothing else knew the name
+  `blog`, so it matched nothing and rendered as absence.
+  `rata-test-blog-tag-matches-agenda-group` and
+  `rata-test-blog-capture-template-tags-and-names` now bind both ends (L-029). **`org-hugo-base-dir` is set from `rata-hugo-dir`**, so a post that omits
+  `#+hugo_base_dir:` still lands in the right site while one that sets it still wins —
+  before, path resolution rode entirely on a per-file keyword that two different templates
+  spelled differently. **Preview liveness is `process-live-p`, never the buffer:** hugo
+  exits on a config error and leaves `*hugo-server*` behind, so the old buffer check made
+  `SPC o b p` browse a dead port, and the browser now opens from a process filter watching
+  for hugo's "Web Server is available" line rather than a fixed two-second delay.
+  `rata-blog-status` (`SPC o b s`) reports every post's target markdown as `exported` /
+  `stale` / `never` — the count nobody was computing by hand. `rata-blog--parse-targets` is
+  pure (string in, paths out) so the whole path convention is testable in batch without
+  touching `~/workspace/second-brain/`.
+- `init-dialogic.el` — dialogic formatting for blog posts under `SPC o b d`: a simulated
+  side-character conversation embedded in an otherwise ordinary article (the operator's own
+  definition lives in the `blog post writing tips` org-roam node). Phase 1 is authoring and
+  export only — **no LLM anywhere in the module**, so the workflow survives Ollama being
+  down; generated turns are a later, additive phase, and the cast
+  (`rata-dialogic-characters`) is hand-authored on purpose because it is a voice decision.
+  Source shape is a `#+begin_dialogue` special block holding a `- Speaker :: text`
+  description list. Export is a **parse-tree** filter, not a string filter: ox-hugo already
+  supplies the `<div class="dialogue">` wrapper for any unknown special block, but
+  `org-blackfriday-item` renders a non-nested description list in Blackfriday syntax
+  (`Term\n: description`) and this site renders with goldmark, which has no definition-list
+  extension — those turns would reach the page as literal `Skeptic : ...` text. Rewriting the
+  tree instead of the exported string keeps inline org markup inside a turn (`~code~`, links)
+  going through the normal transcoders. Each generated paragraph carries `:post-blank 1`;
+  without it Markdown reads the whole exchange as one paragraph and every speaker lands in
+  the same `<p>`. `rata-dialogic-audit` (`SPC o b d a`) reports blocks and turns per heading
+  over prose word counts with blocks excluded, because the failure mode of this style is
+  overuse. The `.dialogue` / `.dialogue-who` CSS lives in the Hugo site at
+  `~/workspace/second-brain/hugo/static/css/custom.css` (written 2026-08-31 with operator
+  approval; it shadows the risotto module's placeholder, which `layouts/partials/head.html`
+  already links). That path is off-limits autonomously — the module still cannot restyle its
+  own output without asking, and the per-speaker `--me` / `--skeptic` / `--newcomer` classes
+  are a contract with `rata-dialogic-characters` that nothing checks. See L-027 for the regexp trap this module was built through.
 - `init-present.el` — reveal.js slide export via `org-re-reveal` under `SPC o p`. Decks are org-roam nodes in the flat roam root, identified by the `rata-reveal-deck-tag` (`:presentation:`) filetag rather than by directory. New decks come from the `presentation` org-roam capture template in `init-org.el` (key `r`) rather than a bespoke command; `rata-reveal-add-header` converts an existing note in place, mirroring `rata-toggle-hastodo-filetag`. `rata-reveal-export-all` finds them with an `org-roam-db-query` mirroring `rata-org-roam-agenda-files` in `init-org.el`. HTML output is redirected to `rata-reveal-export-dir` (outside org-roam) by shadowing `org-export-output-file-name`'s PUB-DIR argument, so no generated file lands in the note tree. Two `ox-html` advices make export non-interactive in this config: one suppresses `set-auto-mode` in `org-html-final-function` (it activates `mhtml-mode`, whose submodes trigger treesit-auto), the other binds `treesit-auto-install` to nil around `org-html-fontify-code` (src-block fontification otherwise prompts to install a missing grammar mid-export). Keybindings sit at top level, not in the deferred `use-package :config`, because `:after (ox general)` would leave them dead until the first manual export. reveal.js assets come from a CDN by default; `rata-reveal-install-local` clones a local copy and `rata-reveal-toggle-root` switches between them for offline presenting. Reuses the `simple-httpd` recipe declared in `init-org.el` to serve decks over HTTP.
 
 **Error handling:** `rata-load-module` wraps each require in `condition-case`. Failed modules are logged to `rata--failed-modules` and reported in the `*init-errors*` buffer at startup. With `--debug-init`, errors propagate for full backtraces. Alternatively, use `when (file-exists-p ...)` for optional file loading and provide fallbacks for external dependencies.
@@ -317,7 +368,14 @@ init-present → init-dashboard
 ### Import/Require Patterns
 - Core modules loaded in `init.el` via `(rata-load-module 'init-category)`
 - Package dependencies handled within `use-package` blocks
-- Use `eval-when-compile` for compile-time dependencies
+- Use `eval-when-compile` for compile-time *declarations* — `(defvar some-var)` stubs — and
+  `declare-function` for functions owned by a package that loads later. **Never `require` a
+  package there.** `eval-when-compile` is plain `progn` in interpreted code, and the modules
+  in `lisp/` are loaded as source, so a "compile-time" require runs on every startup; requiring
+  org that early pulls Emacs's built-in Org before elpaca activates the newer one and every org
+  package then warns about a version mismatch. `lisp/init-present.el` is the model. See
+  [`FAIL-0012`](.are/memory/failures/FAIL-0012.md) and L-028. `just batch-strict` (inside
+  `are-verify full`) fails on the resulting startup warnings
 
 ### UI/UX Principles
 - Minimalist: Disable toolbars, scrollbars, menu bars by default

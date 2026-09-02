@@ -80,12 +80,15 @@ if [ "$LEVEL" != "fast" ]; then
 
     run "ert" "the ERT suite against the fully loaded config" -- \
         just test-ert
+
+    run "work-agenda" "the \"w\" agenda's rendered output, over org fixtures" -- \
+        just test-work-agenda
 fi
 
 # --- full -------------------------------------------------------------------------
 if [ "$LEVEL" = "full" ]; then
-    run "batch-startup" "init runs to completion; NOT that modules loaded (see ERT)" -- \
-        just batch
+    run "batch-startup" "init completes with no load-order warning; NOT that modules loaded (ERT)" -- \
+        just batch-strict
 fi
 
 # --- Report -----------------------------------------------------------------------
@@ -123,7 +126,8 @@ echo "NOT TESTED at any level — do not report these as PASS:"
 echo "  integrations   every network service (Ollama, Khoj, Snowflake, GitHub, IRC, feeds)"
 echo "  binaries       lsp servers, formatters, kubectl, hugo, the real claude CLI"
 echo "  gui            interactive behaviour, frames, faces, popups (headless)"
-echo "  operator-data  org-roam / second-brain read-write paths (no fixture)"
+echo "  operator-data  org-roam / second-brain read-write paths. Exception: the \"w\""
+echo "                 agenda is rendered over fixtures by the work-agenda step"
 echo "  daemon         the exec-path-from-shell path gated on (daemonp)"
 if [ "$LEVEL" = "fast" ]; then
     echo "  modules        NOT loaded at this level — 'fast' loads no packages."

@@ -21,7 +21,8 @@ installed. First-ever run is minutes longer because elpaca builds everything.
 | `just batch` | 70 s | `early-init.el` + `init.el` run to completion headlessly without aborting | that any module loaded. `rata-load-module` swallows failures by design, so a module can be entirely broken and `just batch` still exits 0. See [ARCHITECTURE.md](ARCHITECTURE.md) §3 |
 | `just test-ert` | 78 s | **the real check.** Loads the full config, then runs the ERT suite (23 tests at bootstrap): no failed modules, every leader binding is a named `commandp`, no anonymous lambdas bound, no-littering redirects hold, and the claude-loop pure functions behave | nothing that needs a frame, a network, a credential, or a real subprocess. No integration is contacted |
 | `just test-claude-loop` | 3.0 s | the claude-loop **state machine** end to end against a stub CLI under `emacs -Q`: happy path, exit-0 failures, retry-by-resume, exhaustion, wrong-box refusal, timeout + no orphan process, stdout/stderr noise, duplicate task text, wedge detection | the real `claude` CLI, its flags, or its `stream-json` schema. Everything is stubbed |
-| `just test` | ~2.9 min | `lint` + `compile` + `batch` + `test-ert` | **it excludes `test-claude-loop`**, so the largest and only stateful module is outside the gate. Deliberate (the suite runs real processes and timers) but it is a gap. See [FAIL-0004](../memory/failures/FAIL-0004.md) |
+| `just test-work-agenda` | 8 s | the **rendered output** of the `"w"` work agenda: a dated block of `rata-org-work-agenda-span` day headers, items on their own day, the `+work` preset excluding foreign tasks, and a backlog holding only what the calendar cannot show. Loads the full config, then renders over org fixtures in `temporary-file-directory` | the operator's real notes — `rata-org-roam-agenda-files` is stubbed so the second-brain tree stays out. Nothing about faces, alignment or anything needing a frame |
+| `just test` | ~3.0 min | `lint` + `compile` + `batch` + `test-ert` + `test-work-agenda` | **it excludes `test-claude-loop`**, so the largest and only stateful module is outside the gate. Deliberate (the suite runs real processes and timers) but it is a gap. See [FAIL-0004](../memory/failures/FAIL-0004.md) |
 
 ## 2. The gate
 
@@ -41,7 +42,7 @@ neither is carried by a clone: see [FAIL-0005](../memory/failures/FAIL-0005.md).
 | Level | Composition | Time | Use when |
 |---|---|---|---|
 | `fast` | `lint` + `test-claude-loop` + `are-audit` | ~4 s | mid-work; docs; any LOW-risk change; **the session-start hook** |
-| `relevant` | `fast` + `compile` + `test-ert` | ~1.8 min | MEDIUM-risk; any `lisp/` change |
+| `relevant` | `fast` + `compile` + `test-ert` + `test-work-agenda` | ~1.9 min | MEDIUM-risk; any `lisp/` change |
 | `full` | `relevant` + `batch` (i.e. all of `just test`) | ~3 min | HIGH/CRITICAL; startup path; `justfile`; before ending any session that changed Elisp |
 
 `fast` deliberately includes `test-claude-loop`, which `just test` omits: it needs no
@@ -58,7 +59,7 @@ packages, takes 3 s, and covers the CRITICAL area. That inversion is intentional
 | External binaries (`lsp` servers, formatters, `kubectl`, `hugo`, `claude`) | NOT TESTED | not installed in the test environment; deferred loading hides their absence |
 | The real `claude` CLI contract | NOT TESTED | stubbed on purpose |
 | `terraform plan/apply`, `kubel` operations | NOT TESTED **and must stay that way** | see [../rules/SAFETY_RULES.md](../rules/SAFETY_RULES.md) |
-| org-roam / second-brain read-write paths | NOT TESTED | operates on the operator's real notes; no fixture exists |
+| org-roam / second-brain read-write paths | NOT TESTED | operates on the operator's real notes. The one exception is agenda *rendering*: `test-work-agenda` has fixtures for it and stubs the roam file lookup |
 | Package version reproducibility | NOT TESTED | no committed lockfile |
 | Daemon mode (`exec-path-from-shell` path) | NOT TESTED | the one code path gated on `(daemonp)` |
 
@@ -71,5 +72,6 @@ Match the existing structure; do not introduce a framework.
 | A pure function's behaviour | `tests/run-tests.el` as an `ert-deftest` |
 | An invariant about the loaded config (a variable, a hook, a binding) | `tests/run-tests.el` — it has the full config loaded |
 | claude-loop state-machine behaviour | `tests/claude-loop-e2e.el`, as a new numbered section using `rata-e2e--check` |
+| What an `org-agenda-custom-commands` entry actually renders | `tests/work-agenda-render.el` — the structural half (is the block there, is the filter in the global slot) belongs in `tests/run-tests.el` |
 | A textual convention across files | `scripts/lint.sh` |
 | A repo-wide invariant that needs no Emacs (docs drift, map coverage, gitignore traps) | `scripts/are-audit.sh` |
