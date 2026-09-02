@@ -64,8 +64,12 @@ headless agent with `--permission-mode acceptEdits` and an operator-supplied she
 two checkouts of this repo exist and the docs below point at the stale one (FAIL-0001).
 
 FAIL-0005 is **closed in this checkout** (2026-08-25): `core.hooksPath` is `.githooks`, so
-`just are-verify full` gates every commit here, and `.github/workflows/ci.yml` gates PRs to
-master. Budget ~3 min for a commit. The cause is permanent, though — `core.hooksPath` is
+every commit here is gated, and `.github/workflows/ci.yml` gates PRs to master. The hook
+runs **`just are-verify fast`** (~4 s), not `full` — it loads no packages on purpose, so a
+partially built elpaca cannot block an unrelated commit. Budget seconds for a commit, and
+do **not** read a green hook as module health: run `just are-verify relevant` or `full`
+yourself before pushing anything that could affect startup or load order (FAIL-0012). The
+cause is permanent, though — `core.hooksPath` is
 per-clone and cannot be committed, so a fresh clone starts ungated until someone runs
 `just install-hooks`. `are-audit`'s `hooks-installed` check warns when that is so; read it
 rather than assuming either state.
