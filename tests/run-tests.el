@@ -192,7 +192,12 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC o b e" . org-hugo-export-wim-to-md)
     ("SPC o b s" . rata-blog-status)
     ("SPC i o p" . org-id-get-create)
-    ("SPC i o a" . rata-roam-alias-add-to-file))
+    ("SPC i o a" . rata-roam-alias-add-to-file)
+    ;; agent-shell's context senders are not autoloaded upstream, so these
+    ;; resolve only while their symbols stay in init-llm.el's :commands list.
+    ("SPC a i c f" . rata-agent-shell-send-file)
+    ("SPC a i c r" . agent-shell-send-region)
+    ("SPC a i c d" . agent-shell-send-dwim))
   "Leader keys that must resolve immediately after init, with their commands.
 Not exhaustive — a contract for the keys most likely to be broken by the
 failure mode in .are/memory/failures/FAIL-0009.md.  Extend it when a

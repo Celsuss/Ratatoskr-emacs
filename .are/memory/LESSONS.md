@@ -745,3 +745,71 @@ defect, watch it fail, remove it, watch it pass (L-009 / FAIL-0008).
 
 Related: L-011 / FAIL-0009 (silently dead configuration below the failure point), FAIL-0003
 (compile exits 0 regardless), FAIL-0007 (the other repo-hygiene audit check).
+
+## L-031 — In agent-shell, the agent's own CLI is never the thing you launch
+
+Adding Pi to `init-llm.el` looks like a one-line config change and is not, because
+`agent-shell` speaks ACP and no coding-agent CLI in this config speaks ACP itself. Each
+agent is reached through a **separate adapter binary** that the agent's own vendor does not
+ship: `claude-code-acp` for Claude Code, and for Pi the third-party `pi-acp`
+(`bun install -g pi-acp`), which spawns `pi --mode rpc` and bridges it. `pi --help` lists no
+`acp` mode and the pi bundle contains no ACP strings at all; having `pi` on `PATH` therefore
+tells you nothing about whether `SPC a i c p` will start. That is the check to make when a
+new agent is added — is the *adapter* installed, not the agent — and the cheap proof is one
+line of stdio, not a running Emacs:
+
+```sh
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{}}}}' | pi-acp
+```
+
+A `result` with `agentInfo` back means the adapter is wired to the CLI; anything else is a
+missing or mismatched adapter, and no amount of Elisp will fix it. Two related traps found
+while reading the upstream module: `agent-shell-<agent>-environment` **replaces** the child's
+environment rather than extending it unless `agent-shell-make-environment-variables` is given
+`:inherit-env t` (so a naive setting strips `PATH` and the adapter can no longer find the
+agent), and that function is not autoloaded — putting it in a `use-package :custom` form runs
+it before the package loads. Leave the environment nil unless there is a reason not to.
+
+Related: the `install-deps` bullet in `.are/knowledge/INTEGRATIONS.md` §2 does not cover these
+adapters (npm/bun, not pacman), so they are per-machine state no target installs for you.
+
+## L-032 — Grep the package for `(interactive` before writing a command for it
+
+The request was "a keybinding to send the current file to the agent-shell context", which
+reads like a feature and was entirely a *binding* problem. `agent-shell` already implements
+the whole family — `agent-shell-send-file` (visited file, or dired marks, or a project-file
+prompt), `-send-file-to`, `-send-region`, `-send-region-to`, `-send-dwim` — plus the wire
+format: an inserted `@relative/path` mention that becomes an ACP `resource` /
+`resource_link` / `image` block at submit time. Re-implementing that under a `rata-` prefix
+would have duplicated a tested upstream path and drifted from it. The cheap first move on any
+"add a command for package X" task is `grep -nB1 '(interactive' <package>.el`, not a blank
+buffer.
+
+Two traps specific to this package, both of which produce a key that looks bound and does
+nothing:
+
+- **None of the senders carry an `;;;###autoload` cookie.** The symbol does not exist until
+  something else pulls `agent-shell` in, so every bound command must also be listed in the
+  `use-package :commands` form. This is the sibling of L-011/FAIL-0009: there the *key* was
+  unreachable, here the *command* is, and `rata-test-keybindings-all-commandp` catches only
+  the second when the autoload stub is missing. The curated
+  `rata-test--must-be-live-keys` entries added for `SPC a i c f/r/d` pin both ends.
+- **The senders disagree about creating a shell.** `agent-shell-send-file` resolves its
+  target with `:no-create t` and reports "No agent shell buffers available for current
+  project"; `agent-shell-send-dwim` omits the flag and starts one. Bound raw, the file key
+  fails on first use of every session while the dwim key beside it works, which reads as a
+  broken binding rather than a design choice. Hence the one wrapper in the module,
+  `rata-agent-shell-send-file`. Resolve the shell with the autoloaded, documented public
+  `agent-shell-shell-buffer`, not the private `agent-shell--shell-buffer`, and do not sleep
+  after starting: the insert path replays itself on the `prompt-ready` event.
+
+A third thing the one-line stdio probe from L-031 answers for free: the agent decides which
+block it accepts. Pi (pi-acp 0.0.33) returns `embeddedContext: false`, so a file mention
+reaches it as a `resource_link` it has to open itself, never as inlined text — a detail that
+would otherwise be debugged as truncation.
+
+Note the checkout layout while reading: elpaca sources are under `elpaca/sources/`, not
+`elpaca/repos/`, and a grep aimed at the latter reports the package as absent.
+
+Related: L-031 (the adapter, not the CLI, is what you launch), L-011 / FAIL-0009 (dead
+keybindings), FAIL-0012 / L-028 (`declare-function`, never a compile-time `require`).
