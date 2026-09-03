@@ -80,7 +80,8 @@ are missing:
 | =kubectl=           | Kubernetes cluster management (kubel)                       |
 | =docker=            | Docker integration                                          |
 | =hugo=              | Blog export (ox-hugo)                                       |
-| =claude-code-acp=   | agent-shell AI integration (AUR)                            |
+| =claude-agent-acp=  | agent-shell Claude Code integration (npm/bun, not a distro package) |
+| =pi-acp=            | agent-shell Pi integration (npm/bun, not a distro package)  |
 | =claude=            | Claude Code CLI — required by the task loop (=init-claude-loop=) |
 | =jdk-openjdk=       | Java 11+ runtime for the Snowflake JDBC driver (ejc-sql)    |
 | =leiningen=         | Boots the Clojure nREPL ejc-sql drives JDBC through         |
@@ -116,6 +117,10 @@ notes need (they do not work over =file://=).
 Requires =latex= and =dvisvgm= on PATH. On Arch these come from:
 =texlive-binextra texlive-latex texlive-latexrecommended texlive-latexextra
 texlive-plaingeneric= (wrapfig/capt-of from latexextra, ulem from plaingeneric).
+On Debian and Ubuntu the equivalents are =dvisvgm= (its own package — there is no
+=texlive-binextra=) plus =texlive-latex-base texlive-latex-recommended
+texlive-latex-extra texlive-plain-generic=. Both lists are what =just install-deps=
+installs.
 
 *** Fonts
 
@@ -127,22 +132,34 @@ Icons (modeline, dirvish, dashboard, corfu) require *Symbols Nerd Font Mono*:
 
 *** Installing
 
-On Arch Linux everything above is installed by:
+Everything above is installed by:
 
 #+begin_src sh
   just install-deps
 #+end_src
 
-On Debian/Ubuntu, install the core and native-build dependencies with:
+It reads =/etc/os-release= and dispatches on the distro family: =pacman= plus =yay=
+on Arch and derivatives, =apt-get= plus the language toolchains on Debian, Ubuntu
+and derivatives. On a derivative whose =ID_LIKE= names neither, force one:
+=just install-deps-arch= or =just install-deps-debian=. Anything else prints the
+required binaries and exits.
+
+On Debian and Ubuntu, apt handles the libraries, build tooling and TeX; the
+language servers and formatters come from their own ecosystems (=go install=,
+=bun=/=npm=, =rustup=), because apt's are years behind on an LTS. Whatever apt on
+that release cannot provide at all — typically =kubectl=, =hugo= and =terraform= —
+is printed with the command to get it, rather than installed from a repository
+you did not ask to trust.
+
+A dependency list is not an inventory. To see what this machine actually has:
 
 #+begin_src sh
-  sudo apt install build-essential pkg-config enchant-2 libenchant-2-dev \
-      hunspell-en-us cmake libtool-bin ripgrep fd-find
+  just check-deps
 #+end_src
 
-Language servers and formatters on non-Arch systems come from their own
-ecosystems (=npm=, =pip=, =go install=, =rustup=) — install the ones you need for
-the languages you use.
+It resolves each *binary* (not package name — they are different namespaces) and
+prints the path, so you can see which ones came from apt, brew, cargo, bun or
+=~/.local/bin=. A missing binary degrades one feature; it never breaks startup.
 
 ** Getting Started
 
@@ -180,6 +197,9 @@ To install icon fonts and tree-sitter grammars:
 
 ** Commands
 
+The recipes live in =just/*.just=, imported flat by the root =justfile= — every
+target is still =just <name>= with no module prefix.
+
 | Command               | Description                                  |
 |-----------------------+----------------------------------------------|
 | =just run=              | Launch Emacs with this config                |
@@ -198,7 +218,8 @@ To install icon fonts and tree-sitter grammars:
 | =just update=           | Update all packages and regenerate lockfile  |
 | =just install-fonts=    | Install nerd-icons fonts (one-time)          |
 | =just install-grammars= | Install tree-sitter grammars (one-time)      |
-| =just install-deps=     | Install system dependencies (Arch Linux)     |
+| =just install-deps=     | Install system dependencies (detects the OS) |
+| =just check-deps=       | Report which dependency binaries are present |
 | =just install-hooks=    | Install git pre-commit hook (one-time)       |
 | =just are=              | Show the ARE entry point and commands        |
 | =just are-context=      | Generate task context from git + the ARE map |

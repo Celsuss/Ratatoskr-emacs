@@ -133,13 +133,31 @@ fi
 # `just are-verify` delegates to scripts/are-verify.sh, so the justfile recipe body cannot
 # show reachability — the script is where the steps actually are. (The first version of
 # this check grepped the justfile recipe and reported two false failures. L-008.)
+#
+# The recipe list comes from `just --summary', never from a grep of the justfile: the
+# recipes live in just/*.just and are imported flat (D-013), so a grep of one file would
+# find nothing and pass silently. --summary resolves imports and hides private recipes,
+# which is exactly the set the docs and the gates may name. L-034.
 echo "=== Check: gate-covers-tests ==="
-if [ -f justfile ] && [ -f scripts/are-verify.sh ]; then
-    for target in $(grep -oE '^test-[a-z-]+:' justfile | tr -d ':'); do
+just_recipes=""
+if command -v just &>/dev/null && [ -f justfile ]; then
+    if just_recipes="$(just --summary 2>&1 | tr ' ' '\n')"; then
+        :
+    else
+        fail "the justfile does not parse, so no target can be checked: $just_recipes"
+        just_recipes=""
+    fi
+elif [ -f justfile ]; then
+    warn "just is not on PATH — the justfile target checks are skipped"
+fi
+
+if [ -n "$just_recipes" ] && [ -f scripts/are-verify.sh ]; then
+    while IFS= read -r target; do
+        [ -n "$target" ] || continue
         if ! grep -q "just $target\b" scripts/are-verify.sh; then
             fail "justfile target '$target' is not run by scripts/are-verify.sh, so no gate covers it (see FAIL-0004)"
         fi
-    done
+    done < <(printf '%s\n' "$just_recipes" | grep -E '^test-' || true)
 fi
 
 # --- Check: docs-commands --------------------------------------------------------
@@ -149,12 +167,12 @@ fi
 # name is actually reachable. This checks the mechanical half of that: a `just <target>`
 # named in the docs must exist in the justfile.
 echo "=== Check: docs-commands ==="
-if [ -f justfile ]; then
+if [ -n "$just_recipes" ]; then
     for doc in README.org AGENTS.md .are/INDEX.md .are/SYSTEM.md; do
         [ -f "$doc" ] || continue
         while IFS= read -r target; do
             [ -n "$target" ] || continue
-            grep -qE "^${target}( [a-z_]+=?.*)?:" justfile \
+            printf '%s\n' "$just_recipes" | grep -qxF "$target" \
                 || fail "$doc names 'just $target', which is not a target in the justfile"
         # Only code context counts: a backtick/org-verbatim marker, or the start of a
         # line in a shell block. Bare prose has "just the ..." in it, and English is not
@@ -366,6 +384,32 @@ done < <(grep -oE "agent-shell-[a-z-]+acp-command '\(\"[^\"]+\"" lisp/init-llm.e
 # config does pin at least one adapter.
 if [ "$acp_found" -eq 0 ]; then
     warn "could not read any adapter name out of lisp/init-llm.el — the :custom block was reformatted and this check is now blind (L-033)"
+fi
+
+# --- Check: install-deps-covers-this-host ----------------------------------------
+# The reported bug behind D-013/D-014: `install-deps' was pacman-only, so on the Ubuntu
+# laptop the one command that is supposed to make a machine ready did nothing but fail.
+# That is invisible to every other check here — nothing else in the audit knows what
+# distro it is standing on.
+#
+# Warn, never fail: a distro with no branch is a gap to fill, not a broken checkout, and
+# the two per-OS targets can still be forced by name. The family patterns are duplicated
+# from just/deps.just on purpose — what this proves is that THIS host resolves to a target
+# that EXISTS, which catches both a renamed recipe and an unrecognised distro.
+echo "=== Check: install-deps-covers-this-host ==="
+if [ -n "$just_recipes" ]; then
+    audit_os_id="$(just --evaluate os_id 2>/dev/null || echo unknown)"
+    audit_os_like="$(just --evaluate os_like 2>/dev/null || echo '')"
+    case "$audit_os_id $audit_os_like" in
+        *arch*)   expect_target="install-deps-arch" ;;
+        *debian*|*ubuntu*) expect_target="install-deps-debian" ;;
+        *)        expect_target="" ;;
+    esac
+    if [ -z "$expect_target" ]; then
+        warn "install-deps has no branch for this host (ID='$audit_os_id' ID_LIKE='$audit_os_like'); it will print the binary list and exit 1 (D-013)"
+    elif ! printf '%s\n' "$just_recipes" | grep -qxF "$expect_target"; then
+        warn "install-deps would dispatch to '$expect_target' on this host, but no such target exists — the recipe was renamed or its import dropped (D-013)"
+    fi
 fi
 
 # --- Check: context-freshness ----------------------------------------------------

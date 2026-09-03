@@ -78,6 +78,7 @@ that can actually go wrong in an Emacs configuration are:
 | scripts/lint.sh | verification | HIGH | fast | knowledge/TESTING_STRATEGY.md |
 | scripts/are-*.sh | verification,are | HIGH | fast | SYSTEM.md |
 | justfile | verification,tooling | HIGH | full | knowledge/TESTING_STRATEGY.md |
+| just/*.just | verification,tooling | HIGH | full | knowledge/TESTING_STRATEGY.md |
 | .githooks/* | verification | HIGH | fast | knowledge/TESTING_STRATEGY.md |
 | .claude/* | verification,tooling | MEDIUM | fast | SYSTEM.md |
 | .are/* | are | MEDIUM | fast | SYSTEM.md |

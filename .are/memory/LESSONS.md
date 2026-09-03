@@ -820,6 +820,10 @@ keybindings), FAIL-0012 / L-028 (`declare-function`, never a compile-time `requi
 Three separate things had to be true for `SPC a i c c` to fail on the Ubuntu laptop while
 working on Arch, and each is worth carrying forward on its own (FAIL-0014).
 
+*(Fixed 2026-09-03: `install-deps` now dispatches on `/etc/os-release`, and `just check-deps`
+answers the "what does this host actually have" question in one command. The lesson below is
+kept as written, because the reasoning is what generalises. See D-013, D-014, L-034.)*
+
 **An Arch-only install path means "absent" everywhere else, silently.** `justfile`
 `install-deps` is `pacman` plus `yay`, and `.are/knowledge/INTEGRATIONS.md` says plainly it
 is never run on this host. So its `aur_pkgs=(claude-code-acp ...)` line is not a statement
@@ -882,3 +886,44 @@ Related: L-031 (the adapter, not the CLI, is what launches; the one-line stdio p
 L-032 (the senders and their autoload cookies), L-010 / FAIL-0005 (print real state rather
 than asserting it), L-011 / FAIL-0009 and L-026 / FAIL-0011 (the suite green on a contract
 one level shallower than the defect).
+
+## L-034 — A gate that greps a file's layout is coupled to that layout, and fails open when it changes
+
+Splitting the justfile into `just/*.just` (D-013) was a five-minute mechanical move. The
+part that could actually have broken something was in `scripts/are-audit.sh`, which had two
+checks reading the justfile as *text*:
+
+```sh
+for target in $(grep -oE '^test-[a-z-]+:' justfile | tr -d ':'); do   # gate-covers-tests
+grep -qE "^${target}( [a-z_]+=?.*)?:" justfile                        # docs-commands
+```
+
+After the split, `justfile` contains seven `import` lines and no recipes. The first check
+would iterate an empty list and **pass in silence** — the FAIL-0004 gate ("a test target no
+gate runs is decoration") quietly covering nothing. The second would fail loudly on all 27
+`just <target>` strings the docs name. One fails open, one fails closed; the first is much
+worse, and neither would have been noticed by running the audit and seeing green.
+
+Both now read `just --summary`, which resolves imports, excludes `[private]` recipes, and is
+the same list `just --list` shows the operator. The check is asking just what its targets
+are instead of guessing from a regexp — and that is available for any tool with an
+introspection command (`git config --list`, `cargo metadata`, `emacs --batch --eval`). Prefer
+it over a grep of the file, always, and note that this made the check *shorter*.
+
+Two details worth carrying:
+
+- **Verify a rewritten check by breaking it on purpose.** Commenting out one `import` line
+  and re-running the audit produced exactly the two expected FAILs (`just repomix`,
+  `just install-repomix`). A check rewritten and observed only in the passing state has not
+  been tested — it has been watched not firing, which is what it also does when it is broken.
+- **`just --summary` needs the recipe list to parse.** A justfile that does not parse now
+  fails the audit with the parse error, instead of a check silently finding no targets.
+  Fail loudly on the tool being unusable; that is not the same as the check passing.
+
+The generalisation beyond just: any gate whose input is a file's *shape* rather than a
+tool's *answer* has a silent-pass mode that arrives the day someone reorganises the file —
+and reorganising the file is exactly when nobody is thinking about the gate.
+
+Related: L-008 (the first version of `gate-covers-tests` grepped a recipe body and reported
+two false failures — same root cause, opposite symptom), L-010 (print real state rather than
+asserting it), D-013 (why `import`, not `mod`), FAIL-0004 (the gate this protects).

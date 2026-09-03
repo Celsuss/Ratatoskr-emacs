@@ -1,7 +1,9 @@
 # Testing strategy — what each command actually proves
 
-Source: `justfile`, `scripts/lint.sh`, `tests/run-tests.el`, `tests/claude-loop-e2e.el`,
-plus observed output of every command. Confidence: HIGH.
+Source: `justfile` and `just/*.just` (the recipes are imported flat — `just --summary` is
+the authoritative target list, never a grep of one file; see D-013 and L-034),
+`scripts/lint.sh`, `tests/run-tests.el`, `tests/claude-loop-e2e.el`, plus observed output of
+every command. Confidence: HIGH.
 
 The point of this page is the **right-hand column**. This project has decent tests; the
 danger is over-reading them. Two of the five existing targets pass while genuinely broken

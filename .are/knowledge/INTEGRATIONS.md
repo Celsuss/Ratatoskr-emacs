@@ -15,7 +15,7 @@ credentials and a homelab.
 | Service | Endpoint | Used by | Auth | Notes |
 |---|---|---|---|---|
 | Anthropic API, via the `claude` CLI | CLI-managed | `init-claude-loop.el` | the CLI's own login | metered spend; see [CLAUDE_LOOP.md](CLAUDE_LOOP.md) |
-| Claude Code over ACP | `claude-agent-acp` binary | `init-llm.el` (`agent-shell`) | web login (`authMethods: []` in the handshake, so no key in this repo) | `@agentclientprotocol/claude-agent-acp` 0.73.0, `bun install -g`; installed on this host 2026-09-03 as `~/.bun/bin/claude-agent-acp`. Renamed from `claude-code-acp` (`@zed-industries`, dead since 2026-03) — FAIL-0014. `justfile` `aur_pkgs` still names the old one, so a fresh Arch clone gets the abandoned adapter |
+| Claude Code over ACP | `claude-agent-acp` binary | `init-llm.el` (`agent-shell`) | web login (`authMethods: []` in the handshake, so no key in this repo) | `@agentclientprotocol/claude-agent-acp` 0.73.0, `bun install -g`; installed on this host 2026-09-03 as `~/.bun/bin/claude-agent-acp`. Renamed from `claude-code-acp` (`@zed-industries`, dead since 2026-03) — FAIL-0014. `install-deps` no longer names the old one: the AUR entry is gone and both adapters come from the shared `_deps-acp` recipe (`just/deps.just`) on every distro |
 | Pi coding agent over ACP | `pi-acp` binary, which spawns `pi --mode rpc` | `init-llm.el` (`agent-shell`) | pi's own provider config (`pi auth check --provider <p>`); no key in this repo | `pi-acp` is a *separate* npm package from `pi` (`bun install -g pi-acp`, needs pi >= 0.80.4). Installed on this host: `~/.bun/bin/{pi,pi-acp}`. Both agents work here as of 2026-09-03; before that only Pi did (FAIL-0014). `pi-acp` keeps nested `@agentclientprotocol/sdk@0.26.0` and `zod@3.25.76` because the Claude adapter hoisted 1.4.0 and zod 4 to the top of `~/node_modules` — check that nesting survives any reinstall of either |
 | Ollama (local models) | `localhost:11434` | `init-llm.el` (`gptel`, `ellama`, `aidermacs`) | none | local only; models `deepseek-coder`, `mistral`, `nomic-embed-text` |
 | Khoj (self-hosted) | `http://khoj.homelab.local` | `init-khoj.el` | none configured | **indexes `~/workspace/second-brain/org-roam/`** — sends the operator's notes to the homelab host |
@@ -70,9 +70,17 @@ identical; the two agents are not.
 
 ## 2. External binaries
 
-Assumed on `PATH`, declared in `justfile install-deps` (Arch-only, never run on this host):
+Assumed on `PATH`, declared in `install-deps`, which is no longer Arch-only: it reads
+`/etc/os-release` and dispatches to `just/deps-arch.just` (pacman + yay) or
+`just/deps-debian.just` (apt-get + `go install` / `bun` / `rustup`). Both paths remain a
+statement about what *should* be present. **`just check-deps` is the only statement about
+this host** — it resolves each binary and prints the path, which is what would have caught
+FAIL-0014 in one command:
 
-- **Core:** `git`, `ripgrep`, `fd`, `enchant` (jinx spellcheck), `shfmt`, `editorconfig`
+- **Core:** `git`, `ripgrep`, `fd`, `enchant` (jinx spellcheck), `shfmt`, `editorconfig`.
+  Debian ships `fd-find` as the binary `fdfind` and `python3-pytest` as `pytest-3`;
+  `install-deps-debian` symlinks both into `~/.local/bin` under the names Emacs calls,
+  because a package installed under a name nothing calls is a missing dependency
 - **Language servers:** `pyright`, `gopls`, `rust-analyzer` (rustup nightly), `terraform-ls`
 - **Formatters:** `black`, `prettier` (apheleia drives these; lsp formatting is disabled)
 - **Tools:** `kubectl` (kubel), `docker`, `hugo`, `delve` (dap-go), `pytest`, `go-tools`, `gomodifytags`
@@ -81,9 +89,11 @@ Assumed on `PATH`, declared in `justfile install-deps` (Arch-only, never run on 
 - **Agents:** `claude` (claude-loop), `claude-agent-acp` and `pi-acp` (agent-shell). Both
   ACP adapters belong to npm/bun, not pacman, and both are installed globally with bun on
   this host so they land next to `pi` on `PATH` rather than under an nvm-versioned npm
-  prefix. Note `install-deps` still names the *old* Claude adapter in `aur_pkgs` (FAIL-0014,
-  left open by operator decision), so the claim that neither adapter is in `install-deps` is
-  false until that line moves — read `justfile:104`, not this sentence.
+  prefix. Both are now installed by `install-deps` on every distro through the shared
+  private `_deps-acp` recipe in `just/deps.just` — never as a distro package, and **only
+  when the binary is missing**, because the two adapters disagree about
+  `@agentclientprotocol/sdk` and zod versions and a working pair depends on how npm/bun
+  nested them (§1). The abandoned `claude-code-acp` AUR entry is gone (FAIL-0014 closed).
 
 A missing binary degrades one feature; it does not break startup, because every consumer
 is deferred. `just batch` and `just test-ert` therefore pass with all of them absent —

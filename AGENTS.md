@@ -77,6 +77,15 @@ rather than assuming either state.
 ## Commands
 
 ### Just Commands (Preferred)
+
+The recipes live in `just/*.just` (`emacs`, `test`, `are`, `deps`, `deps-arch`,
+`deps-debian`, `tools`), imported **flat** by the root `justfile`. Every target is
+still `just <name>` with no module prefix — `import` was chosen over `mod` for exactly
+that reason (D-013), because these invocation strings are named by README.org, this
+file, `.githooks/pre-commit`, `scripts/are-verify.sh` and CI. Anything that needs the
+target list must read `just --summary`, never grep the justfile: `scripts/are-audit.sh`
+did, and a grep of one file would now check nothing and pass (L-034).
+
 ```bash
 # Run with this config
 just run
@@ -116,6 +125,17 @@ just todos
 
 # Install git pre-commit hook (one-time)
 just install-hooks
+
+# Install system dependencies. Dispatches on /etc/os-release: pacman+yay for the
+# Arch family, apt-get + language toolchains for the Debian family. Force one with
+# `just install-deps-arch' / `just install-deps-debian' on an odd derivative.
+just install-deps
+
+# Report which dependency BINARIES this host actually has, with resolved paths.
+# The dependency lists in install-deps are statements about what should be present;
+# this is the only one about this machine (L-033, FAIL-0014). Informational: always
+# exits 0, and deliberately not wired into are-verify.
+just check-deps
 ```
 
 ### Emacs Commands (Manual)

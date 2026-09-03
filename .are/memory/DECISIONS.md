@@ -253,3 +253,58 @@ The same commit moved the six Snowflake `defvar`s out of `lisp/init-sql.el`, whi
 building a URI from nils that would fail much later inside a Leiningen nREPL boot. The git
 history still contains the values; erasing that is a separate, HIGH-risk job that has not been
 approved.
+
+## D-013 — The justfile is split with `import`, not `mod`: target names are a public API
+
+**2026-09-03.**
+
+The justfile had grown to ~300 lines mixing five unrelated concerns, and `install-deps`
+assumed pacman on a machine that runs apt. Both were fixed at once: the recipes moved into
+`just/*.just`, and `install-deps` became a dispatcher on `/etc/os-release`.
+
+just offers two ways to split a file, and they are not interchangeable:
+
+| | `import 'just/x.just'` | `mod x 'just/x.just'` |
+|---|---|---|
+| Namespace | flattened into the root | prefixed |
+| Invocation | `just lint` | `just x::lint` |
+| Root variables | visible in the imported recipes | not shared |
+
+`mod` is the better-isolated design in the abstract and is wrong here. Every target name in
+this repo is referenced from outside the justfile: `README.org`, `AGENTS.md`,
+`.githooks/pre-commit`, `scripts/are-verify.sh`, `.github/workflows/ci.yml`, and the
+operator's habits. `mod` would rename all 30 of them in one commit, for no gain — the
+concerns are separated by *file* either way, which is the whole of what was asked for.
+
+The split's own regression test is `just --summary`, diffed against the pre-split output:
+30 recipes before, 33 after, the three new names being `check-deps`, `install-deps-arch`
+and `install-deps-debian`. Nothing else moved. That diff is the proof the split changed
+nothing, and it is worth re-running after any future move.
+
+Two consequences to keep in mind:
+
+- **Cross-file dependencies resolve normally.** `test: lint compile batch …` lives in
+  `just/test.just` while `compile` and `batch` are in `just/emacs.just`. Flat means flat.
+- **Root variables are shared, so they stay in the root.** `emacs_bin`, `init_dir`,
+  `os_id`, `os_like` and the `trash_*` lists are defined once in `justfile` and are visible
+  inside every imported recipe.
+
+## D-014 — `install-deps` never adds a package repository or pipes a script into a shell
+
+**2026-09-03.**
+
+`install-deps-debian` cannot install `kubectl`, `hugo` or `terraform` on Ubuntu 22.04 from
+apt — the first two have no candidate at all, and `terraform` only resolves on a machine
+where someone already added HashiCorp's repository. The obvious fixes are to `add-apt-repository`,
+drop a keyring into `/etc/apt/`, `snap install`, or `curl https://… | sh` (which is what
+rustup's own documented install is).
+
+None of those happen inside a recipe. They change *what the machine trusts*, and that is a
+decision with a blast radius beyond this config — it is the same class of act as the entries
+in `.are/rules/SAFETY_RULES.md` §2, even though a package repository is not literally listed
+there. The recipe prints the exact command for each and exits successfully having done
+everything else.
+
+The corollary is that `install-deps` finishing cleanly does **not** mean every dependency is
+present, on either distro. That is what `just check-deps` is for, and why it reports the
+resolved path of each binary rather than a tick.
