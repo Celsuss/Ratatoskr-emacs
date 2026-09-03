@@ -340,6 +340,34 @@ if hits="$(git ls-files -z -- '*.el' '*.sh' '*.md' '*.org' '*.yml' '*.yaml' 'jus
     fi
 fi
 
+# --- Check: acp-adapters-on-path -------------------------------------------------
+# L-033: agent-shell spawns an ACP *adapter* binary, never the agent CLI itself, and
+# no adapter arrives from pacman, elpaca or anything in this repo -- they are npm/bun
+# installs. A missing one is invisible until the leader key is pressed: the whole
+# suite stays green because nothing in tests/ execs the adapter. Cost: the Claude
+# adapter was only ever installed by `install-deps' aur_pkgs, which is Arch-only, so
+# `SPC a i c c' had never worked on the Ubuntu host (FAIL-0014).
+#
+# Warn, never fail. A machine that does not use one of the agents is not broken, and
+# this check must keep working with no Emacs, no packages and no network. The names
+# are read out of the config rather than hardcoded so this cannot drift from
+# init-llm.el; `rata-test-acp-adapter-commands-match-upstream' ties that config to
+# agent-shell's own defaults, so reading the config transitively covers both.
+echo "=== Check: acp-adapters-on-path ==="
+acp_found=0
+while read -r adapter; do
+    [ -n "$adapter" ] || continue
+    acp_found=$((acp_found + 1))
+    command -v "$adapter" >/dev/null 2>&1 \
+        || warn "agent-shell adapter '$adapter' is not on PATH, so that agent's shell cannot start (lisp/init-llm.el). Install it with bun/npm (L-033)"
+done < <(grep -oE "agent-shell-[a-z-]+acp-command '\(\"[^\"]+\"" lisp/init-llm.el 2>/dev/null \
+             | grep -oE '"[^"]+' | tr -d '"' || true)
+# Extracting nothing would make the loop above pass for the wrong reason, and the
+# config does pin at least one adapter.
+if [ "$acp_found" -eq 0 ]; then
+    warn "could not read any adapter name out of lisp/init-llm.el — the :custom block was reformatted and this check is now blind (L-033)"
+fi
+
 # --- Check: context-freshness ----------------------------------------------------
 echo "=== Check: context-freshness ==="
 ctx=".are/generated/CURRENT_CONTEXT.md"

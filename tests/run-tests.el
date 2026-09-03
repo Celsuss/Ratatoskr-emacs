@@ -1519,6 +1519,54 @@ L-029 shape once more, so the two cases are kept apart."
       (delete-directory tmp t))))
 
 ;;; ============================================================
+;;; Test — agent-shell ACP adapter pins (lisp/init-llm.el)
+;;; ============================================================
+
+(defvar rata-test--acp-adapter-options
+  '(agent-shell-anthropic-claude-acp-command
+    agent-shell-pi-acp-command)
+  "agent-shell options `init-llm.el' pins in its :custom block.
+Each names a bare adapter executable.  The pin exists so that a rename
+shows up in a diff, which only helps if something checks that the pin and
+upstream still agree.  Add a row when the config pins another agent's
+adapter.")
+
+(ert-deftest rata-test-acp-adapter-commands-match-upstream ()
+  "Pinned adapter commands must equal agent-shell's own standard values.
+
+Regression test for .are/memory/failures/FAIL-0014.md.  Upstream renamed
+the Claude adapter `claude-code-acp' -> `claude-agent-acp'; the pin in
+`init-llm.el' kept the dead name and `SPC a i c c' failed with
+\"Executable not found\" while the whole suite stayed green -- the adapter
+is a binary on `exec-path', so batch mode had nothing to notice.
+
+`use-package' :custom sets the value before the package declares the
+`defcustom', but `custom-declare-variable' records `standard-value'
+regardless, so that property is upstream's default rather than the pin.
+
+A failure here means upstream moved: install the new adapter and update
+the pin.  Do not just edit the expected value."
+  (require 'agent-shell-anthropic)
+  (require 'agent-shell-pi)
+  (let (failures)
+    (dolist (option rata-test--acp-adapter-options)
+      (let ((standard (eval (car (get option 'standard-value)) t))
+            (pinned (symbol-value option)))
+        ;; A nil standard value would make every comparison below pass for the
+        ;; wrong reason, so treat it as the failure it is.
+        (unless (and standard (stringp (car standard)))
+          (push (format "%s has no usable upstream standard-value (%S)"
+                        option standard)
+                failures))
+        (unless (equal pinned standard)
+          (push (format "%s is pinned to %S but agent-shell now defaults to %S"
+                        option pinned standard)
+                failures))))
+    (when failures
+      (ert-fail (concat "ACP adapter pins have drifted from upstream:\n"
+                        (mapconcat #'identity (nreverse failures) "\n"))))))
+
+;;; ============================================================
 ;;; Run all tests
 ;;; ============================================================
 

@@ -18,6 +18,7 @@ Add a row here whenever you add a record — the record is the detail, this is t
 | [FAIL-0011](failures/FAIL-0011.md) | MEDIUM | configuration, verification-gap | `init-elfeed.el`, `feeds.org` | Elfeed stamps a feed's tags onto an entry at fetch time, so the tag-axis rework left 22 of 36 views matching zero entries while every tag-contract test stayed green | introduced by `a037bab` | FIXED | `rata-test-elfeed-retag-wired` |
 | [FAIL-0012](failures/FAIL-0012.md) | MEDIUM | configuration, verification-gap, self-inflicted | `init-dialogic.el`, `are-verify.sh`, `justfile` `batch` | `eval-when-compile` is `progn` in interpreted code, so a compile-time `(require 'org)` loaded built-in Org before elpaca activated the newer one; four version-mismatch warnings on every interactive start while `are-verify full` reported PASS on batch-startup | introduced by `a488d5c` | FIXED | `just batch-strict` (reads startup output, not just exit code) |
 | [FAIL-0013](failures/FAIL-0013.md) | MEDIUM | repo-hygiene, verification-gap | `init-org.el`, `scripts/are-audit.sh` | A merge conflict marker was committed; it parses as two ordinary Elisp symbols and sits after `provide`, so lint, compile, the reader-based keybinding tests and `featurep` all stayed green | introduced by `b510337` | FIXED | `are-audit` check `no-conflict-markers` |
+| [FAIL-0014](failures/FAIL-0014.md) | MEDIUM | configuration, environment-drift, verification-gap | `init-llm.el`, `justfile` `install-deps`, `.are/knowledge/INTEGRATIONS.md` | The Claude ACP adapter was pinned to `claude-code-acp`, a name upstream abandoned five months earlier, and installed only via Arch-only `aur_pkgs` — so `SPC a i c c` had never worked on the Ubuntu host while the key itself resolved and every gate passed; an unrelated npm package of the same name (bin `cc-acp`) made `npm ls -g` look correct | pre-existing | FIXED | `rata-test-acp-adapter-commands-match-upstream`; `are-audit` check `acp-adapters-on-path` (warn) |
 
 ## Patterns visible across these records
 
@@ -34,6 +35,13 @@ weak was the machinery that would tell you if it stopped being so.
   FAIL-0002 was cosmetic; FAIL-0009 is not — it left 86 leader keys dead in the running
   editor, and it is the first record where the *tests themselves* certified the broken thing
   as correct (see [LESSONS.md](LESSONS.md) L-011).
+- **FAIL-0014** is the third, and it fails one level lower than either. The suite was green
+  on a *correct* contract — `rata-test-keybindings-live-after-init` asserts `SPC a i c c`
+  resolves to `agent-shell-anthropic-start-claude-code`, and it did. The command was live;
+  only the external binary it spawns did not exist, and nothing in `tests/` execs an adapter.
+  Worse, the knowledge base already recorded "not present on this Ubuntu host": a
+  known-missing dependency had been written down as a settled property of the machine rather
+  than a defect with a fix. See [LESSONS.md](LESSONS.md) L-033.
 - **FAIL-0011** is the second such record, and the sharper one: the tests were not merely
   silent, they were *green on the right contract*. Both `feeds.org` and `init-elfeed.el`
   were correct; the stale copy of the tags lived in a third place neither file mentions

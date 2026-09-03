@@ -751,7 +751,8 @@ Related: L-011 / FAIL-0009 (silently dead configuration below the failure point)
 Adding Pi to `init-llm.el` looks like a one-line config change and is not, because
 `agent-shell` speaks ACP and no coding-agent CLI in this config speaks ACP itself. Each
 agent is reached through a **separate adapter binary** that the agent's own vendor does not
-ship: `claude-code-acp` for Claude Code, and for Pi the third-party `pi-acp`
+ship: `claude-code-acp` for Claude Code (**renamed — see L-033**; the current adapter is
+`claude-agent-acp`, from `@agentclientprotocol/claude-agent-acp`), and for Pi the third-party `pi-acp`
 (`bun install -g pi-acp`), which spawns `pi --mode rpc` and bridges it. `pi --help` lists no
 `acp` mode and the pi bundle contains no ACP strings at all; having `pi` on `PATH` therefore
 tells you nothing about whether `SPC a i c p` will start. That is the check to make when a
@@ -813,3 +814,71 @@ Note the checkout layout while reading: elpaca sources are under `elpaca/sources
 
 Related: L-031 (the adapter, not the CLI, is what you launch), L-011 / FAIL-0009 (dead
 keybindings), FAIL-0012 / L-028 (`declare-function`, never a compile-time `require`).
+
+## L-033 — A dependency installed only by `install-deps` is not installed, and a pinned binary name rots
+
+Three separate things had to be true for `SPC a i c c` to fail on the Ubuntu laptop while
+working on Arch, and each is worth carrying forward on its own (FAIL-0014).
+
+**An Arch-only install path means "absent" everywhere else, silently.** `justfile`
+`install-deps` is `pacman` plus `yay`, and `.are/knowledge/INTEGRATIONS.md` says plainly it
+is never run on this host. So its `aur_pkgs=(claude-code-acp ...)` line is not a statement
+that the adapter is present here — it is a statement about a *different machine*. Reading a
+dependency list as an inventory is the mistake. The only claim about this host that means
+anything is `command -v`.
+
+**`npm ls -g` naming a package is not evidence the executable exists.** `claude-code-acp@0.1.1`
+was installed globally and is an unrelated third party's package whose `bin` is `cc-acp`:
+
+```sh
+$ npm view claude-code-acp version bin
+version = '0.1.1'
+bin = { 'cc-acp': 'dist/index.js' }
+```
+
+So `npm ls -g` showed the exact string from the error message while `which` found nothing.
+For an npm/bun dependency, check the *bin name*, not the package name — they are unrelated
+namespaces, and a plausible package name is not a reserved one.
+
+**Pinning a third-party binary name to "make a rename visible" only works if something
+compares the pin to upstream.** `init-llm.el` spelled out
+`(agent-shell-anthropic-claude-acp-command '("claude-code-acp"))` with a comment saying the
+adapter name is the one thing that breaks when upstream renames it. Upstream then renamed it
+to `claude-agent-acp` — and the pin **suppressed the new default rather than surfacing the
+change**. Had the option simply been left at its default, the config would have healed itself.
+A pin that duplicates an upstream default is a fork with no owner: it is only defensible with
+a check beside it, and `rata-test-acp-adapter-commands-match-upstream` is that check —
+`(eval (car (get option 'standard-value)) t)` yields upstream's default even after
+`use-package :custom` has overridden the value, because `custom-declare-variable` records
+`standard-value` regardless of whether the variable was already bound. Verified in isolation:
+
+```sh
+$ emacs -Q --batch --eval '(progn (require (quote cus-edit))
+    (customize-set-variable (quote probe) (quote ("stale")))
+    (eval (quote (defcustom probe (quote ("live")) "d" :type (quote (repeat string)))) t)
+    (princ (format "%S / %S" probe (eval (car (get (quote probe) (quote standard-value))) t))))'
+("stale") / ("live")
+```
+
+The generalisation: **when this config pins a value that a package also defaults, pin it *and*
+assert it still agrees.** Otherwise prefer the default.
+
+The sharpest part of this record is not any of the three, though. The knowledge base already
+had it right: `.are/knowledge/INTEGRATIONS.md` said "not present on this Ubuntu host" and
+"`SPC a i c p` works here and `SPC a i c c` does not". A known-missing dependency had been
+written down as a settled property of the host instead of a defect with a fix, and nothing
+turned it back into a signal. Hence `are-audit`'s `acp-adapters-on-path` — a warn-only
+check that re-derives the fact every session from `command -v` rather than trusting prose,
+in the same spirit as `hooks-installed` (L-010): print real state, do not assert it.
+
+One shape to reuse when adding an agent: an install can fix one agent and break another.
+The new adapter pins `@agentclientprotocol/sdk` at exactly `1.4.0` and `zod@^4`; `pi-acp`
+needs `^0.26.0` and `zod@^3.25`. Check the resolved tree after installing
+(`grep '"version"' ~/node_modules/.../package.json`, and look for nested copies) rather than
+assuming the package manager nested them — bun did here, so both agents still handshake, but
+that was the live risk, not a hypothetical one.
+
+Related: L-031 (the adapter, not the CLI, is what launches; the one-line stdio probe),
+L-032 (the senders and their autoload cookies), L-010 / FAIL-0005 (print real state rather
+than asserting it), L-011 / FAIL-0009 and L-026 / FAIL-0011 (the suite green on a contract
+one level shallower than the defect).

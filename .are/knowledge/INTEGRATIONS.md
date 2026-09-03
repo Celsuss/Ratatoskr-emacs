@@ -15,8 +15,8 @@ credentials and a homelab.
 | Service | Endpoint | Used by | Auth | Notes |
 |---|---|---|---|---|
 | Anthropic API, via the `claude` CLI | CLI-managed | `init-claude-loop.el` | the CLI's own login | metered spend; see [CLAUDE_LOOP.md](CLAUDE_LOOP.md) |
-| Claude Code over ACP | `claude-code-acp` binary | `init-llm.el` (`agent-shell`) | web login | AUR package on Arch; not present on this Ubuntu host |
-| Pi coding agent over ACP | `pi-acp` binary, which spawns `pi --mode rpc` | `init-llm.el` (`agent-shell`) | pi's own provider config (`pi auth check --provider <p>`); no key in this repo | `pi-acp` is a *separate* npm package from `pi` (`bun install -g pi-acp`, needs pi >= 0.80.4). Installed on this host: `~/.bun/bin/{pi,pi-acp}`. Unlike `claude-code-acp` this one is present, so `SPC a i c p` works here and `SPC a i c c` does not |
+| Claude Code over ACP | `claude-agent-acp` binary | `init-llm.el` (`agent-shell`) | web login (`authMethods: []` in the handshake, so no key in this repo) | `@agentclientprotocol/claude-agent-acp` 0.73.0, `bun install -g`; installed on this host 2026-09-03 as `~/.bun/bin/claude-agent-acp`. Renamed from `claude-code-acp` (`@zed-industries`, dead since 2026-03) — FAIL-0014. `justfile` `aur_pkgs` still names the old one, so a fresh Arch clone gets the abandoned adapter |
+| Pi coding agent over ACP | `pi-acp` binary, which spawns `pi --mode rpc` | `init-llm.el` (`agent-shell`) | pi's own provider config (`pi auth check --provider <p>`); no key in this repo | `pi-acp` is a *separate* npm package from `pi` (`bun install -g pi-acp`, needs pi >= 0.80.4). Installed on this host: `~/.bun/bin/{pi,pi-acp}`. Both agents work here as of 2026-09-03; before that only Pi did (FAIL-0014). `pi-acp` keeps nested `@agentclientprotocol/sdk@0.26.0` and `zod@3.25.76` because the Claude adapter hoisted 1.4.0 and zod 4 to the top of `~/node_modules` — check that nesting survives any reinstall of either |
 | Ollama (local models) | `localhost:11434` | `init-llm.el` (`gptel`, `ellama`, `aidermacs`) | none | local only; models `deepseek-coder`, `mistral`, `nomic-embed-text` |
 | Khoj (self-hosted) | `http://khoj.homelab.local` | `init-khoj.el` | none configured | **indexes `~/workspace/second-brain/org-roam/`** — sends the operator's notes to the homelab host |
 | Snowflake | `<rata-sql-snowflake-account>.snowflakecomputing.com` over JDBC, set in `local.el` | `init-sql.el` | SSO, `authenticator=externalbrowser` | corporate. nil in the tracked sources since D-012, so `SPC a d s` refuses to build a URI until `local.el` exists; see [SECRETS_AND_SENSITIVE_DATA.md](SECRETS_AND_SENSITIVE_DATA.md) |
@@ -63,8 +63,10 @@ Which block you get is the *agent's* choice, and Pi's answer is verified here: i
 embeddedContext: false}` (pi-acp 0.0.33, probed 2026-09-02). So a file sent to Pi arrives as
 a `resource_link` — a pointer it must then read with its own fs tools — never as inlined
 text, whatever the file's size. Do not debug that as a truncation or a size-limit problem;
-re-probe the capability. Claude Code's answer is unknown on this host because
-`claude-code-acp` is not installed.
+re-probe the capability. Claude Code's answer is the opposite: `claude-agent-acp` 0.73.0 advertises
+`promptCapabilities` `{image: true, embeddedContext: true}` (probed 2026-09-03), so the same
+file mention reaches Claude Code as inlined text and Pi as a pointer. The senders are
+identical; the two agents are not.
 
 ## 2. External binaries
 
@@ -76,10 +78,12 @@ Assumed on `PATH`, declared in `justfile install-deps` (Arch-only, never run on 
 - **Tools:** `kubectl` (kubel), `docker`, `hugo`, `delve` (dap-go), `pytest`, `go-tools`, `gomodifytags`
 - **SQL:** `jdk-openjdk`, `leiningen` — ejc-sql drives JDBC through a Clojure nREPL
 - **LaTeX:** `texlive-*` for org math preview (`dvisvgm`)
-- **Agents:** `claude` (claude-loop), `claude-code-acp` and `pi-acp` (agent-shell). The two
-  ACP adapters are *not* in `install-deps` — they come from npm/bun, not pacman, and
-  `pi-acp` is installed globally with bun on this host so it lands next to `pi` on `PATH`
-  rather than under an nvm-versioned npm prefix.
+- **Agents:** `claude` (claude-loop), `claude-agent-acp` and `pi-acp` (agent-shell). Both
+  ACP adapters belong to npm/bun, not pacman, and both are installed globally with bun on
+  this host so they land next to `pi` on `PATH` rather than under an nvm-versioned npm
+  prefix. Note `install-deps` still names the *old* Claude adapter in `aur_pkgs` (FAIL-0014,
+  left open by operator decision), so the claim that neither adapter is in `install-deps` is
+  false until that line moves — read `justfile:104`, not this sentence.
 
 A missing binary degrades one feature; it does not break startup, because every consumer
 is deferred. `just batch` and `just test-ert` therefore pass with all of them absent —

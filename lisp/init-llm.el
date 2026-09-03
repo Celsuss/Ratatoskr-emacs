@@ -32,11 +32,16 @@
 ;; --- agent-shell (Claude Code and Pi, both over ACP) ---
 ;; Neither agent is spawned directly: agent-shell speaks ACP, and each CLI is
 ;; reached through an adapter binary that must be on `exec-path'.
-;;   claude-code-acp -- Claude Code (web login, no API key here)
-;;   pi-acp          -- Pi; spawns `pi --mode rpc' and bridges it to ACP
-;;                      (bun install -g pi-acp; needs pi >= 0.80.4)
-;; Both values are agent-shell's own defaults; they are spelled out because the
-;; adapter name is the one thing that breaks when an upstream renames it.
+;;   claude-agent-acp -- Claude Code (web login, no API key here)
+;;                       (bun install -g @agentclientprotocol/claude-agent-acp)
+;;   pi-acp           -- Pi; spawns `pi --mode rpc' and bridges it to ACP
+;;                       (bun install -g pi-acp; needs pi >= 0.80.4)
+;; Both values are agent-shell's own current defaults, spelled out so a rename
+;; shows up in a diff -- which only helps because
+;; `rata-test-acp-adapter-commands-match-upstream' checks they still agree.  The
+;; Claude adapter used to be `claude-code-acp' (@zed-industries, dead since
+;; 2026-03) and this pin outlived the rename by five months, leaving `SPC a i c c'
+;; dead on any host that had not installed the old name: see L-033 / FAIL-0014.
 (use-package agent-shell
   :after general
   ;; None of the context senders below carry an `;;;###autoload' cookie
@@ -54,7 +59,7 @@
              agent-shell-toggle
              agent-shell-switch-buffer)
   :custom
-  (agent-shell-anthropic-claude-acp-command '("claude-code-acp"))
+  (agent-shell-anthropic-claude-acp-command '("claude-agent-acp"))
   (agent-shell-pi-acp-command '("pi-acp")))
 
 ;; Declared, never required: these modules load as source, so a
