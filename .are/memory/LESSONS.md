@@ -927,3 +927,59 @@ and reorganising the file is exactly when nobody is thinking about the gate.
 Related: L-008 (the first version of `gate-covers-tests` grepped a recipe body and reported
 two false failures — same root cause, opposite symptom), L-010 (print real state rather than
 asserting it), D-013 (why `import`, not `mod`), FAIL-0004 (the gate this protects).
+
+## L-035 — A `keymap` text property that binds only `RET` is unreachable in a GUI once anything binds `<return>`
+
+**From:** agent-shell's `> ...` fold headers (Agent capabilities, Notices, Available models)
+being impossible to expand under evil, in `lisp/init-llm.el`.
+
+The obvious reading was a keymap-precedence conflict with evil, and it was wrong. A `keymap`
+text property outranks every emulation map — it sits above `emulation-mode-map-alists` in
+the lookup order that `(elisp) Searching Keymaps` documents — so evil-collection cannot
+shadow it, and `RET` on the chrome resolved to the toggle correctly the whole time:
+
+```
+point on the chrome, evil normal state:
+  RET       -> agent-shell-ui-toggle-fragment   ✅
+  <return>  -> shell-maker-submit               ❌
+```
+
+The failure is **key translation**, one layer earlier than precedence. A GUI frame delivers
+`<return>`; Emacs falls back to translating it to `RET` through `local-function-key-map`
+*only when nothing in the active maps binds `<return>`*. evil-collection's `repl-submit` /
+`repl-newline` binding themes bind the key list `("RET" "<return>" "C-m")` on
+`shell-maker-mode-map` and `comint-mode-map`, both ancestors of `agent-shell-mode-map`. So
+`<return>` had a binding, the fallback never ran, and the text property's `RET` entry was
+dead — while remaining perfectly visible to `describe-key` and to `key-binding` if you
+happened to probe the spelling that still worked.
+
+**Apply:**
+
+- When a keyboard binding "does not fire" but resolves correctly under `key-binding`, probe
+  **both spellings** — `RET` *and* `<return>`, `TAB` *and* `<tab>`, `M-RET` and
+  `M-<return>`. A working `RET` with a hijacked `<return>` is the signature, and it means
+  the bug is a lost translation, not a lost precedence fight.
+- Reproduce in the frame type that fails. This bug does not exist in `just cli`: a TTY sends
+  `RET` directly, so a terminal check would have cleared a GUI-only defect.
+- Fixing it belongs on the **narrow** map, not the broad one. Adding `<return>` to
+  `agent-shell-ui-fragment-map` — which covers only the propertized chrome — folds on a
+  header while leaving Enter at the prompt as submit. The same key in
+  `agent-shell-mode-map` would have folded everywhere and cost prompt submission, which is
+  why `rata-test-agent-shell-return-still-submits-off-chrome` asserts the *other* position
+  as well. One test that the key works is half a gate when the binding is meant to be
+  position-sensitive.
+- Third-party maps rendered into buffer text hold the keymap **object**, so extend them with
+  `define-key`, never `setq` — upstream says so in the `agent-shell-ui-fragment-map`
+  docstring, and rebinding by assignment would leave every already-printed header on the old
+  map.
+
+The generalisation: `RET`/`TAB` are ASCII control characters that GUI Emacs reaches only by
+*fallback*. Any binding that relies on that fallback is conditional on no other active map
+having claimed the function-key spelling — which a package three inheritance levels away
+can do at any time, without touching your code, and without any error.
+
+Related: L-011 / FAIL-0009 (a binding that exists but is unreachable — same class of
+invisible failure, different mechanism), L-017 (evil shadowing keymaps in `special-mode`
+children, which *is* a genuine precedence problem and the trap this one imitates), L-034
+(verify a check by breaking it on purpose — done here, and it is what proved the new test
+was a gate rather than decoration).

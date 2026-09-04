@@ -1567,6 +1567,114 @@ the pin.  Do not just edit the expected value."
                         (mapconcat #'identity (nreverse failures) "\n"))))))
 
 ;;; ============================================================
+;;; Test — agent-shell fold chrome vs the GUI Enter key (lisp/init-llm.el)
+;;; ============================================================
+
+(defun rata-test--agent-shell-binding (keys state position)
+  "Return what KEYS resolves to in an agent-shell buffer.
+
+STATE is `normal' or `insert'.  POSITION is `chrome' to put point on
+agent-shell's fold chrome, or `prompt' to put it on ordinary buffer text
+of the kind the prompt line is made of.
+
+Stands up the smallest buffer that reproduces real key lookup there:
+`agent-shell-mode-map' as the local map (so the evil auxiliary keymaps
+evil-collection hangs off it and off its `comint-mode-map' ancestor are
+active), `agent-shell-ui-mode' on, and -- for `chrome' -- one run of text
+propertized by `agent-shell-ui-make-foldable-text'.
+
+`agent-shell-mode' itself is not called: it runs
+`shell-maker-define-major-mode' machinery that wants a live shell, and the
+local map is the only part of it that key lookup consults."
+  (with-temp-buffer
+    (use-local-map agent-shell-mode-map)
+    (agent-shell-ui-mode 1)
+    (evil-local-mode 1)
+    (if (eq state 'insert) (evil-insert-state) (evil-normal-state))
+    (evil-normalize-keymaps)
+    (when (eq position 'chrome)
+      (insert (agent-shell-ui-make-foldable-text :text "> Agent capabilities"
+                                                 :hint "toggle"))
+      (insert "\n"))
+    (insert "plain text standing in for the prompt line\n")
+    ;; Either way the text under test is the first thing in the buffer: the
+    ;; chrome when it was inserted, the plain line when it was not.
+    (goto-char (point-min))
+    (key-binding (kbd keys))))
+
+(ert-deftest rata-test-agent-shell-fold-chrome-answers-gui-return ()
+  "The GUI Enter key must fold agent-shell's collapsible sections.
+
+Regression test for the `> ...' headers (Agent capabilities, Notices,
+Available models) being impossible to expand under evil.
+
+The trap is key TRANSLATION, not keymap precedence.  agent-shell puts
+`agent-shell-ui-fragment-map' on the fold chrome as a `keymap' text
+property, and that map bound only `RET' (?\\r) and `mouse-1'.  A
+text-property keymap outranks every emulation map, so `RET' on the chrome
+always resolved correctly and evil looked innocent.  But a GUI frame
+delivers `<return>', and Emacs falls back to translating `<return>' ->
+`RET' only when *nothing* binds `<return>' -- while evil-collection's
+`repl-submit' / `repl-newline' themes bind (\"RET\" \"<return>\" \"C-m\")
+on `shell-maker-mode-map' and `comint-mode-map', both ancestors of
+`agent-shell-mode-map'.  So `<return>' resolved to submit/newline and the
+toggle was unreachable from the keyboard.  Terminal frames were fine: a
+TTY sends `RET' directly.
+
+`init-llm.el' fixes it by adding `<return>' to the fragment map.  This
+test fails if that binding is dropped; its pair,
+`rata-test-agent-shell-return-still-submits-off-chrome', fails if it is
+widened into `agent-shell-mode-map' instead.  Neither is sufficient
+alone -- the binding has to hold at one position and not the other."
+  (require 'agent-shell)
+  (require 'agent-shell-ui)
+  (let (failures)
+    ;; On the chrome, both spellings of Enter fold, in either state -- point,
+    ;; not state, is what decides.
+    (dolist (state '(normal insert))
+      (dolist (keys '("RET" "<return>"))
+        (let ((got (rata-test--agent-shell-binding keys state 'chrome)))
+          (unless (eq got 'agent-shell-ui-toggle-fragment)
+            (push (format "%s state, point on fold chrome: %s -> %s (want %s)"
+                          state keys got 'agent-shell-ui-toggle-fragment)
+                  failures)))))
+    (when failures
+      (ert-fail (concat "agent-shell fold chrome does not answer Enter:\n"
+                        (mapconcat #'identity (nreverse failures) "\n"))))))
+
+(ert-deftest rata-test-agent-shell-return-still-submits-off-chrome ()
+  "Enter must keep submitting the prompt everywhere but the fold chrome.
+
+The other half of `rata-test-agent-shell-fold-chrome-answers-gui-return'.
+The fold binding is deliberately scoped to a text property so that it is
+position-sensitive; a binding in `agent-shell-mode-map' would fold
+everywhere and cost the operator prompt submission.  Both spellings of
+Enter are checked, because the whole bug was one spelling behaving
+differently from the other.
+
+Normal state submits and insert state inserts a newline because
+`evil-collection-repl-submit-state' defaults to normal.  A failure here
+after changing that option is expected -- update the expectations.  A
+failure here with that option untouched means the fold binding leaked out
+of the chrome."
+  (require 'agent-shell)
+  (require 'agent-shell-ui)
+  (let (failures)
+    (dolist (expectation '((normal . shell-maker-submit)
+                           (insert . newline)))
+      (dolist (keys '("RET" "<return>"))
+        (let* ((state (car expectation))
+               (want (cdr expectation))
+               (got (rata-test--agent-shell-binding keys state 'prompt)))
+          (unless (eq got want)
+            (push (format "%s state, point off fold chrome: %s -> %s (want %s)"
+                          state keys got want)
+                  failures)))))
+    (when failures
+      (ert-fail (concat "agent-shell prompt submission has regressed:\n"
+                        (mapconcat #'identity (nreverse failures) "\n"))))))
+
+;;; ============================================================
 ;;; Run all tests
 ;;; ============================================================
 

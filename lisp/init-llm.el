@@ -64,8 +64,38 @@
 
 ;; Declared, never required: these modules load as source, so a
 ;; `eval-when-compile' require would run on every startup (FAIL-0012 / L-028).
+(eval-when-compile
+  (defvar agent-shell-ui-fragment-map))
+
 (declare-function agent-shell-shell-buffer "agent-shell")
 (declare-function agent-shell-send-file "agent-shell")
+
+;; Make the GUI Enter key fold agent-shell's `> ...' sections.
+;;
+;; agent-shell puts `agent-shell-ui-fragment-map' on the fold chrome as a
+;; `keymap' TEXT PROPERTY, and that map binds only `RET' (i.e. ?\r) and
+;; `mouse-1'.  A text-property keymap outranks every emulation map, so evil does
+;; not shadow it -- `RET' on the chrome already resolves to the toggle.  What
+;; breaks is key TRANSLATION, not precedence: a GUI frame delivers `<return>',
+;; and Emacs only falls back to translating `<return>' -> `RET' when *nothing*
+;; binds `<return>'.  evil-collection's `repl-submit' / `repl-newline' themes
+;; bind the key list ("RET" "<return>" "C-m") on `shell-maker-mode-map' and
+;; `comint-mode-map', which `agent-shell-mode-map' inherits -- so `<return>' is
+;; consumed as submit/newline and the chrome's `RET' entry is unreachable.
+;; Terminal frames were never affected; a TTY sends `RET' directly.
+;;
+;; Binding `<return>' into the fragment map is the extension point upstream
+;; documents, and it must be `define-key' rather than `setq': already rendered
+;; text holds on to this keymap object.  Because the map covers only the chrome,
+;; Enter still submits at the prompt and still inserts a newline in insert state
+;; -- the binding is position-sensitive, which an `agent-shell-mode-map' binding
+;; could not be.  Both halves are pinned:
+;; `rata-test-agent-shell-fold-chrome-answers-gui-return' asserts Enter folds on
+;; the chrome, `rata-test-agent-shell-return-still-submits-off-chrome' asserts it
+;; does not fold anywhere else.  See L-035.
+(with-eval-after-load 'agent-shell-ui
+  (define-key agent-shell-ui-fragment-map (kbd "<return>")
+              #'agent-shell-ui-toggle-fragment))
 
 (defun rata-agent-shell-send-file (&optional prompt-for-file)
   "Send the current file to an agent shell as an `@' context mention.
