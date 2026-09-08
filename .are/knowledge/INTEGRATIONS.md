@@ -43,6 +43,20 @@ still works on-premise. Packages pinned to `rest/api/2/search` — `jiralib2`, a
 why they were rejected in D-011. If `SPC J j` ever returns nothing, read that probe before
 suspecting credentials.
 
+**But the fallback covers the request only, not the response — this checkout is on the
+truncating side of it.** `local.el` sets `rata-jira-api-version` 2, so the probe lands on
+legacy `search`, which paginates with `startAt` and reports `total`. `jira.el` contains
+neither string: it reads `nextPageToken` (`jira-issues.el:179`) and sends `nextPageToken`
+(`jira-issues.el:107`), the Cloud contract. So `M-n` always answers "No more pages.", the
+row count is never checked against `total`, and `SPC J j` silently shows the first
+`jira-issues-max-results` rows of an `ORDER BY`-less query — an arbitrary subset that the
+client-side sort then makes look deliberate. The symptom is *missing issues with no error*,
+not an empty list, so it does not look like the endpoint problem above. Mitigation is the
+page size, raised to 100 in `init-jira.el` with the reasoning inline;
+`rata-test-jira-issues-single-page-assumption-still-holds` fails when upstream gains
+`startAt`, so the workaround is retired rather than inherited. See L-038 and
+`docs/jira-cheatsheet.org`.
+
 **How a file reaches either ACP agent — read this before writing any Elisp for it.**
 `agent-shell` already ships the whole context-send family and *nothing in it is
 autoloaded*, so a leader key bound to one of those commands resolves to nothing unless the

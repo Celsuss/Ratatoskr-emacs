@@ -948,6 +948,35 @@ as though the token were wrong.  L-018."
   (should-not (string-match-p
                "/" (replace-regexp-in-string "https://" "" jira-base-url))))
 
+(ert-deftest rata-test-jira-issues-page-size-is-raised ()
+  "The issues list asks for more than upstream\='s 30 per page.
+On Jira Server/DC -- what `rata-jira-api-version\=' 2 means -- `search/jql\='
+404s and jira.el falls back to the legacy `search\=' endpoint, which
+paginates with `startAt\='/`total\='.  jira.el reads neither: it only looks for
+`nextPageToken\=' (jira-issues.el:179) and only sends one
+\(jira-issues.el:107).  `M-n\=' therefore always answers \"No more pages.\" and
+the list is silently truncated to one page with no total shown.  Page size
+is the only knob that does not patch upstream, so it must not drift back to
+the default."
+  (skip-unless (require 'jira-issues nil t))
+  (should (integerp jira-issues-max-results))
+  (should (> jira-issues-max-results 30)))
+
+(ert-deftest rata-test-jira-issues-single-page-assumption-still-holds ()
+  "jira.el still has no `startAt\=' paging, so the page-size workaround is still needed.
+If upstream gains `startAt\=' support this test fails and
+`rata-test-jira-issues-page-size-is-raised\=' can be reconsidered."
+  ;; `find-library-name' resolves to the .el source; `locate-library' can hand
+  ;; back a .elc, whose byte-compiled body would not contain the string either
+  ;; and would pass vacuously.
+  (let ((src (ignore-errors (find-library-name "jira-issues"))))
+    ;; Not `skip-unless': a permanently skipped test reads as coverage and is
+    ;; not.  If the source cannot be found, that is itself the failure.
+    (should (and src (file-readable-p src)))
+    (with-temp-buffer
+      (insert-file-contents src)
+      (should-not (string-match-p "startAt" (buffer-string))))))
+
 (ert-deftest rata-test-jira-base-url-normalisation ()
   "A trailing slash in `rata-jira-base-url\=' is dropped, not passed through."
   (should (equal (directory-file-name "https://acme.atlassian.net/")

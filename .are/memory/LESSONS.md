@@ -1099,3 +1099,56 @@ them.
 Related: FAIL-0002 (`yas-snippet-dirs` warning on every startup, unseen for the same
 reason), L-034 (verify a new check in every branch — done here in both directions for both
 new checks), FAIL-0012 (the other "green exit code, broken anyway" shape).
+
+## L-038 — A client written against one deployment's pagination silently truncates on the other
+
+`jira-issues` showed a subset of the operator's assigned Jira tasks and gave no hint that it
+was doing so. Nothing in this repository was wrong, and nothing in `jira.el` was wrong on the
+deployment it was written for.
+
+`jira.el` paginates with `nextPageToken`: it reads that key from the response
+(`jira-issues.el:179`) and sends it back as a request parameter (`jira-issues.el:107`). That is
+the Jira **Cloud** `search/jql` contract. `jira-api-search` (`jira-api.el:238`) tries
+`search/jql` first and, on a 404, falls back to the legacy `search` endpoint — which is what a
+Server/DC instance returns, because `search/jql` is Cloud-only. This checkout is Server/DC:
+`local.el` sets `rata-jira-api-version` to 2.
+
+The legacy endpoint paginates with `startAt` and reports `total`. `jira.el` contains neither
+string. So on Server/DC, `jira-issues--pagination-next` is permanently nil, `M-n` answers "No
+more pages.", the row count is never compared against `total`, and the list is the first
+`jira-issues-max-results` (30) rows of a query carrying no `ORDER BY` — an arbitrary 30. The
+client-side sort then reorders exactly those rows into something that looks deliberate.
+
+Three properties made this invisible for as long as it was:
+
+1. **The failure is a silent subset, not an error.** Every request succeeded. A truncated
+   list and a complete one render identically, because the one number that distinguishes them
+   (`total`) is discarded.
+2. **The fallback that made it work at all is the same fallback that broke it.** Degrading
+   from `search/jql` to `search` fixed connectivity and silently changed the pagination
+   contract. A compatibility shim that covers the request but not the response is worse than
+   no shim, because the failure moves from "cannot connect" to "connected, wrong answer".
+3. **The sort made truncation look like a decision.** Reordering an arbitrary subset produces
+   something with the shape of a curated list.
+
+Generalisation: **when a client supports two deployments of one service, the deployment
+difference is not confined to the endpoint path.** Pagination, ordering guarantees, and
+totals all differ, and only the endpoint path is visible at the call site. Whenever a
+`:custom` here pins a client to the non-default deployment — `rata-jira-api-version` 2 is
+this repository's only such pin today — assume the client was written and tested against the
+default one, and check the response-shaping code, not just the URL.
+
+Second-order: the mitigation is a *page size*, which is a workaround with an expiry date.
+`rata-test-jira-issues-single-page-assumption-still-holds` greps the installed `jira-issues.el`
+for `startAt` and fails when upstream gains real paging, so the workaround announces its own
+obsolescence instead of outliving it. That test resolves the source with `find-library-name`,
+not `locate-library`: `locate-library` can return a `.elc`, whose byte-compiled body would not
+contain the string either and would pass vacuously. It also does not `skip-unless` the file is
+findable — a permanently skipped test reads as coverage and is not, the same trap called out in
+`rata-test-jira-base-url-has-no-trailing-slash`. Both variants of that mistake were made and
+caught in the same session, by reading the ERT output for `skipped` rather than trusting the
+suite's PASS.
+
+Related: L-018 (the other jira.el trap, also a silent auth-shaped failure from a value this
+repo controls), FAIL-0012 and L-034 (green exit code, broken anyway), FAIL-0002 (an invariant
+nothing loaded at startup could see).

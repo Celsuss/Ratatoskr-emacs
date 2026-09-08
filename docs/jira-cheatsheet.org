@@ -36,7 +36,7 @@ is marked (dired semantics, via tablist).
 | ~e~     | Export menu → Markdown / Org-mode / CSV of what is on screen        |
 | ~T~     | Jump to Tempo worklogs (kills this buffer)                          |
 | ~H~     | Switch Jira host (needs =jira-secondary-urls=)                       |
-| ~M-n~ / ~M-p~ | Next / previous page of results                               |
+| ~M-n~ / ~M-p~ | Next / previous page — /Cloud only/, dead here (see Truncation) |
 | ~n~ / ~p~ | Next / previous issue (~j~/~k~ do *not* move — see the last section)   |
 | ~{~ / ~}~ | Narrow / widen the current column                                   |
 | ~G~     | Refresh the list                                                    |
@@ -160,7 +160,7 @@ as though the token were wrong. =init-jira.el= runs the value through
 
 | Variable                         | Default | Notes                                       |
 |----------------------------------+---------+---------------------------------------------|
-| =jira-issues-max-results=         | 30      | Page size; ~M-n~ / ~M-p~ page through          |
+| =jira-issues-max-results=         | *100*   | Raised from 30: this is the whole list, not a page |
 | =jira-issues-table-fields=        | —       | Which columns the list shows                 |
 | =jira-issues-default-type=        | nil     | Pre-set =--type= in the query menu            |
 | =jira-issues-sort-key=            | Status  | Initial sort column                          |
@@ -184,3 +184,35 @@ as though the token were wrong. =init-jira.el= runs the value through
   that evil shadows (L-017). So ~j~/~k~ are *not* motion here: ~j~ is unbound and ~k~ kills
   (hides) the line in the issue list. Move with ~n~ / ~p~, ~C-n~ / ~C-p~ or the arrows, and
   press ~C-z~ when you want evil back.
+
+* Truncation: the list is one page, and the page is all you get
+
+On this instance =rata-jira-api-version= is 2, i.e. Jira Server/DC.  jira.el
+tries the =search/jql= endpoint first and falls back to the legacy =search= one
+on a 404 (=jira-api.el:238=), which is what Server/DC returns — =search/jql= is
+Cloud-only.
+
+The legacy endpoint paginates with =startAt= and reports =total=.  jira.el reads
+neither: it only looks for =nextPageToken= in the response (=jira-issues.el:179=)
+and only ever sends one (=jira-issues.el:107=).  Consequences here:
+
+- ~M-n~ always answers "No more pages."  There is no second page to reach.
+- The row count is never compared against =total=, so a truncated list looks
+  exactly like a complete one.
+- The default query is =assignee = currentUser()= with *no* =ORDER BY=, so the
+  rows you get are an arbitrary subset, not "the newest" or "the open ones".
+  The ~s~ sort only reorders what already arrived.
+
+Mitigations, in order of effort:
+
+1. =jira-issues-max-results= is set to 100 in =lisp/init-jira.el=.  Raise it
+   further if you routinely have more than that assigned; the server-side cap
+   is =jira.search.views.default.max= (1000 by default).
+2. Narrow the query instead of paging it: ~l~ then ~c~ (current sprint) or ~s~
+   (status), or ~j~ for a JQL with an explicit ~ORDER BY~ so the truncation at
+   least cuts off the end you care least about.
+3. ~F~ applies a saved Jira filter, which is also subject to the same cap.
+
+Note that ~m~ (=--myself=) is on by default, so issues where you are only the
+reporter or a watcher never appear at all — that is scope, not truncation.
+Turn it off with ~l~ ~m~ and set ~R~ (reporter) instead.

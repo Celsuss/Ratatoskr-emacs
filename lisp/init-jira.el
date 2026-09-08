@@ -40,6 +40,19 @@ While nil, the commands load but cannot reach an instance."
                      (directory-file-name rata-jira-base-url)
                    ""))
   (jira-api-version rata-jira-api-version)
+  ;; Upstream ships 30 and pages the rest with `M-n'.  That paging only works on
+  ;; Cloud.  jira.el asks for `search/jql' first and falls back to the legacy
+  ;; `search' endpoint on a 404 (jira-api.el:238) -- which is what a Server/DC
+  ;; instance like ours does, since `search/jql' is Cloud-only.  The legacy
+  ;; endpoint paginates with `startAt'/`total'; jira.el only ever reads
+  ;; `nextPageToken' and never sends `startAt' (jira-issues.el:107,179).  So on
+  ;; Server/DC `jira-issues--pagination-next' is permanently nil, `M-n' answers
+  ;; "No more pages.", `total' is never shown, and the list is silently the
+  ;; first 30 matches of an unordered JQL -- an arbitrary 30, since the query
+  ;; carries no ORDER BY and the client-side sort only reorders what arrived.
+  ;; Raising the page size is the only mitigation that does not patch upstream.
+  ;; Server-side cap is `jira.search.views.default.max' (1000 by default).
+  (jira-issues-max-results 100)
   (jira-detail-reuse-buffer t)
   :config
   ;; jira.el does not support evil (upstream issue #31), and its keymaps live in
