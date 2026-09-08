@@ -277,9 +277,24 @@ init-present → init-dashboard
   things are deliberate. `jira-username`/`jira-token` are left unset, which is what makes
   `jira.el` fall back to `auth-source`; and `rata-jira-base-url` defaults to nil and is set in
   the gitignored `local.el`, because the instance hostname is corporate identity on a public
-  remote. The three Jira modes are put in **emacs state** via `evil-set-initial-state` —
-  upstream does not support evil, and its keymaps live in `tabulated-list-mode` and
-  `magit-section-mode` children, which evil shadows. See L-017 in `.are/memory/LESSONS.md`.
+  remote. **Evil stays live in the three Jira buffers, and jira.el's own keys are mirrored
+  under the local leader `,`** (D-015, reversing L-017's recommendation on operator
+  instruction). Upstream does not support evil and its keymaps live in `tabulated-list-mode`
+  / `magit-section-mode` children, which evil's normal state shadows; emacs state fixes that
+  but costs `j`/`k`, `/` and the `SPC` leader inside the buffer. Three things make the
+  mirror cheap enough to keep: it is built with `lookup-key` out of jira.el's own mode maps
+  (`rata-jira--mirror-args`) rather than by naming commands, because most of upstream's
+  bindings are anonymous closures — the same technique `init-evil.el` uses for dashboard; it
+  covers only jira.el's own keys, since evil-collection already supplies `j`/`k`, `q`, `g r`
+  and tablist marking; and `rata-test-jira-mirrored-keys-exist-upstream` turns an upstream
+  rename into a failing test instead of a silently dead key. `RET` is the one key bound
+  outside the leader map. Do **not** put any of this in the `use-package` `:config`: the
+  feature `jira` is never loaded here (elpaca's autoloads send `jira-issues` to
+  `jira-issues.el`, and nothing requires the `jira` umbrella), so a `:config` body never runs
+  at all — that is how the earlier `evil-set-initial-state` call stayed dead from the day it
+  was written until 2026-09-08, leaving every documented key shadowed. See
+  [`FAIL-0016`](.are/memory/failures/FAIL-0016.md), L-039, D-015, and
+  `rata-test-jira-buffers-keep-evil-and-mirror-keys`.
 - `init-org.el` — org-agenda with org-super-agenda, org-roam, org-transclusion. Owns the
   org-roam capture templates, including `blog-post` (key `b`) — whose `:blog:` filetag and
   non-empty `:export_file_name:` are a contract with `init-blog.el` and with the
@@ -367,6 +382,16 @@ init-present → init-dashboard
 - Regression check: `rata-test-keybindings-live-after-init` in `tests/run-tests.el` resolves a
   curated set of keys against a fully initialised Emacs. Add a key there when you add an
   entry point you would notice being dead.
+- **The same trap one level down: `:config` is only as live as the feature it names.** It
+  compiles to `(with-eval-after-load '<name> ...)`, and for a multi-file package the umbrella
+  feature is often never loaded — the `;;;###autoload` cookies sit on the commands in the
+  sub-files, and use-package's `:commands` stub is skipped when elpaca's own autoloads already
+  fbound them. `use-package jira`'s `:config` had never run once for exactly that reason,
+  leaving every jira.el key shadowed by evil. `(symbol-function 'the-command)` after a full
+  init tells you which file the key really loads. Anything consulted by *someone else* later —
+  `evil-set-initial-state`, `auto-mode-alist`, `shackle-rules`, leader keys — belongs at top
+  level; only the package's own runtime state belongs in `:config`. See
+  [`FAIL-0016`](.are/memory/failures/FAIL-0016.md) and L-039.
 
 ```elisp
 (general-create-definer rata-leader

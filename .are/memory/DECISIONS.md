@@ -308,3 +308,42 @@ everything else.
 The corollary is that `install-deps` finishing cleanly does **not** mean every dependency is
 present, on either distro. That is what `just check-deps` is for, and why it reports the
 resolved path of each binary rather than a tick.
+
+## D-015 — Evil stays live in the Jira buffers; jira.el's keys are mirrored under `,`
+
+**2026-09-08.** Reverses the `evil-set-initial-state … 'emacs` approach argued for in L-017,
+on operator instruction: *"I would like to keep using EVIL mode inside the jira buffer. If
+there is any keybinding conflicts then we need to fix those."*
+
+The mechanism L-017 describes is unchanged and still the reason something has to be done:
+`jira-issues-mode` derives from `tabulated-list-mode`, `jira-detail-mode` from
+`magit-section-mode`, and evil's normal state shadows their single-letter keys. What changed
+is which cost is preferred. Emacs state costs two lines and never drifts, but it takes
+`j`/`k`, `/`, and the `SPC` leader away inside those buffers — in a config whose stated first
+principle is "vim-first", spending the editor's whole idiom to buy one package's keyset is
+the wrong trade for the operator.
+
+So: normal state, and jira.el's shadowed keys live under the local leader `,`.
+
+Three properties keep the maintenance cost that L-017 warned about from landing:
+
+1. **The mirror is by `lookup-key`, not by naming commands.** `rata-jira--mirror-args` reads
+   the definition out of `jira-issues-mode-map` / `jira-detail-mode-map` /
+   `jira-tempo-mode-map` at bind time. Most of jira.el's bindings are anonymous closures over
+   private helpers, so there is no symbol to bind and copying the bodies would fork upstream.
+   This config already does exactly this for dashboard (`init-evil.el`).
+2. **The mirror is small, because evil-collection already covers the tablist half.** `j`/`k`,
+   `/`, `q`, `g r`, and `m`/`u`/`U`/`t` marking all work in normal state untouched. Only
+   jira.el's *own* keys are mirrored — 11 in the issue list, 13 in the detail buffer, 3 in
+   tempo. Re-binding what already works would be the part that drifts.
+3. **Drift is a red test, not a dead key.** `rata-test-jira-mirrored-keys-exist-upstream`
+   checks both ends of every entry: the upstream key still resolves in jira.el's map, and the
+   `,` suffix resolves to a command in a live buffer. An upstream rename fails the suite
+   instead of silently dropping one leader key.
+
+`RET` is the one key taken outside the leader map: in a read-only list `evil-ret` moves down
+a line, and RET opening the thing at point is the convention everywhere else here.
+
+Superseded: L-017's second bullet ("`evil-set-initial-state` is the cheap fix; re-binding is
+the expensive one") is now a statement about a trade this repository has decided the other
+way. Its diagnostic value — read the mode's ancestry, not the readme — is untouched.

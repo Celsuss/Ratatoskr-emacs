@@ -276,6 +276,14 @@ state shadows both — the same mechanism that made plain `define-key` dead in t
   ships `?`, `l`, `C`, `U`, `E`, `H`, `S` and adds more on a monthly cadence. A hand-written
   `evil-define-key*` table for them is a promise to track someone else's keymap forever.
   Emacs state costs two lines and never drifts; `C-z` is the way out.
+  **Decided the other way for jira.el on 2026-09-08 (D-015), on operator instruction:** emacs
+  state also takes `j`/`k`, `/` and the `SPC` leader away inside the buffer, which is the
+  larger loss in a vim-first config. What makes the re-binding affordable is *not* writing the
+  table by hand: `rata-jira--mirror-args` reads each definition out of the package's own mode
+  map with `lookup-key` (as `init-evil.el` already does for dashboard), mirrors only the keys
+  evil-collection does not already cover, and `rata-test-jira-mirrored-keys-exist-upstream`
+  turns an upstream rename into a failing test rather than a dead key. Prefer that shape over
+  either extreme when a package's keymap has to coexist with evil.
 - **This is the third distinct shape of the same root cause** (deferred `:config` leader keys
   in FAIL-0009, `define-key` in a `special-mode` child, an upstream package's own keymap).
   When adding any module whose buffer is not an editing buffer, ask which of the three
@@ -1152,3 +1160,59 @@ suite's PASS.
 Related: L-018 (the other jira.el trap, also a silent auth-shaped failure from a value this
 repo controls), FAIL-0012 and L-034 (green exit code, broken anyway), FAIL-0002 (an invariant
 nothing loaded at startup could see).
+
+## L-039 — A `:config` block is only as live as the feature it names, and a multi-file package's umbrella feature is often unreachable
+
+`use-package`'s `:config` compiles to `(with-eval-after-load '<name> ...)`. The name is
+whatever was written after `use-package`, and for a package of more than one file that is
+frequently *not* the feature anything actually loads. `init-jira.el` put the
+`evil-set-initial-state` calls for the three Jira buffers there, and the body never ran once:
+the operator pressed `l` in `*Jira Issues*` and the cursor moved right, because the buffer was
+in evil normal state where `l` is `evil-forward-char`. See
+[`FAIL-0016`](failures/FAIL-0016.md).
+
+The chain is worth knowing in full, because every link looks correct in isolation:
+
+1. `;;;###autoload` cookies live on the *commands*, in `jira-issues.el` and `jira-tempo.el`.
+   Elpaca loads `jira-autoloads.el` at activation, so `jira-issues` is already fbound at
+   startup, pointing at `jira-issues.el`.
+2. `use-package`'s `:commands` stub is guarded with `(unless (fboundp ...))`, so the stub that
+   *would* have loaded `jira` is never installed. This is correct behaviour — it exists to
+   avoid clobbering a real definition — and it silently changes which file the key loads.
+3. `jira.el` is an umbrella: it `require`s its siblings and none of them requires it back.
+   Nothing else in the config requires it either. `(featurep 'jira)` is therefore nil forever,
+   and every `with-eval-after-load 'jira` form in the world is dead code.
+
+Generalisation, and the check to run when writing a module: **ask which file the autoload
+actually names, not which package the docs are titled after.** `(symbol-function 'the-command)`
+after a full init answers it in one line — an `(autoload "jira-issues" ...)` cell where
+`use-package jira` was written is the tell. When they differ, either key `:config` on the file
+that really loads (`(with-eval-after-load 'jira-issues ...)`), or — better when the form does
+not need the package at all — hoist it to top level.
+
+That last point is the deciding one here and is more general than the load-order trap:
+`evil-set-initial-state` merely pushes a mode symbol onto `evil-emacs-state-modes`, which is
+read when the major mode activates. Nothing about it needs the package loaded, so gating it on
+the package could only ever delay it or lose it. The same is true of
+`add-to-list 'auto-mode-alist`, `shackle-rules` and leader keys (L-011): *configuration that
+is consulted by someone else later belongs at top level; only configuration that touches the
+package's own runtime state belongs in `:config`.*
+
+Note also which half of the form kept working, because it is why the module looked healthy:
+`:custom` is not load-gated. It compiles to `custom-theme-set-variables` under the
+`use-package` theme, which records a value for a variable whose `defcustom` has not loaded yet
+and applies it when it does — `jira-issues-max-results` was correctly 100. A module where the
+options are right and the behaviour is wrong is a strong hint that the split runs along the
+`:custom` / `:config` line.
+
+Second-order, on verification: the FAIL-0009 sweep added an *exhaustive* test over
+`rata-leader` forms, and it passed here — `SPC J j` was live, since the leader keys in this
+module were already hoisted. The dead form was not a key, so an exhaustive test over keys could
+not see it. **A test made exhaustive over one syntactic shape is not exhaustive over the
+failure mode**; the failure mode was "a `:config` body that never runs", and the keys were only
+its most visible symptom. The new test asserts the observable end state instead — a buffer in
+`jira-issues-mode` reports `evil-state` `emacs` and `(key-binding "l")` is `jira-issues-menu`.
+
+Related: L-011 and [`FAIL-0009`](failures/FAIL-0009.md) (the same root cause for leader keys),
+L-017 (why these buffers need emacs state at all), L-038 (the other jira.el defect the operator
+found by using the feature).

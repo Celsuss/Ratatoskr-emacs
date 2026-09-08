@@ -984,6 +984,178 @@ If upstream gains `startAt\=' support this test fails and
   (should (equal (directory-file-name "https://acme.atlassian.net")
                  "https://acme.atlassian.net")))
 
+(defun rata-test--use-package-forms-with-config ()
+  "Return ((PKG . COMMANDS) ...) for `use-package\=' forms in lisp/ that have both.
+
+Only forms carrying `:commands\=' AND a `:config\=' block are returned: those are
+the ones where the question \"does this `:config\=' ever run?\" has teeth, because
+the package is reached through an autoloaded command rather than eagerly.
+
+Arguments are grouped by keyword by hand.  `plist-get\=' is wrong on a
+`use-package\=' body: a keyword may take several values (`:general\=' does), and
+`plist-get\=' would then read a value as a key."
+  (let (result)
+    (dolist (file (directory-files (expand-file-name "lisp" user-emacs-directory)
+                                   t "\\.el\\'"))
+      (with-temp-buffer
+        (insert-file-contents file)
+        (goto-char (point-min))
+        (condition-case nil
+            (while t
+              (let ((form (read (current-buffer))))
+                (when (and (consp form) (eq (car form) 'use-package) (symbolp (cadr form)))
+                  (let ((pkg (cadr form)) (key nil) (cmds nil) (has-config nil))
+                    (dolist (arg (cddr form))
+                      (if (keywordp arg)
+                          (setq key arg)
+                        (pcase key
+                          (:commands (setq cmds (append cmds (if (listp arg) arg (list arg)))))
+                          (:config   (setq has-config t)))))
+                    ;; `:config' with a body of only comments still counts as
+                    ;; nothing to run, so require an actual form.
+                    (when (and cmds has-config)
+                      (push (cons pkg cmds) result))))))
+          (end-of-file nil))))
+    (nreverse result)))
+
+(ert-deftest rata-test-use-package-config-blocks-can-run ()
+  "Every `:config\=' block in lisp/ is keyed on a feature something actually loads.
+
+Regression test for .are/memory/failures/FAIL-0016.md, generalising FAIL-0009 one
+layer down.  `:config\=' compiles to `(with-eval-after-load \='PKG ...)\=', and for a
+multi-file package PKG is often *not* what gets loaded: the `;;;###autoload\='
+cookies sit on the commands in the sub-files, so elpaca's autoloads point the
+command at `PKG-sub.el\=', and use-package's own `:commands\=' stub — the one that
+would have loaded PKG — is skipped by its `(unless (fboundp ...))\=' guard.  If no
+sub-file requires the umbrella, the `:config\=' body never runs even once.
+
+`use-package jira\='s\=' whole `:config\=' was dead for exactly this reason, which
+left every jira.el key shadowed by evil.
+
+Where the autoload file differs from the feature name, this asserts that loading
+that file does reach the feature — statically first (a `require\=' in its source),
+then by actually loading it, so a two-hop require chain is not a false positive."
+  (let (failures)
+    (pcase-dolist (`(,pkg . ,cmds) (rata-test--use-package-forms-with-config))
+      (let* ((cmd (car cmds))
+             (fn (and (fboundp cmd) (symbol-function cmd)))
+             (file (and (consp fn) (eq (car fn) 'autoload) (cadr fn))))
+        (cond
+         ((not (fboundp cmd))
+          (push (format "`use-package %s' declares :commands %s, which is not even fbound"
+                        pkg cmd)
+                failures))
+         ;; Feature already loaded, or the command autoloads the feature's own
+         ;; file: `:config' will run.
+         ((or (featurep pkg) (null file) (equal file (symbol-name pkg))) nil)
+         (t
+          (let* ((src (ignore-errors (find-library-name file)))
+                 (requires-pkg
+                  (and src (file-readable-p src)
+                       (with-temp-buffer
+                         (insert-file-contents src)
+                         (re-search-forward
+                          (format "(require '%s)" (regexp-quote (symbol-name pkg)))
+                          nil t)))))
+            (unless (or requires-pkg
+                        (progn (require (intern file) nil t) (featurep pkg)))
+              (push (format (concat "`use-package %s' has a :config block, but %s autoloads "
+                                    "%s.el, which never provides `%s' — the block never runs")
+                            pkg cmd file pkg)
+                    failures)))))))
+    (when failures
+      (ert-fail (concat "Dead use-package :config blocks:\n"
+                        (mapconcat #'identity (nreverse failures) "\n"))))))
+
+(ert-deftest rata-test-jira-buffers-keep-evil-and-mirror-keys ()
+  "The Jira buffers stay in evil normal state, with jira.el's keys under `,\='.
+
+Regression test for .are/memory/failures/FAIL-0016.md and D-015.  Two failures
+are in scope and they pull in opposite directions:
+
+* the original defect — `evil-set-initial-state\=' sat in the `use-package jira\='
+  `:config\=' block, which never runs because the feature `jira\=' is never loaded
+  here, so nothing configured these buffers at all;
+* the current design — the operator wants evil motion in these buffers, so
+  normal state is deliberate and jira.el's shadowed keys are mirrored under the
+  local leader.  A mirror that is silently not installed looks exactly like the
+  original defect from the user's side: a key that does nothing.
+
+So this asserts evil is live, the mirror is reachable, and `RET\=' opens an issue."
+  (should (require 'jira-issues nil t))
+  (let ((buf (generate-new-buffer "*rata-test-jira-issues*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (jira-issues-mode)
+          ;; Evil, not emacs state: `j\=' still moves.
+          (should (eq evil-state 'normal))
+          (should (eq (key-binding (kbd "j")) 'evil-next-line))
+          ;; The key the operator actually pressed, now under the local leader.
+          (should (eq (key-binding (kbd ", l")) 'jira-issues-menu))
+          (should (eq (key-binding (kbd ", ?")) 'jira-issues-actions-menu))
+          ;; RET opens the issue rather than moving down a line.
+          (should-not (eq (key-binding (kbd "RET")) 'evil-ret))
+          (should (commandp (key-binding (kbd "RET"))))
+          ;; What evil-collection already provides is not re-bound, and must
+          ;; keep working: these are the reason the mirror is small.
+          (should (eq (key-binding (kbd "q")) 'tablist-quit))
+          (should (eq (key-binding (kbd "g r")) 'tablist-revert))
+          (should (eq (key-binding (kbd "m")) 'tablist-mark-forward)))
+      (kill-buffer buf)))
+  ;; The detail buffer is a magit-section child; same mirror, its own map.
+  (should (require 'jira-detail nil t))
+  (let ((buf (generate-new-buffer "*rata-test-jira-detail*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (jira-detail-mode)
+          (should (eq evil-state 'normal))
+          (should (eq (key-binding (kbd ", ?")) 'jira-detail--actions-menu))
+          (should (eq (key-binding (kbd ", w")) 'jira-detail--watchers-menu))
+          (should (commandp (key-binding (kbd ", c"))))
+          ;; magit-section folding survives, which is why `TAB\=' is left alone.
+          (should (eq (key-binding (kbd "TAB")) 'magit-section-toggle)))
+      (kill-buffer buf))))
+
+(ert-deftest rata-test-jira-mirrored-keys-exist-upstream ()
+  "Every mirrored key is still bound by jira.el, and every mirror is installed.
+
+The local-leader mirror is built with `lookup-key\=' against jira.el's own mode
+maps (see lisp/init-jira.el), so an upstream rename does not break the module —
+it silently drops one leader key.  That is the failure this test exists to make
+loud.  It checks both ends: the upstream key still resolves in jira.el's map,
+and the mirrored `,\=' suffix resolves to something callable in a live buffer."
+  (should (require 'jira-issues nil t))
+  (should (require 'jira-detail nil t))
+  (should (require 'jira-tempo nil t))
+  (let (failures)
+    (dolist (spec (list (list 'jira-issues-mode 'jira-issues-mode-map
+                              rata-jira-issues-key-mirror)
+                        (list 'jira-detail-mode 'jira-detail-mode-map
+                              rata-jira-detail-key-mirror)
+                        (list 'jira-tempo-mode 'jira-tempo-mode-map
+                              rata-jira-tempo-key-mirror)))
+      (pcase-let* ((`(,mode ,map-sym ,mirror) spec)
+                   (map (symbol-value map-sym))
+                   (buf (generate-new-buffer (format "*rata-test-%s*" mode))))
+        (unwind-protect
+            (with-current-buffer buf
+              (funcall mode)
+              (pcase-dolist (`(,upstream ,suffix ,label) mirror)
+                (let ((up (lookup-key map (kbd upstream)))
+                      (mine (key-binding (kbd (concat ", " suffix)))))
+                  (when (or (null up) (numberp up))
+                    (push (format "%s: jira.el no longer binds `%s\=' (%s)"
+                                  mode upstream label)
+                          failures))
+                  (unless (commandp mine)
+                    (push (format "%s: `, %s\=' (%s) is not a command: %S"
+                                  mode suffix label mine)
+                          failures)))))
+          (kill-buffer buf))))
+    (when failures
+      (ert-fail (concat "Jira local-leader mirror out of sync with jira.el:\n"
+                        (mapconcat #'identity (nreverse failures) "\n"))))))
+
 ;;; ============================================================
 ;;; 9. Work agenda is dated
 ;;; ============================================================
