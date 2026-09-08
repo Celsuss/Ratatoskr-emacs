@@ -3,7 +3,6 @@
 # key: hugo
 # --
 #+filetags: :blog:
-#+hugo_base_dir: ../hugo/
 #+hugo_tags: ${1:tag}
 
 * ${2:Post title}

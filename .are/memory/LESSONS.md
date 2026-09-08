@@ -1036,3 +1036,66 @@ exists, so it would have converted a compile problem into an unbounded dependenc
 FAIL-0003 (`just compile` proves syntax only), FAIL-0012 (the other green-exit-code
 startup failure, and why `batch-strict` reads output as well as status), L-034 (verify a
 new check in every branch, which is how the three states of this one were confirmed).
+
+## L-037 — A snippet's key is a namespace, and a collision inside it fails silently
+
+Adding `snippets/org-mode/example` (`<e`, mirroring the `<s?` src-block family) is a
+one-file change with no failure mode worth a record — except for the one it shares with
+every other snippet: `yas-expand` maps a key to exactly one template, so two files
+declaring the same `# key:` leave the loser reachable only through `SPC i s`. Nothing
+signals, nothing warns, and byte-compilation cannot see a directory of non-Elisp files at
+all. It is FAIL-0002's shape (yasnippet degrading by warning or by silence rather than by
+erroring) one directory over.
+
+The header itself is the same kind of trap: omit the `# --` separator and yasnippet reads
+the whole header as body, so the snippet inserts its own metadata and still "works".
+
+`are-audit`'s `snippet-headers` check now reads the whole `snippets/` tree — duplicate
+keys per mode directory, missing `# --`, missing `# name:`. It needs no Emacs, so it runs
+in the `fast` lane and therefore on every commit through `.githooks/pre-commit`. Verified
+in both branches per L-034: clean tree passes, a probe file with a duplicate `<e` and no
+separator produces all three failures.
+
+The general point: whenever a config directory's filenames are *not* the identifier —
+snippets keyed by `# key:`, capture templates keyed by a letter, keybindings keyed by a
+prefix — uniqueness is an invariant the filesystem does not enforce for you, and the
+collision presents as absence rather than as an error.
+
+Two more failure modes surfaced the moment snippets were treated as code rather than as
+text files, and both are now checked:
+
+- **A template can evaluate elisp, so it can reference a symbol that no longer exists.**
+  `snippets/org-mode/dialogue` reads `rata-dialogic-characters` and
+  `rata-dialogic-self-name`; a first draft called `rata-dialogic-speakers` when the
+  function is `rata-dialogic--speakers`, and nothing in the repo could see it — the
+  snippet would have errored *halfway through expanding*, leaving a half-written
+  `#+begin_dialogue` in the buffer. `are-audit`'s `snippet-symbol-refs` now greps the
+  evaluated segments (backtick forms, `$$(...)` fields) for `rata-` names absent from
+  `lisp/`. Scoping matters: a first cut scanned whole files and flagged both a
+  `${1:rata-command}` *placeholder* and a snippet that legitimately inserts a
+  `rata-leader` form as text. What a snippet *evaluates* and what it *types out* are
+  different things.
+- **`yas-indent-line` defaults to `'auto`, which re-indents the template with the major
+  mode's indenter — and in Python that rewrites the code.** Expanding
+  `python-mode/async-context-manager` today dedents `return self` out of `__aenter__` and
+  `__aexit__` out of the class entirely; the snippet has been broken in place, silently,
+  for as long as it has existed. A whitespace-sensitive template must pin its own
+  indentation with `# expand-env: ((yas-indent-line 'fixed))`, which is what the new
+  `main-guard` does.
+
+`rata-test-snippets-expand` in `tests/run-tests.el` now expands every snippet and fails on
+any that signals — the class a grep cannot reach (unbalanced parens in embedded elisp, a
+malformed field, an erroring `$(...)` transformation). It runs in `fundamental-mode` with
+indentation off on purpose: per-mode indentation is a separate concern, and expanding the
+`*-ts-mode` directories in their real modes would drag treesit grammar installation into a
+batch run.
+
+The generalisation worth keeping: a directory of templates is *code with no compiler*.
+Nothing type-checks it, nothing loads it at startup, and its failures present as a
+half-finished insertion rather than as an error — so every invariant it has must be
+asserted from outside, by a check that reads the templates as text and a test that runs
+them.
+
+Related: FAIL-0002 (`yas-snippet-dirs` warning on every startup, unseen for the same
+reason), L-034 (verify a new check in every branch — done here in both directions for both
+new checks), FAIL-0012 (the other "green exit code, broken anyway" shape).

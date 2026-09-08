@@ -1,0 +1,18 @@
+# -*- mode: snippet -*-
+# name: main-guard
+# key: main
+# expand-env: ((yas-indent-line 'fixed))
+# --
+import argparse
+
+
+def main() -> None:
+    """${1:One-line summary.}"""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("${2:path}", help="${3:What it is.}")
+    args = parser.parse_args()
+    $0
+
+
+if __name__ == "__main__":
+    main()

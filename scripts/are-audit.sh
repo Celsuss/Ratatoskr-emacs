@@ -290,6 +290,58 @@ while IFS= read -r p; do
     warn "unexpected untracked file: '$p' (FAIL-0007)"
 done < <(git ls-files --others --exclude-standard 2>/dev/null || true)
 
+# --- Check: snippet-headers ------------------------------------------------------
+# A yasnippet file whose `# key:' duplicates another one in the same mode directory
+# never expands: `yas-expand' resolves a key to a single template, so the loser is
+# reachable only through `SPC i s'. Nothing signals, nothing warns — it is exactly the
+# silent-shadowing shape of FAIL-0002, one directory over. A missing `# --' separator is
+# checked in the same pass because yasnippet then treats the header as body text.
+echo "=== Check: snippet-headers ==="
+for mode_dir in snippets/*/; do
+    [ -d "$mode_dir" ] || continue
+    for snippet in "$mode_dir"*; do
+        [ -f "$snippet" ] || continue
+        grep -q '^# --' "$snippet" || fail "$snippet has no '# --' header separator; yasnippet reads its header as body"
+        grep -q '^# name:' "$snippet" || fail "$snippet has no '# name:' line, so 'SPC i s' cannot label it"
+    done
+    dupes=$(grep -h '^# key:' "$mode_dir"* 2>/dev/null | sed 's/^# key:[[:space:]]*//' \
+        | sort | uniq -d || true)
+    for key in $dupes; do
+        owners=$(grep -l "^# key:[[:space:]]*${key}\$" "$mode_dir"* | tr '\n' ' ')
+        fail "duplicate snippet key '$key' in $mode_dir: $owners(only one can expand)"
+    done
+done
+
+# --- Check: snippet-symbol-refs --------------------------------------------------
+# A snippet may embed elisp — backtick-quoted forms and `$$(...)' fields — and the ones
+# here reach into this config's own variables (snippets/org-mode/dialogue reads
+# `rata-dialogic-characters'). A `rata-' symbol in one of those positions that no source
+# file mentions is a typo or a rename, and the snippet then errors halfway through
+# expanding, leaving a half-written block in the buffer. Found exactly that on the run
+# that added this check: a draft calling `rata-dialogic-speakers' when the function is
+# `rata-dialogic--speakers'.
+#
+# Only evaluated segments are scanned. A `${1:rata-command}' placeholder is text the
+# user types over, and a snippet body may legitimately *insert* a call to something
+# defined elsewhere (snippets/emacs-lisp-mode/rata-leader inserts a `rata-leader' form),
+# so scanning the whole file reports both as errors — it did, on the first draft here.
+#
+# Presence in the tracked elisp is all that is required: a name can be defined by
+# `defun', `defcustom', `general-create-definer' or `defalias', and enumerating those
+# would fail open the moment a new form is used. Typos and renames are the failure mode,
+# and presence alone catches both.
+echo "=== Check: snippet-symbol-refs ==="
+for snippet in snippets/*/*; do
+    [ -f "$snippet" ] || continue
+    while IFS= read -r sym; do
+        [ -n "$sym" ] || continue
+        if ! grep -rqF -- "$sym" lisp/ init.el early-init.el 2>/dev/null; then
+            fail "$snippet evaluates '$sym', which appears nowhere in lisp/ — expansion will error"
+        fi
+    done < <({ grep -oE '`[^`]+`' "$snippet" || true; grep -oE '\$\$?\(.*' "$snippet" || true; } \
+        | grep -oE 'rata-[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?' | sort -u)
+done
+
 # --- Check: knowledge-line-refs --------------------------------------------------
 # The knowledge pages cite source lines as `symbol`, `:NNN`. Those drift the moment
 # anyone inserts a defun above them, and a citation that points at the wrong line is

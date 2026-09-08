@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: dialogue
+# key: <d
+# --
+#+begin_dialogue
+- ${1:$$(yas-choose-value (mapcar #'car rata-dialogic-characters))} :: ${2:The question the prose just skipped over.}
+- `rata-dialogic-self-name` :: $0
+#+end_dialogue

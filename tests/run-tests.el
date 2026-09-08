@@ -1675,6 +1675,67 @@ of the chrome."
                         (mapconcat #'identity (nreverse failures) "\n"))))))
 
 ;;; ============================================================
+;;; Test — every snippet in snippets/ expands without error
+;;; ============================================================
+
+(ert-deftest rata-test-snippets-expand ()
+  "Every snippet in `snippets/' must expand without signalling.
+
+`are-audit' checks snippet headers and the `rata-' symbols a template
+evaluates, but a grep cannot see unbalanced parens in an embedded elisp
+form, a malformed field, or a `$(...)' transformation that errors — those
+surface only when the template is actually run, halfway through expanding,
+leaving a half-written block in the buffer.
+
+Expansion happens in `fundamental-mode' with indentation disabled, not in
+each snippet's own major mode.  Two reasons: the `*-ts-mode' directories
+would pull treesit grammar installation into a batch run, and
+`yas-indent-line' makes the result depend on a major mode's indent
+function, which is a separate concern from whether the template is
+well-formed (a snippet that needs literal indentation says so with
+`# expand-env: ((yas-indent-line (quote fixed)))').
+
+`yas-choose-value' consults `yas-prompt-functions', so it is stubbed to
+take the first candidate rather than blocking on input."
+  (skip-unless (fboundp 'yas-expand-snippet))
+  (let* ((root (expand-file-name "snippets" user-emacs-directory))
+         (yas-prompt-functions
+          (list (lambda (_prompt choices &optional _display-fn) (car choices))))
+         (checked 0)
+         failures)
+    (skip-unless (file-directory-p root))
+    (dolist (mode-dir (directory-files root t "\\`[^.]"))
+      (when (file-directory-p mode-dir)
+        (dolist (file (directory-files mode-dir t "\\`[^.]"))
+          (when (file-regular-p file)
+            (setq checked (1+ checked))
+            (let* ((parsed (with-temp-buffer
+                             (insert-file-contents file)
+                             ;; FILE is metadata only; the template is read
+                             ;; from the current buffer.
+                             (yas--parse-template file)))
+                   (body (nth 1 parsed))
+                   (env  (nth 5 parsed)))
+              (if (null body)
+                  (push (format "%s: no template body parsed"
+                                (file-relative-name file root))
+                        failures)
+                (condition-case err
+                    (with-temp-buffer
+                      (fundamental-mode)
+                      (yas-minor-mode 1)
+                      (let ((yas-indent-line nil))
+                        (yas-expand-snippet body nil nil env)))
+                  (error (push (format "%s: %S"
+                                       (file-relative-name file root) err)
+                               failures)))))))))
+    (should (> checked 0))
+    (when failures
+      (ert-fail (concat (format "%d of %d snippets failed to expand:\n  "
+                                (length failures) checked)
+                        (mapconcat #'identity (nreverse failures) "\n  "))))))
+
+;;; ============================================================
 ;;; Run all tests
 ;;; ============================================================
 

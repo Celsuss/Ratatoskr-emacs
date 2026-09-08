@@ -1,0 +1,9 @@
+# -*- mode: snippet -*-
+# name: output
+# key: out
+# --
+output "${1:name}" {
+  description = "${2:What this exposes.}"
+  value       = ${3:resource.name.attribute}
+}
+$0
