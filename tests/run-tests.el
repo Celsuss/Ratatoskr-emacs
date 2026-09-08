@@ -67,7 +67,7 @@ Skips keyword arguments (:states, :keymaps, etc.) and their values."
 				     :non-normal-prefix :global-prefix :infix))
             (setq skip-next t)))
          ((stringp item)
-          (when-let ((next (cadr items)))
+          (when-let* ((next (cadr items)))
             (push (rata-test--classify-binding file item next) results)
             ;; Advance past the value we just consumed
             (setq items (cdr items))))))

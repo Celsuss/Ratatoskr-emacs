@@ -19,6 +19,7 @@ Add a row here whenever you add a record — the record is the detail, this is t
 | [FAIL-0012](failures/FAIL-0012.md) | MEDIUM | configuration, verification-gap, self-inflicted | `init-dialogic.el`, `are-verify.sh`, `justfile` `batch` | `eval-when-compile` is `progn` in interpreted code, so a compile-time `(require 'org)` loaded built-in Org before elpaca activated the newer one; four version-mismatch warnings on every interactive start while `are-verify full` reported PASS on batch-startup | introduced by `a488d5c` | FIXED | `just batch-strict` (reads startup output, not just exit code) |
 | [FAIL-0013](failures/FAIL-0013.md) | MEDIUM | repo-hygiene, verification-gap | `init-org.el`, `scripts/are-audit.sh` | A merge conflict marker was committed; it parses as two ordinary Elisp symbols and sits after `provide`, so lint, compile, the reader-based keybinding tests and `featurep` all stayed green | introduced by `b510337` | FIXED | `are-audit` check `no-conflict-markers` |
 | [FAIL-0014](failures/FAIL-0014.md) | MEDIUM | configuration, environment-drift, verification-gap | `init-llm.el`, `justfile` `install-deps`, `.are/knowledge/INTEGRATIONS.md` | The Claude ACP adapter was pinned to `claude-code-acp`, a name upstream abandoned five months earlier, and installed only via Arch-only `aur_pkgs` — so `SPC a i c c` had never worked on the Ubuntu host while the key itself resolved and every gate passed; an unrelated npm package of the same name (bin `cc-acp`) made `npm ls -g` look correct | pre-existing | FIXED | `rata-test-acp-adapter-commands-match-upstream`; `are-audit` check `acp-adapters-on-path` (warn) |
+| [FAIL-0015](failures/FAIL-0015.md) | MEDIUM | environment-drift, verification-gap | `elpaca/builds/`, `eln-cache/`, `init-completion.el`, `tests/run-tests.el` | The host's Emacs went 30.2 -> 31.1, invalidating every byte-compiled package at once: `compat-call` resolves at compile time, so marginalia and elfeed hard-call `compat--seconds-to-string`, a shim compat correctly stops defining on 31 — `void-function` on every `find-file` while all 36 modules loaded and every gate stayed green | pre-existing, triggered externally by the 2026-09-04 Emacs upgrade | PARTIALLY FIXED — config changes applied; artifact rebuild is an operator action | `are-audit` check `build-artifact-emacs-version` (warn) |
 
 ## Patterns visible across these records
 
@@ -47,8 +48,17 @@ weak was the machinery that would tell you if it stopped being so.
   were correct; the stale copy of the tags lived in a third place neither file mentions
   (`elfeed-db/index`). When state is derived from config at write time, a config-vs-code
   test says nothing about the state already on disk — see L-026.
+- **FAIL-0015** is the first record with **no cause inside the repository at all**. Nothing
+  was committed, nothing drifted, no test was shallow — the host's Emacs was upgraded, and
+  that silently invalidated every artifact under `elpaca/builds` and `eln-cache`, because
+  macros resolve at byte-compile time. It extends the FAIL-0011 pattern (state on disk that
+  no config-vs-code test can see) one step further: that state is not even version
+  controlled, so no amount of reading the repository could have found it. The only check
+  that works is one that reads the artifacts themselves — see L-036.
 
 **Origin split:** FAIL-0001 through FAIL-0007, FAIL-0009 and FAIL-0010 are pre-existing. FAIL-0008 was
 introduced by ARE, found by running the new tooling before trusting it, and fixed in the same
 session. FAIL-0011 was introduced by the immediately preceding feature commit and found by the
-operator using the feature — not by the suite.
+operator using the feature — not by the suite. FAIL-0015 was triggered externally by an
+OS-level Emacs upgrade and, like FAIL-0011, was found by the operator hitting it rather than
+by any gate.

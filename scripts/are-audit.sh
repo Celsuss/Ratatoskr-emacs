@@ -235,6 +235,49 @@ if [ "$hooks_path" = ".githooks" ]; then
     fi
 fi
 
+# --- Check: build-artifact-emacs-version -----------------------------------------
+# FAIL-0015: an Emacs upgrade silently invalidates everything under `elpaca/builds'
+# and `eln-cache', because macros resolve at byte-compile time. `compat-call' is the
+# worst of them: it expands to `compat--FOO' only when that shim is fbound *while
+# compiling*, so a package built under Emacs 30 hard-calls a symbol that compat
+# deliberately stops defining on Emacs 31. Nothing failed to load and nothing exited
+# non-zero -- marginalia just signalled `void-function compat--seconds-to-string' the
+# next time you pressed a key in `find-file'.
+#
+# The evidence is in the artifacts themselves: every .elc carries a plain-text
+# ";;; in Emacs version N.N" header, so this needs no Emacs to read. It does need one
+# to know what is running now; `emacs --version' loads no config and is skipped
+# entirely if there is no binary or no build tree (CI, fresh clone).
+#
+# Warning, not error: a mid-rebuild tree is a normal transient state, and this checkout
+# is the only thing that can fix it.
+echo "=== Check: build-artifact-emacs-version ==="
+audit_emacs_bin="${EMACS_BIN:-}"
+if [ -z "$audit_emacs_bin" ]; then
+    for p in /usr/bin/emacs /snap/bin/emacs; do
+        [ -x "$p" ] && { audit_emacs_bin="$p"; break; }
+    done
+    [ -n "$audit_emacs_bin" ] || audit_emacs_bin="$(command -v emacs || true)"
+fi
+if [ -z "$audit_emacs_bin" ] || [ ! -d elpaca/builds ]; then
+    echo "skipped: no emacs binary or no elpaca/builds in this checkout"
+else
+    running="$("$audit_emacs_bin" --version 2>/dev/null | sed -n '1s/^GNU Emacs //p')"
+    # Sorted and deduplicated, so the message names every vintage present, not a sample.
+    built="$(find elpaca/builds -name '*.elc' -print0 2>/dev/null \
+        | xargs -0r grep -haom1 ';;; in Emacs version [0-9][0-9.]*' 2>/dev/null \
+        | sed 's/.*version //' | sort -u | tr '\n' ' ' | sed 's/ $//')"
+    if [ -z "$built" ]; then
+        # Distinguish "not built yet" from "built wrong". Zero .elc is the normal state
+        # between the delete and the rebuild, and an unbuilt tree is not a stale one.
+        echo "skipped: elpaca/builds holds no .elc yet (deleted, or rebuild not run)"
+    elif [ -z "$running" ]; then
+        echo "skipped: could not read a version from '$audit_emacs_bin'"
+    elif [ "$built" != "$running" ]; then
+        warn "elpaca/builds was byte-compiled by Emacs [$built] but Emacs $running is running; macro expansions baked into those artifacts are wrong (FAIL-0015). Fix: rm -rf eln-cache/*; find elpaca/builds -name '*.elc' -delete; then M-x elpaca-manager, mark all with B, execute with x. Wiping eln-cache is not optional -- elns are keyed by source hash, so a bad one is reused verbatim."
+    fi
+fi
+
 # --- Check: stray-files ----------------------------------------------------------
 # FAIL-0007: nothing noticed an accidental untracked file. Warning only — work in progress
 # is normal.

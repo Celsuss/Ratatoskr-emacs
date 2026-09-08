@@ -983,3 +983,56 @@ invisible failure, different mechanism), L-017 (evil shadowing keymaps in `speci
 children, which *is* a genuine precedence problem and the trap this one imitates), L-034
 (verify a check by breaking it on purpose — done here, and it is what proved the new test
 was a gate rather than decoration).
+
+## L-036 — Macro expansion is compile-time, so a build artifact is only valid for the interpreter that built it
+
+**From:** upgrading the host from Emacs 30.2 to 31.1 (FAIL-0015). Marginalia started
+signalling `void-function compat--seconds-to-string` on every `find-file`, for a symbol
+belonging to a library that was demonstrably loaded — `featurep 'compat-31` was `t`.
+
+Nothing was wrong with any package, and nothing was wrong with any source file. The
+`.elc` files were wrong, and they had been wrong since the moment the interpreter under
+them changed.
+
+`compat-call` is the sharpest instance of the general rule (`compat.el:88`):
+
+```elisp
+`(,(if (fboundp compat) compat fun) ,@args)
+```
+
+That `if` runs during *byte compilation*. Compile marginalia under Emacs 30 and the call
+site becomes `compat--seconds-to-string` forever; run it under Emacs 31, where compat
+deliberately stops defining that shim, and it is a void function. Same source, same
+package version, different answer — decided by whichever Emacs happened to expand the
+macro.
+
+Three things generalise:
+
+- **An interpreter upgrade is a cache-invalidation event, and nothing announces it.** Every
+  gate stayed green: all 36 modules loaded, `rata--failed-modules` was `nil`,
+  `are-verify fast` passed, `batch-strict` passed. They test the source tree; the defect
+  was in generated output that no check had ever looked at. `just compile` cannot see it
+  by construction — it loads no packages (FAIL-0003).
+- **Regenerating an artifact does not clean it.** Native compilation rebuilt
+  `marginalia.eln` *under Emacs 31* and it was still wrong, because the async compile
+  subprocess loads its dependencies as `.elc` and read the stale Emacs-30 `compat-31.elc`.
+  A fresh artifact built against stale inputs is a stale artifact. Order the deletion
+  before the rebuild, always.
+- **Content-addressed caches survive deletions you meant to be total.** Elns are keyed by
+  source hash, so removing every `.elc` and rebuilding would have re-used
+  `marginalia-2cf404e5-f6f184f8.eln` verbatim — the source never changed, so the key never
+  changed. The cache has to be wiped by *version directory*, not reasoned about per file.
+
+The diagnostic habit worth keeping: when a symbol is void but its library is loaded,
+stop reading the library and read the *artifacts*. Every `.elc` says who built it in plain
+text on line 3 (`;;; in Emacs version 30.2`), which needs no Emacs to check and is what
+`are-audit`'s `build-artifact-emacs-version` now reads. The same question applies to any
+ahead-of-time compiled ecosystem where macros, `defsubst` inlining or conditional
+compilation can bake a decision into output — the artifact is a function of the toolchain,
+not only of the source.
+
+Related: FAIL-0015 (the record, and why `just clean` was the wrong remedy — no lockfile
+exists, so it would have converted a compile problem into an unbounded dependency update),
+FAIL-0003 (`just compile` proves syntax only), FAIL-0012 (the other green-exit-code
+startup failure, and why `batch-strict` reads output as well as status), L-034 (verify a
+new check in every branch, which is how the three states of this one were confirmed).
