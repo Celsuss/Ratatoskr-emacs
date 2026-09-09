@@ -28,6 +28,21 @@ While nil, the commands load but cannot reach an instance."
   :type 'integer
   :group 'rata)
 
+(defcustom rata-jira-excluded-statuses '("CLOSED" "DEPLOYED" "DONE" "REJECTED")
+  "Issue statuses kept out of the default `jira-issues' query.
+Finished work is noise in a list whose job is \"what is on my plate\".
+
+These are instance workflow names, not Jira built-ins.  JQL matches them
+case-insensitively, but it does not tolerate a name that no status in the
+instance carries: Jira rejects the whole query with a 400 and the list comes
+back empty rather than unfiltered.  Trim the list in `local.el' on an instance
+with a different workflow; nil restores jira.el's own default query.
+
+This is scope, not truncation.  In the issues list, `, l' then `j' clears the
+JQL argument for a one-off look at everything."
+  :type '(repeat string)
+  :group 'rata)
+
 (use-package jira
   :commands (jira-issues jira-tempo)
   :custom
@@ -54,6 +69,56 @@ While nil, the commands load but cannot reach an instance."
   ;; Server-side cap is `jira.search.views.default.max' (1000 by default).
   (jira-issues-max-results 100)
   (jira-detail-reuse-buffer t))
+
+;; --- Default query: assigned to me, and not already finished ---
+;;
+;; jira.el has no option for this.  `--status=' is a single equality
+;; (jira-issues.el:222) and there is no negation argument at all, so the only
+;; composable place to say "not these four" is the `--jql=' argument: when it is
+;; set, `jira-issues--refresh' emits `(JQL) AND <the other arguments>'
+;; (jira-issues.el:231-238), so the exclusion survives whatever else is toggled
+;; in the query menu.
+;;
+;; The argument reaches a menu that was never opened through the prefix's
+;; default value, which is where `--myself' already comes from: `jira-issues'
+;; does not invoke the transient at all, it calls `tablist-revert', and
+;; `jira-issues--refresh' reads `(transient-args 'jira-issues-menu)' -- for which
+;; transient falls back to the set, saved or default value of a prefix that was
+;; never displayed.  Hence a `:filter-return' advice on the default rather than a
+;; replacement for it: it composes with `--myself' and `jira-issues-default-type'
+;; instead of restating them, so an upstream change to either is inherited rather
+;; than shadowed.
+;;
+;; Two things it deliberately does not cover.  `C-x C-s' in the query menu
+;; persists an argument set, and a saved value wins over the default -- `C-x C-k'
+;; comes back to this one.  And `F' (a saved Jira filter) replaces the JQL
+;; wholesale by design (jira-issues.el:340): a server-side filter is the server's
+;; query, not ours.
+
+(defun rata-jira-exclusion-jql (statuses)
+  "Return a JQL clause excluding STATUSES, or nil when STATUSES is empty."
+  (when statuses
+    (format "status not in (%s)"
+            (mapconcat (lambda (status)
+                         (format "\"%s\"" (string-replace "\"" "\\\"" status)))
+                       statuses ", "))))
+
+(defun rata-jira--default-jql-value (value)
+  "Add the `rata-jira-excluded-statuses' exclusion to transient VALUE.
+VALUE is jira.el's default argument list for `jira-issues-menu'.  A `--jql='
+already present in VALUE wins: this module supplies a default, and an upstream
+default query would be upstream's decision, not ours."
+  (let ((jql (rata-jira-exclusion-jql rata-jira-excluded-statuses)))
+    (if (or (null jql)
+            (seq-some (lambda (arg)
+                        (and (stringp arg) (string-prefix-p "--jql=" arg)))
+                      value))
+        value
+      (cons (concat "--jql=" jql) value))))
+
+(with-eval-after-load 'jira-issues
+  (advice-add 'jira-issues--transient-default-value
+              :filter-return #'rata-jira--default-jql-value))
 
 ;; --- Evil: these buffers stay in evil normal state (D-015) ---
 ;;

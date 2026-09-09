@@ -984,6 +984,61 @@ If upstream gains `startAt\=' support this test fails and
   (should (equal (directory-file-name "https://acme.atlassian.net")
                  "https://acme.atlassian.net")))
 
+(ert-deftest rata-test-jira-exclusion-jql-is-well-formed ()
+  "`rata-jira-exclusion-jql' quotes each status and joins them into one clause.
+Pure: string list in, JQL out, no instance needed."
+  (should-not (rata-jira-exclusion-jql nil))
+  (should (equal (rata-jira-exclusion-jql '("DONE"))
+                 "status not in (\"DONE\")"))
+  (should (equal (rata-jira-exclusion-jql '("A" "B C"))
+                 "status not in (\"A\", \"B C\")"))
+  ;; A quote inside a status name is escaped rather than closing the literal.
+  (should (equal (rata-jira-exclusion-jql '("a\"b"))
+                 "status not in (\"a\\\"b\")"))
+  ;; And the configured list is what the operator asked for.
+  (let ((jql (rata-jira-exclusion-jql rata-jira-excluded-statuses)))
+    (dolist (status '("CLOSED" "DEPLOYED" "DONE" "REJECTED"))
+      (should (string-match-p (regexp-quote (concat "\"" status "\"")) jql)))))
+
+(ert-deftest rata-test-jira-default-jql-composes-with-upstream ()
+  "The exclusion is added to jira.el's default arguments, never in place of them.
+`rata-jira--default-jql-value' is a `:filter-return' advice, so whatever
+upstream puts in the default list (`--myself', `jira-issues-default-type')
+has to survive it, and an explicit `--jql=' has to win."
+  (let ((out (rata-jira--default-jql-value '("--myself" "--type=Bug"))))
+    (should (member "--myself" out))
+    (should (member "--type=Bug" out))
+    (should (member (concat "--jql=" (rata-jira-exclusion-jql
+                                      rata-jira-excluded-statuses))
+                    out)))
+  ;; An explicit JQL is left alone: exactly one --jql= comes out.
+  (let ((out (rata-jira--default-jql-value '("--myself" "--jql=project = X"))))
+    (should (equal out '("--myself" "--jql=project = X"))))
+  ;; Empty list of statuses: upstream's default, untouched.
+  (let ((rata-jira-excluded-statuses nil))
+    (should (equal (rata-jira--default-jql-value '("--myself")) '("--myself")))))
+
+(ert-deftest rata-test-jira-default-query-reaches-the-transient ()
+  "The finished statuses are actually excluded from the query `jira-issues' runs.
+Three things have to hold together and only this test sees all three: jira.el
+still computes its default through `jira-issues--transient-default-value' (a
+private function -- `advice-add' on a renamed one succeeds and does nothing),
+the advice is installed on it, and the resulting value is what
+`jira-issues--refresh' reads back out of the prefix as `--jql='.
+`transient-values' is bound to nil because a value the operator persisted with
+`C-x C-s' on this machine would otherwise decide the answer."
+  (should (require 'jira-issues nil t))
+  (should (fboundp 'jira-issues--transient-default-value))
+  (should (advice-member-p #'rata-jira--default-jql-value
+                           'jira-issues--transient-default-value))
+  (let* ((transient-values nil)
+         (expected (rata-jira-exclusion-jql rata-jira-excluded-statuses))
+         (args (transient-args 'jira-issues-menu)))
+    ;; Read back exactly as jira-issues--refresh does (jira-issues.el:201).
+    (should (equal (transient-arg-value "--jql=" args) expected))
+    ;; ...and upstream's own default is still in force alongside it.
+    (should (transient-arg-value "--myself" args))))
+
 (defun rata-test--use-package-forms-with-config ()
   "Return ((PKG . COMMANDS) ...) for `use-package\=' forms in lisp/ that have both.
 

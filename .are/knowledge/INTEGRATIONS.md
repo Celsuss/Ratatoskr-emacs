@@ -54,8 +54,12 @@ client-side sort then makes look deliberate. The symptom is *missing issues with
 not an empty list, so it does not look like the endpoint problem above. Mitigation is the
 page size, raised to 100 in `init-jira.el` with the reasoning inline;
 `rata-test-jira-issues-single-page-assumption-still-holds` fails when upstream gains
-`startAt`, so the workaround is retired rather than inherited. See L-038 and
-`docs/jira-cheatsheet.org`.
+`startAt`, so the workaround is retired rather than inherited. Narrowing the query helps
+for the same reason: since 2026-09-08 the default excludes `rata-jira-excluded-statuses`
+(D-016), so the 100 rows are open work rather than an arbitrary slice of all history.
+A status name the instance does not carry makes Jira reject the whole query with a 400 —
+that failure is an *empty* list, which is the endpoint-shaped symptom above, not this one.
+See L-038, L-040, D-016 and `docs/jira-cheatsheet.org`.
 
 **How a file reaches either ACP agent — read this before writing any Elisp for it.**
 `agent-shell` already ships the whole context-send family and *nothing in it is

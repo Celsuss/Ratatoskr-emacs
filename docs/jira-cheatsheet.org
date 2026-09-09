@@ -94,8 +94,9 @@ miss:
    you do.
 
 ~C-g~ dismisses the popup. *The arguments are not sticky:* transient re-initialises the
-prefix from its default value on every invocation — here =--myself= plus
-=jira-issues-default-type= if set (=jira-issues--transient-default-value=) — so a filter you
+prefix from its default value on every invocation — here =--myself=, the status exclusion
+in =--jql== (see below), and =jira-issues-default-type= if set
+(=jira-issues--transient-default-value=, plus this config's advice on it) — so a filter you
 built by hand is gone the next time you open it. That is what ~C-x s~ (this session) and
 ~C-x C-s~ (all sessions) are for: they store the current argument set in the prefix itself, and
 only then does reopening the menu show what you last ran. ~C-x C-k~ goes back to the default.
@@ -116,7 +117,7 @@ users, versions, types). Set what you want, then press ~l~ to run the query.
 | ~R~       | =--reporter=        |                                                 |
 | ~r~       | =--resolution=      |                                                 |
 | ~v~       | =--version=         | Fix version                                     |
-| ~j~       | =--jql=             | Raw JQL — escape hatch for anything above        |
+| ~j~       | =--jql=             | Raw JQL — escape hatch. *Pre-filled* with the status exclusion; clear it to see finished issues |
 | ~l~       | —                  | *Run the query*                                  |
 | ~F~       | —                  | Apply a saved Jira filter (ignores the args above) |
 | ~C-x s~   | —                  | Remember these args for this Emacs session       |
@@ -271,3 +272,10 @@ Mitigations, in order of effort:
 Note that ~m~ (=--myself=) is on by default, so issues where you are only the
 reporter or a watcher never appear at all — that is scope, not truncation.
 Turn it off with ~, l~ then ~m~, and set ~R~ (reporter) instead.
+
+The same goes for finished work: =rata-jira-excluded-statuses= (=lisp/init-jira.el=,
+default =CLOSED=, =DEPLOYED=, =DONE=, =REJECTED=) is injected as
+=status not in (...)= in the =--jql== argument, so the default list is open work only.
+Clear ~j~ in the query menu for a one-off look at everything, or trim the variable in
+=local.el=. A status name that no status in the instance carries makes Jira reject the
+*whole* query with a 400 — an empty list rather than an unfiltered one is the symptom.

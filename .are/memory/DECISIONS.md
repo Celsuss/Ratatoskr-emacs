@@ -347,3 +347,50 @@ a line, and RET opening the thing at point is the convention everywhere else her
 Superseded: L-017's second bullet ("`evil-set-initial-state` is the cheap fix; re-binding is
 the expensive one") is now a statement about a trade this repository has decided the other
 way. Its diagnostic value — read the mode's ancestry, not the readme — is untouched.
+
+## D-016 — The Jira list hides finished work by default, through `--jql=`, not `--status=`
+
+**2026-09-08.** On operator instruction: the `*Jira Issues*` list is "what is on my plate",
+so `CLOSED`, `DEPLOYED`, `DONE` and `REJECTED` are out of the default query alongside the
+existing `assignee = currentUser()`.
+
+jira.el offers no way to say this. `--status=` is a single equality
+(`jira-issues.el:222`) and there is no negation argument at all, so the choice was between
+patching upstream's transient and using the one argument that composes: `--jql=`. When it
+is set, `jira-issues--refresh` emits `(JQL) AND <everything else>`
+(`jira-issues.el:231-238`), so the exclusion survives whatever the operator toggles in the
+query menu instead of being replaced by it.
+
+The value reaches a menu that is never opened through the prefix's *default value* — the
+same place `--myself` comes from. `jira-issues` does not invoke the transient; it calls
+`tablist-revert`, and `jira-issues--refresh` reads `(transient-args 'jira-issues-menu)`,
+for which transient falls back to the set, saved or default value of a prefix that was
+never displayed (L-040).
+
+Two shapes were available and the cheaper one was rejected:
+
+- **Replacing `jira-issues--transient-default-value`** (an `oset` on the prefix prototype's
+  `value` slot, or `:override`) would restate `--myself` and `jira-issues-default-type` in
+  this repository, freezing today's upstream default into our config.
+- **`:filter-return` advice** — what is used — composes on top of whatever upstream returns.
+  An upstream change to the default set is inherited; the only thing this module asserts is
+  the one clause it cares about.
+
+Consequences accepted:
+
+1. **The statuses are instance workflow names, and a wrong one is not a soft failure.** JQL
+   matches them case-insensitively but rejects a name no status in the instance carries —
+   the whole query 400s and the list is *empty*, not unfiltered. Hence
+   `rata-jira-excluded-statuses` is a `defcustom` that can be trimmed in `local.el`, and nil
+   restores jira.el's own query. The names are not secret (they are ordinary workflow
+   vocabulary), so the default stays in the tracked file rather than moving to `local.el`.
+2. **Advising a private function is a rename away from silence.** `advice-add` on a function
+   that does not exist succeeds and does nothing, so the guard is
+   `rata-test-jira-default-query-reaches-the-transient`, which asserts the end state —
+   `transient-arg-value "--jql="` on the real prefix — rather than the advice's presence
+   alone.
+3. **`F` (a saved Jira filter) still ignores this**, by design: it replaces the JQL wholesale
+   (`jira-issues.el:340`), and a server-side filter is the server's query, not ours.
+
+Related: D-011 (Jira is a view, not a sync), L-038 (the page-size cap this narrowing also
+relieves — a smaller result set is less likely to be truncated at 100), L-040.

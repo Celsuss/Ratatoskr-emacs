@@ -277,7 +277,16 @@ init-present → init-dashboard
   things are deliberate. `jira-username`/`jira-token` are left unset, which is what makes
   `jira.el` fall back to `auth-source`; and `rata-jira-base-url` defaults to nil and is set in
   the gitignored `local.el`, because the instance hostname is corporate identity on a public
-  remote. **Evil stays live in the three Jira buffers, and jira.el's own keys are mirrored
+  remote. **The default query is narrowed to open work:** `rata-jira-excluded-statuses`
+  reaches jira.el as a `--jql=` argument, injected by a `:filter-return` advice on
+  `jira-issues--transient-default-value`, because `--status=` is a single equality and the
+  transient has no negation argument (D-016, L-040). It composes rather than replaces, so
+  `--myself` and `jira-issues-default-type` still come from upstream, and `C-x C-k` in the
+  query menu returns to it. A status name the instance does not carry makes Jira reject the
+  *whole* query with a 400, so the symptom is an empty list rather than an unfiltered one;
+  `rata-test-jira-default-query-reaches-the-transient` asserts the argument the list actually
+  runs with, because `advice-add` on a renamed private function succeeds silently.
+  **Evil stays live in the three Jira buffers, and jira.el's own keys are mirrored
   under the local leader `,`** (D-015, reversing L-017's recommendation on operator
   instruction). Upstream does not support evil and its keymaps live in `tabulated-list-mode`
   / `magit-section-mode` children, which evil's normal state shadows; emacs state fixes that

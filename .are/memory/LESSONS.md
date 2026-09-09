@@ -1216,3 +1216,39 @@ its most visible symptom. The new test asserts the observable end state instead 
 Related: L-011 and [`FAIL-0009`](failures/FAIL-0009.md) (the same root cause for leader keys),
 L-017 (why these buffers need emacs state at all), L-038 (the other jira.el defect the operator
 found by using the feature).
+
+## L-040 — A transient prefix's default value is configuration, and it applies to a menu nobody opens
+
+A package built on `transient` looks like it has no configuration surface for its query: the
+arguments are letters in a popup, and the popup is a UI. It is not. `transient-args` on a
+prefix that was never invoked does not return nil — `transient-prefix-value` initialises the
+prefix from its **set, saved or default** value and reads the suffix values back out of that
+(`transient.el:4287-4325`). So a command that renders a list without showing its own menu is
+still running the menu's default arguments, and *those* are the configuration.
+
+This is how the Jira issue list gained a "hide finished work" default (D-016) with no fork:
+`jira-issues` calls `tablist-revert`, `jira-issues--refresh` reads
+`(transient-args 'jira-issues-menu)`, and the default value function supplies `--myself`.
+Adding `--jql=status not in (…)` to that same list makes it arrive as though the operator had
+typed it, and jira.el's own combining logic then ANDs it with everything else.
+
+Three things generalise:
+
+1. **Prefer `:filter-return` advice on the default-value function to replacing it.** The
+   default is upstream's statement about how the feature should behave out of the box.
+   Composing keeps that statement; overriding copies today's version of it into your config,
+   where it will not be updated.
+2. **The precedence is set > saved > default, so the escape hatch already exists.** `C-x s`
+   and `C-x C-s` in the menu store a value that wins over anything a config supplies, and
+   `C-x C-k` comes back to it. A default injected this way is a default, not a lock — which
+   is the right shape for an opinion about someone's own issue list.
+3. **Advice on a private function is a rename away from doing nothing, silently.**
+   `advice-add` on an unbound symbol succeeds. Test the *end state* — call
+   `transient-args` on the real prefix and assert `transient-arg-value` for the argument you
+   injected — not `advice-member-p` alone. Bind `transient-values` to nil in that test, or a
+   value the operator persisted on this machine decides the result instead of the code
+   (the same class of trap as any test that reads real user state).
+
+Related: L-038 and D-016 (the Jira list this was used on), L-039 (the other "this
+configuration never ran" defect in the same module — there the code was dead, here the
+question was whether it would be reached at all).
