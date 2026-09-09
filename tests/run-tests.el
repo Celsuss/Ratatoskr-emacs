@@ -1039,6 +1039,83 @@ the advice is installed on it, and the resulting value is what
     ;; ...and upstream's own default is still in force alongside it.
     (should (transient-arg-value "--myself" args))))
 
+(ert-deftest rata-test-jira-agile-url-passes-through-jira-api ()
+  "An Agile URL built by `rata-jira-agile-url' survives `jira-api--url' untouched.
+The sprint commands reuse `jira-api-call' for auth and error handling by
+handing it a full `/rest/agile/1.0/' URL, which works only because
+`jira-api--url' passes an endpoint through when it already starts with the base
+URL (jira-api.el:174).  This binds that assumption to upstream's code: if it
+changes, this fails instead of every sprint move 404ing under `/rest/api/N/'."
+  (let* ((base "https://jira.example.com")
+         (url (rata-jira-agile-url base "sprint/42/issue")))
+    (should (equal url "https://jira.example.com/rest/agile/1.0/sprint/42/issue"))
+    ;; Trailing slash on the base and leading slash on the endpoint both fold away.
+    (should (equal (rata-jira-agile-url "https://jira.example.com/" "/backlog/issue")
+                   "https://jira.example.com/rest/agile/1.0/backlog/issue"))
+    (should (require 'jira-api nil t))
+    (should (equal (jira-api--url base url) url))
+    ;; ...and a bare endpoint still gets the REST prefix, so the two families
+    ;; do not collide.
+    (should (string-match-p "/rest/api/[0-9]+/issue/X\\'" (jira-api--url base "issue/X")))))
+
+(ert-deftest rata-test-jira-open-sprints-put-the-active-one-first ()
+  "The active sprint leads the list and is labelled; closed sprints are dropped.
+The operator's board is one never-ending sprint, so the default offered by
+`rata-jira-move-to-sprint' has to be the active one, visibly."
+  (let* ((sprints '(((id . 3) (name . "Future") (state . "future"))
+                    ((id . 1) (name . "Old") (state . "closed"))
+                    ((id . 2) (name . "Board") (state . "active")
+                     (endDate . "2030-01-01T10:00:00.000+02:00"))))
+         (open (rata-jira-open-sprints sprints)))
+    (should (equal (mapcar (lambda (s) (alist-get 'id s)) open) '(2 3)))
+    (should (equal (alist-get 'id (rata-jira-active-sprint open)) 2))
+    (should (equal (rata-jira-sprint-label (car open)) "Board  [active]  ends 2030-01-01"))
+    (should (equal (rata-jira-sprint-label (cadr open)) "Future  [future]"))
+    (should-not (rata-jira-active-sprint '(((id . 3) (name . "F") (state . "future")))))))
+
+(ert-deftest rata-test-jira-move-payloads-are-chunked-at-fifty ()
+  "Issue keys are sent as a JSON array, at most 50 per request, in order."
+  (should (equal (rata-jira-move-payloads '("A-1" "A-2"))
+                 '((("issues" . ["A-1" "A-2"])))))
+  (should-not (rata-jira-move-payloads nil))
+  (let* ((keys (mapcar (lambda (i) (format "A-%d" i)) (number-sequence 1 120)))
+         (bodies (rata-jira-move-payloads keys)))
+    (should (= (length bodies) 3))
+    (should (equal (mapcar (lambda (b) (length (alist-get "issues" b nil nil #'equal)))
+                           bodies)
+                   '(50 50 20)))
+    (should (equal (aref (alist-get "issues" (car bodies) nil nil #'equal) 0) "A-1"))
+    (should (equal (aref (alist-get "issues" (caddr bodies) nil nil #'equal) 19) "A-120"))
+    ;; What actually goes on the wire.
+    (should (equal (json-encode (car (rata-jira-move-payloads '("A-1"))))
+                   "{\"issues\":[\"A-1\"]}"))))
+
+(ert-deftest rata-test-jira-agile-error-message-uses-jiras-words ()
+  "Jira's `errorMessages' and `errors' are joined into one line; nothing gives nil."
+  (should (equal (rata-jira-agile-error-message
+                  '((errorMessages . ["Sprint does not exist"])))
+                 "Sprint does not exist"))
+  (should (equal (rata-jira-agile-error-message
+                  '((errorMessages . []) (errors . ((issues . "Issue X not found")))))
+                 "issues: Issue X not found"))
+  (should (equal (rata-jira-agile-error-message
+                  '((errorMessages . ["a" "b"]) (errors . ((f . "c")))))
+                 "a; b; f: c"))
+  (should-not (rata-jira-agile-error-message nil))
+  (should-not (rata-jira-agile-error-message '((errorMessages . [])))))
+
+(ert-deftest rata-test-jira-sprint-keys-name-real-commands ()
+  "Every sprint key binds an interactive `rata-jira-' command that exists.
+The bindings are built from `rata-jira-sprint-keys' by `general', which binds a
+symbol without checking it, so a typo here would be a dead key."
+  (let ((defs (seq-filter #'consp rata-jira-sprint-keys)))
+    (should (> (length defs) 1))
+    (dolist (def defs)
+      (unless (eq (car def) :ignore)
+        (should (commandp (car def)))
+        (should (string-prefix-p "rata-jira-" (symbol-name (car def))))
+        (should (plist-get (cdr def) :which-key))))))
+
 (defun rata-test--use-package-forms-with-config ()
   "Return ((PKG . COMMANDS) ...) for `use-package\=' forms in lisp/ that have both.
 
@@ -1148,6 +1225,9 @@ So this asserts evil is live, the mirror is reachable, and `RET\=' opens an issu
           ;; The key the operator actually pressed, now under the local leader.
           (should (eq (key-binding (kbd ", l")) 'jira-issues-menu))
           (should (eq (key-binding (kbd ", ?")) 'jira-issues-actions-menu))
+          ;; This module's own sprint commands share the leader map (D-017).
+          (should (eq (key-binding (kbd ", m s")) 'rata-jira-move-to-sprint))
+          (should (eq (key-binding (kbd ", m b")) 'rata-jira-move-to-backlog))
           ;; RET opens the issue rather than moving down a line.
           (should-not (eq (key-binding (kbd "RET")) 'evil-ret))
           (should (commandp (key-binding (kbd "RET"))))
@@ -1166,6 +1246,7 @@ So this asserts evil is live, the mirror is reachable, and `RET\=' opens an issu
           (should (eq evil-state 'normal))
           (should (eq (key-binding (kbd ", ?")) 'jira-detail--actions-menu))
           (should (eq (key-binding (kbd ", w")) 'jira-detail--watchers-menu))
+          (should (eq (key-binding (kbd ", m s")) 'rata-jira-move-to-sprint))
           (should (commandp (key-binding (kbd ", c"))))
           ;; magit-section folding survives, which is why `TAB\=' is left alone.
           (should (eq (key-binding (kbd "TAB")) 'magit-section-toggle)))

@@ -1252,3 +1252,19 @@ Three things generalise:
 Related: L-038 and D-016 (the Jira list this was used on), L-039 (the other "this
 configuration never ran" defect in the same module — there the code was dead, here the
 question was whether it would be reached at all).
+
+## L-041 — A bare `(defvar foreign-var)` stub at top level fails the `rata-` prefix lint; stubs live under `eval-when-compile`
+
+**2026-09-09**, while adding the sprint commands to `init-jira.el` (D-017). Two compile-time
+stubs for hooks owned by jira.el — `(defvar jira-issues-changed-hook)` — were written at top
+level, the way the byte-compiler documentation suggests. `scripts/lint.sh` matched them with
+`^\(def(un|var|custom|macro) ` and failed the `full` run as "definition missing rata- prefix",
+after the ERT suite had already passed. The lint cannot tell a one-argument declaration from a
+definition, and it should not have to: the convention here is that foreign stubs are indented
+inside `(eval-when-compile …)` (`init-present.el:8`), which the anchored regex skips on
+purpose. `declare-function` is unaffected, since it is not a `def` form.
+
+Two things follow. Write `(eval-when-compile (defvar x))` for a foreign variable, never a bare
+top-level `defvar` — and never a `require` in there (L-028). And run `just are-verify fast`
+before the long suites when a module gained new top-level forms: lint is half a second and
+would have caught this before the three-minute `full`.

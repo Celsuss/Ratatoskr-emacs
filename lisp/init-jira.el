@@ -4,7 +4,9 @@
 ;; A read-mostly second view onto work tasks: Jira stays in Jira and gets its own
 ;; buffer, `work_tasks.org' stays hand-written.  Nothing here writes into the
 ;; org-roam tree.  Press `, e' in the issues list to export what is on screen to
-;; Org-mode when a one-off bridge is wanted.  Key-by-key usage: docs/jira-cheatsheet.org.
+;; Org-mode when a one-off bridge is wanted.  The one thing written back besides what
+;; jira.el already offers is sprint membership (`, m', Agile REST API), because the
+;; team board is a never-ending sprint.  Key-by-key usage: docs/jira-cheatsheet.org.
 ;;
 ;; Credentials are never configured here.  Leaving `jira-username' and `jira-token'
 ;; unset is what makes jira.el fall back to `auth-source', i.e. ~/.authinfo.gpg:
@@ -120,6 +122,273 @@ default query would be upstream's decision, not ours."
   (advice-add 'jira-issues--transient-default-value
               :filter-return #'rata-jira--default-jql-value))
 
+;; --- Sprints: move issues onto and off the board (Agile REST API) ---
+;;
+;; The team board is a Scrum board with one sprint that is never closed, run as a
+;; kanban board.  "Put this on the board" therefore means "move the issue into the
+;; active sprint", and jira.el has nothing for it: no board or sprint listing and no
+;; move.  `, u' on the Sprint field goes through the issue PUT with a candidate list
+;; scraped from issues that already carry a sprint, so a fresh sprint is never
+;; offered, and the value is sent as an object where the field wants an id.
+;;
+;; Sprint operations live in a different API family, `/rest/agile/1.0/', which
+;; `jira-api--url' cannot build -- but it passes an endpoint through untouched when
+;; it already starts with the base URL (jira-api.el:174), so a full Agile URL gets
+;; jira.el's auth header, error log and current-host handling for free, with no
+;; second HTTP layer and no patch to upstream.
+;; `rata-test-jira-agile-url-passes-through-jira-api' binds that assumption to
+;; upstream's code.  request.el skips the parser on the 204 these endpoints return
+;; (request.el:567), so jira.el's default `json-read' parser is safe here.
+;;
+;; The active sprint is shown everywhere -- as the default in the prompt, on its
+;; candidate, in the confirmation -- because on a never-ending sprint the whole
+;; question is "did it land on the board", and the wrong sprint looks like success.
+;; Calls are synchronous: the pickers need the answer before they can ask, and a
+;; move is one small POST -- the same trade jira.el makes for its own menus.
+;; See D-017 and docs/jira-cheatsheet.org.
+
+(defcustom rata-jira-board-id nil
+  "Numeric id of the Agile board whose sprints `rata-jira-move-to-sprint' offers.
+Set it in `local.el' (see `local.el.example'); it is in the board's URL as
+`rapidView=NNN'.  While nil, the first sprint command asks which board to use
+and remembers the answer for the session.  `, m o' changes it either way."
+  :type '(choice (const :tag "Ask once per session" nil) integer)
+  :group 'rata)
+
+(defvar rata-jira--session-board-id nil
+  "Board chosen with `rata-jira-choose-board' this session.
+When set it beats `rata-jira-board-id'.")
+
+(defvar rata-jira--boards nil
+  "Cache: alist of (BASE-URL . BOARDS), BOARDS as the Agile API returns them.")
+
+(defvar rata-jira--sprints nil
+  "Cache: alist of ((BASE-URL . BOARD-ID) . SPRINTS), open sprints per board.")
+
+(declare-function jira-api-call "jira-api")
+(declare-function jira-api--get-current-url "jira-api")
+(declare-function jira-utils-marked-item "jira-utils")
+(declare-function jira-utils-marked-items "jira-utils")
+(declare-function request-response-data "request")
+;; Compile-time stubs only -- these hooks are owned by jira.el, which loads later.
+(eval-when-compile
+  (defvar jira-issues-changed-hook)
+  (defvar jira-detail-changed-hook))
+
+(defun rata-jira-agile-url (base endpoint)
+  "Return the Agile REST URL for ENDPOINT under BASE.
+The result starts with BASE, which is what makes `jira-api--url' pass it
+through instead of prefixing `/rest/api/N/'."
+  (concat (directory-file-name base) "/rest/agile/1.0/"
+          (if (string-prefix-p "/" endpoint) (substring endpoint 1) endpoint)))
+
+(defun rata-jira-agile-error-message (data)
+  "Return Jira's own explanation from an Agile API error body DATA, or nil.
+DATA is the parsed JSON: `errorMessages' is a vector of strings and `errors'
+an alist of field -> string; either, both or neither may be present."
+  (let ((all (append (append (alist-get 'errorMessages data) nil)
+                     (mapcar (lambda (e) (format "%s: %s" (car e) (cdr e)))
+                             (alist-get 'errors data)))))
+    (when all (string-join all "; "))))
+
+(defun rata-jira--agile-call (verb endpoint &rest args)
+  "Synchronous VERB request to the Agile ENDPOINT; return the parsed body.
+ARGS are passed on to `jira-api-call'.  Signals a `user-error' carrying Jira's
+message on failure, because the reasons are the operator's to act on: a closed
+sprint, an issue outside the board filter, no Jira Software licence."
+  (let* ((failure nil)
+         (response
+          (apply #'jira-api-call verb
+                 (rata-jira-agile-url (jira-api--get-current-url) endpoint)
+                 :sync t
+                 :error (cl-function
+                         (lambda (&key response error-thrown &allow-other-keys)
+                           (setq failure
+                                 (or (ignore-errors
+                                       (rata-jira-agile-error-message
+                                        (request-response-data response)))
+                                     (format "%s" error-thrown)))))
+                 args)))
+    (when failure
+      (user-error "Jira: %s" failure))
+    (request-response-data response)))
+
+(defun rata-jira--agile-values (endpoint &optional params)
+  "Return every `values' element of the paged Agile ENDPOINT as a list.
+The Agile API pages with `startAt' and reports `isLast'; boards and sprints
+both do, and an instance can have more than the 50-per-page default."
+  (let ((start 0) (all nil) (last nil))
+    (while (not last)
+      (let* ((page (rata-jira--agile-call
+                    "GET" endpoint
+                    :params (append params
+                                    `(("startAt" . ,(number-to-string start))
+                                      ("maxResults" . "50")))))
+             (values (append (alist-get 'values page) nil)))
+        (setq all (append all values)
+              start (+ start (length values))
+              last (or (eq (alist-get 'isLast page) t) (null values)))))
+    all))
+
+(defun rata-jira--boards (&optional refresh)
+  "Return the boards of the current host, from cache unless REFRESH."
+  (let ((url (jira-api--get-current-url)))
+    (when refresh
+      (setq rata-jira--boards (assoc-delete-all url rata-jira--boards)))
+    (or (cdr (assoc url rata-jira--boards))
+        (let ((boards (rata-jira--agile-values "board")))
+          (push (cons url boards) rata-jira--boards)
+          boards))))
+
+(defun rata-jira--sprints (board-id &optional refresh)
+  "Return the active and future sprints of BOARD-ID, from cache unless REFRESH."
+  (let ((key (cons (jira-api--get-current-url) board-id)))
+    (when refresh
+      (setq rata-jira--sprints (assoc-delete-all key rata-jira--sprints)))
+    (or (cdr (assoc key rata-jira--sprints))
+        (let ((sprints (rata-jira--agile-values (format "board/%s/sprint" board-id)
+                                                '(("state" . "active,future")))))
+          (push (cons key sprints) rata-jira--sprints)
+          sprints))))
+
+(defun rata-jira-board-label (board)
+  "Return the completion label for BOARD: name, type, project and id."
+  (let ((project (alist-get 'projectKey (alist-get 'location board))))
+    (format "%s  [%s%s]  #%s"
+            (alist-get 'name board) (alist-get 'type board)
+            (if project (concat ", " project) "")
+            (alist-get 'id board))))
+
+(defun rata-jira-open-sprints (sprints)
+  "Return the open SPRINTS, active ones first.
+Closed sprints are dropped even if the server sent them: an issue can be moved
+into one, and nothing on the board would show it."
+  (let* ((open (seq-remove (lambda (s) (equal (alist-get 'state s) "closed")) sprints))
+         (active-p (lambda (s) (equal (alist-get 'state s) "active"))))
+    (append (seq-filter active-p open) (seq-remove active-p open))))
+
+(defun rata-jira-sprint-label (sprint)
+  "Return the completion label for SPRINT: name, state and end date if any."
+  (let ((end (alist-get 'endDate sprint)))
+    (format "%s  [%s]%s"
+            (alist-get 'name sprint) (alist-get 'state sprint)
+            (if (and (stringp end) (>= (length end) 10))
+                (format "  ends %s" (substring end 0 10))
+              ""))))
+
+(defun rata-jira-active-sprint (sprints)
+  "Return the active sprint among SPRINTS, or nil."
+  (seq-find (lambda (s) (equal (alist-get 'state s) "active")) sprints))
+
+(defun rata-jira-move-payloads (keys)
+  "Return the request bodies moving issue KEYS.
+At most 50 keys per body, which is the Agile API's cap per call."
+  (let (out)
+    (while keys
+      (push `(("issues" . ,(vconcat (seq-take keys 50)))) out)
+      (setq keys (nthcdr 50 keys)))
+    (nreverse out)))
+
+(defun rata-jira--target-issues ()
+  "Return the issue keys an action applies to.
+The marked ones, else the one at point -- the same rule as jira.el's own
+change-issue menu, in both the list and the detail buffer."
+  (let ((keys (delq nil (or (jira-utils-marked-items)
+                            (list (jira-utils-marked-item))))))
+    (or keys (user-error "No Jira issue here; run `jira-issues' first"))))
+
+(defun rata-jira--board-id ()
+  "Return the board to work with.
+Asks once per session when nothing is configured."
+  (or rata-jira--session-board-id
+      rata-jira-board-id
+      (rata-jira-choose-board)))
+
+(defun rata-jira--after-change ()
+  "Refresh whichever jira.el buffer the action ran from, as jira-actions does."
+  (cond ((derived-mode-p 'jira-issues-mode) (run-hooks 'jira-issues-changed-hook))
+        ((derived-mode-p 'jira-detail-mode) (run-hooks 'jira-detail-changed-hook))))
+
+(defun rata-jira-choose-board (&optional refresh)
+  "Pick the Agile board for this session from those the instance lists.
+With prefix argument REFRESH, ask the server again instead of using the cache."
+  (interactive "P")
+  (let* ((boards (rata-jira--boards refresh))
+         (choices (mapcar (lambda (b) (cons (rata-jira-board-label b) (alist-get 'id b)))
+                          boards))
+         (pick (and choices (completing-read "Jira board: " choices nil t))))
+    (unless choices (user-error "Jira: this host lists no Agile boards"))
+    (setq rata-jira--session-board-id (cdr (assoc pick choices)))
+    (message "Jira board for this session: %s" pick)
+    rata-jira--session-board-id))
+
+(defun rata-jira-show-active-sprint (&optional refresh)
+  "Say which sprint is active on the team board, with its end date.
+With prefix argument REFRESH, refetch the sprint list first."
+  (interactive "P")
+  (let* ((board (rata-jira--board-id))
+         (active (rata-jira-active-sprint (rata-jira--sprints board refresh))))
+    (if active
+        (message "Board #%s: active sprint is %s" board (rata-jira-sprint-label active))
+      (message "Board #%s has no active sprint" board))))
+
+(defun rata-jira-move-to-sprint (&optional refresh)
+  "Move the marked issues (or the one at point) into a sprint of the team board.
+The active sprint is the default and is labelled as such: on a board run as a
+never-ending sprint, that is the move that means \"onto the board\".  With
+prefix argument REFRESH, refetch the sprint list first."
+  (interactive "P")
+  (let* ((keys (rata-jira--target-issues))
+         (board (rata-jira--board-id))
+         (sprints (rata-jira-open-sprints (rata-jira--sprints board refresh)))
+         (active (rata-jira-active-sprint sprints))
+         (default (and active (rata-jira-sprint-label active)))
+         (choices (mapcar (lambda (s) (cons (rata-jira-sprint-label s) (alist-get 'id s)))
+                          sprints))
+         (what (string-join keys ", ")))
+    (unless choices (user-error "Jira: board #%s has no open sprint" board))
+    (let* ((pick (completing-read
+                  (format "Move %s to sprint%s: " what
+                          (if default (format " (default %s)" default) ""))
+                  choices nil t nil nil default))
+           (sprint-id (cdr (assoc pick choices))))
+      (dolist (body (rata-jira-move-payloads keys))
+        (rata-jira--agile-call "POST" (format "sprint/%s/issue" sprint-id) :data body))
+      (message "Moved %s to %s" what pick)
+      (rata-jira--after-change))))
+
+(defun rata-jira-move-to-backlog ()
+  "Move the marked issues (or the one at point) out of their sprint.
+They land in the backlog.  On a never-ending sprint this is the only way to
+take something off the board."
+  (interactive)
+  (let* ((keys (rata-jira--target-issues))
+         (what (string-join keys ", ")))
+    (when (y-or-n-p (format "Move %s to the backlog, off the board? " what))
+      (dolist (body (rata-jira-move-payloads keys))
+        (rata-jira--agile-call "POST" "backlog/issue" :data body))
+      (message "Moved %s to the backlog" what)
+      (rata-jira--after-change))))
+
+(defun rata-jira-refresh-agile-cache ()
+  "Forget the cached boards and sprints; the next command fetches them again."
+  (interactive)
+  (setq rata-jira--boards nil
+        rata-jira--sprints nil)
+  (message "Jira boards and sprints will be fetched again on next use"))
+
+(defconst rata-jira-sprint-keys
+  '("m"  (:ignore t :which-key "sprint")
+    "ms" (rata-jira-move-to-sprint :which-key "move to sprint (active = default)")
+    "mb" (rata-jira-move-to-backlog :which-key "move to backlog")
+    "ma" (rata-jira-show-active-sprint :which-key "show active sprint")
+    "mo" (rata-jira-choose-board :which-key "choose board")
+    "mr" (rata-jira-refresh-agile-cache :which-key "refetch boards/sprints"))
+  "Local-leader bindings for the sprint commands.
+Shared by the list and detail buffers.  These are this module's own commands,
+not a mirror of upstream keys, so they sit outside
+`rata-jira-issues-key-mirror'.")
+
 ;; --- Evil: these buffers stay in evil normal state (D-015) ---
 ;;
 ;; jira.el has no evil support (upstream issue #31): `jira-issues-mode' derives from
@@ -211,8 +480,9 @@ EXTRA is key/definition pairs in `general-define-key' form, also prefixed."
          (append (rata-jira--mirror-args (symbol-value map-symbol) mirror) extra)))
 
 (with-eval-after-load 'jira-issues
-  (rata-jira--bind-local-leader 'jira-issues-mode-map rata-jira-issues-key-mirror
-                                "r" '(tablist-revert :which-key "refresh"))
+  (apply #'rata-jira--bind-local-leader 'jira-issues-mode-map rata-jira-issues-key-mirror
+         "r" '(tablist-revert :which-key "refresh")
+         rata-jira-sprint-keys)
   ;; `RET' opens the issue.  `evil-ret' moves down one line, which is useless in a
   ;; read-only list, and RET is what every other list-like buffer here uses.
   (general-define-key
@@ -221,7 +491,8 @@ EXTRA is key/definition pairs in `general-define-key' form, also prefixed."
    "RET" (lookup-key jira-issues-mode-map (kbd "RET"))))
 
 (with-eval-after-load 'jira-detail
-  (rata-jira--bind-local-leader 'jira-detail-mode-map rata-jira-detail-key-mirror))
+  (apply #'rata-jira--bind-local-leader 'jira-detail-mode-map rata-jira-detail-key-mirror
+         rata-jira-sprint-keys))
 
 (with-eval-after-load 'jira-tempo
   (rata-jira--bind-local-leader 'jira-tempo-mode-map rata-jira-tempo-key-mirror

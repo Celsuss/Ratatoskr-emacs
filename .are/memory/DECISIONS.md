@@ -394,3 +394,51 @@ Consequences accepted:
 
 Related: D-011 (Jira is a view, not a sync), L-038 (the page-size cap this narrowing also
 relieves — a smaller result set is less likely to be truncated at 100), L-040.
+
+## D-017 — Sprint moves go through jira.el's request layer with a full Agile URL; the board id lives in `local.el`
+
+**2026-09-09.** On operator request: "move tasks from the backlog to a sprint", with the
+clarification that the team board is a Scrum board carrying one sprint that is never
+closed and is used as a kanban board. So the feature is "move into the active sprint",
+and the operator's one condition was that the active sprint is shown so the move can be
+confirmed.
+
+**What was found.** jira.el (1b1a436, 2026-03-15) has no Agile API support at all — no
+board or sprint listing, no move, no rank. The only path that mentions sprints,
+`U`/`, u` on the Sprint field in the detail buffer, builds its candidates from a JQL
+search over issues that already carry a sprint and sends the value as an `{id}` object,
+so it cannot offer a fresh sprint and is not expected to work. Kanban "move to board"
+is not applicable to this board type and was dropped rather than deferred.
+
+**Decision.**
+
+1. *Reuse `jira-api-call`; do not add a second HTTP layer or patch upstream.*
+   `jira-api--url` passes an endpoint through untouched when it already starts with the
+   base URL (jira-api.el:174), so `rata-jira-agile-url` builds `<base>/rest/agile/1.0/…`
+   and every sprint call inherits jira.el's auth header, error logging and
+   current-host switching. `rata-test-jira-agile-url-passes-through-jira-api` binds the
+   assumption to upstream's code. request.el skips the parser on a 204, so the default
+   `json-read` parser is safe for the move endpoints.
+2. *The active sprint is the default and is labelled everywhere* — in the prompt, on
+   its candidate, in the confirmation message. `rata-jira-open-sprints` puts it first
+   and drops closed sprints even if the server sends them.
+3. *`rata-jira-board-id` is a `local.el` value* (D-012): not a secret, but it names a
+   team on a public remote. Unset, the first command asks once per session
+   (`rata-jira-choose-board`) from the boards the instance lists.
+4. *Synchronous calls.* The pickers need the answer before they can ask, a move is one
+   small POST, and jira.el makes the same trade for its own menus (transitions are
+   fetched synchronously when the change menu opens). Errors surface as a `user-error`
+   in Jira's own words (`rata-jira-agile-error-message`).
+5. *`, m` in both buffers*, as this module's own commands rather than a mirror entry:
+   `rata-jira-sprint-keys` is shared by the list and detail maps, and the key test
+   asserts it resolves in both.
+
+**Not tested here.** Nothing in `tests/` reaches the instance. The first live use should
+check: `, m a` names the expected sprint; `, m s` on one issue lands it on the board;
+`, m b` takes it off again. The `POST backlog/issue` endpoint (without a board id) is the
+one most likely to differ across Server/DC versions — if it 404s, the fix is
+`backlog/<board-id>/issue`.
+
+Related: D-011 (a view, not a sync — this is the one deliberate write-back besides
+what jira.el already offers), D-015 (the `,` leader map), D-016 (`--jql=` narrowing).
+

@@ -304,6 +304,18 @@ init-present → init-dashboard
   was written until 2026-09-08, leaving every documented key shadowed. See
   [`FAIL-0016`](.are/memory/failures/FAIL-0016.md), L-039, D-015, and
   `rata-test-jira-buffers-keep-evil-and-mirror-keys`.
+  **Sprint membership is the one write this module adds on its own** (`, m`, D-017). The
+  team board is a Scrum board with a single never-closed sprint run as a kanban board, so
+  "onto the board" means "into the active sprint", and jira.el only *reads* the Sprint
+  field. The commands call the Agile REST API (`/rest/agile/1.0/`) through
+  `jira-api-call` by handing it a full URL — `jira-api--url` passes through anything that
+  already starts with the base URL — so auth, error logging and host switching are
+  upstream's, and `rata-test-jira-agile-url-passes-through-jira-api` pins that assumption.
+  The active sprint is always the default and always labelled, in the prompt and in the
+  confirmation. The board is `rata-jira-board-id` in `local.el`, else asked once per
+  session. Calls are synchronous and chunked at the API's 50-issue cap
+  (`rata-jira-move-payloads`); every helper that shapes a request or a label is pure and
+  tested.
 - `init-org.el` — org-agenda with org-super-agenda, org-roam, org-transclusion. Owns the
   org-roam capture templates, including `blog-post` (key `b`) — whose `:blog:` filetag and
   non-empty `:export_file_name:` are a contract with `init-blog.el` and with the

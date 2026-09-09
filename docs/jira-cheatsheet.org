@@ -51,6 +51,7 @@ nothing is marked (dired semantics, via tablist).
 | ~, t~   | ~T~        | Jump to Tempo worklogs (kills this buffer)                  |
 | ~, h~   | ~H~        | Switch Jira host (needs =jira-secondary-urls=)               |
 | ~, r~   | ~G~        | Refresh the list (=tablist-revert=)                          |
+| ~, m~   | —        | *Sprint* prefix — see [[*Sprints — the board is a never-ending sprint][Sprints]] below                    |
 | ~M-n~ / ~M-p~ | same | Next / previous page — /Cloud only/, dead here (see Truncation) |
 
 Suffixes are mnemonic rather than upstream's letters: upstream separates ~c~ and ~C~ by case,
@@ -145,10 +146,36 @@ between siblings, ~1~–~4~ set the global fold level, ~z a~ / ~z c~ / ~z o~ fol
 | ~, f~ | ~f~        | Find another issue by key or URL                       |
 | ~, y~ | ~c~        | Copy the issue key to the clipboard                    |
 | ~, r~ | ~g~        | Refresh                                                |
+| ~, m~ | —        | *Sprint* prefix — same commands as in the list         |
 
 With point on a subtask or a linked-issue section, the actions menu (~, ?~) grows two
 entries: ~RET~ opens it in Emacs, ~o~ opens it in the browser — those are transient keys, so
 they are upstream's.
+
+* Sprints — the board is a never-ending sprint
+
+The team board is a Scrum board in Jira with one sprint that is never closed, used as a
+kanban board. "Put this on the board" therefore means "move it into the active sprint",
+and jira.el has no command for it (it only reads the Sprint field). These are this
+config's own commands (=lisp/init-jira.el=, Agile REST API through jira.el's request
+layer), available under ~, m~ in both the issue list and the issue detail buffer. They act
+on the marked issues, else the one at point.
+
+| Key     | Does                                                                          |
+|---------+-------------------------------------------------------------------------------|
+| ~, m s~   | Move to a sprint. The *active* sprint is the default and labelled =[active]= — RET takes it |
+| ~, m b~   | Move to the backlog, i.e. off the board (asks first)                          |
+| ~, m a~   | Say which sprint is active on the board, and when it ends                     |
+| ~, m o~   | Choose the board for this session (from the boards the instance lists)        |
+| ~, m r~   | Forget cached boards and sprints; the next command fetches them again         |
+
+The sprint prompt reads =Move PROJ-1 to sprint (default Board  [active]  ends 2030-01-01):=
+and the confirmation names the sprint it moved to, so a wrong sprint cannot pass for
+success. ~C-u~ before ~, m s~ or ~, m a~ refetches the sprint list first.
+
+The board is =rata-jira-board-id= in =local.el= (=rapidView=NNN= in the board URL). Unset,
+the first sprint command asks once per session. Errors come back in Jira's own words
+(closed sprint, issue outside the board filter, no Jira Software licence).
 
 * Comment / description editor (=jira-edit-mode=)
 

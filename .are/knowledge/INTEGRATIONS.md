@@ -61,6 +61,18 @@ A status name the instance does not carry makes Jira reject the whole query with
 that failure is an *empty* list, which is the endpoint-shaped symptom above, not this one.
 See L-038, L-040, D-016 and `docs/jira-cheatsheet.org`.
 
+**A second API family is in use since 2026-09-09: the Agile REST API** (`/rest/agile/1.0/`
+— `board`, `board/{id}/sprint`, `sprint/{id}/issue`, `backlog/issue`), for the `, m` sprint
+commands in `init-jira.el`. It is the same host, the same credentials and the same
+`jira-api-call`: `jira-api--url` passes a URL that already starts with the base through
+untouched (`jira-api.el:174`), which `rata-test-jira-agile-url-passes-through-jira-api`
+pins. Two things to know when it breaks. It needs a Jira *Software* licence on the
+instance — a plain Jira Core instance 404s every Agile endpoint — and `backlog/issue`
+without a board id is the call most likely to differ across Server/DC versions; the
+alternative spelling is `backlog/<board-id>/issue`. Errors surface as a `user-error` in
+Jira's own `errorMessages`. The board is `rata-jira-board-id` in `local.el`, asked once
+per session when unset. See D-017.
+
 **How a file reaches either ACP agent — read this before writing any Elisp for it.**
 `agent-shell` already ships the whole context-send family and *nothing in it is
 autoloaded*, so a leader key bound to one of those commands resolves to nothing unless the
