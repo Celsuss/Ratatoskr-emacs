@@ -1268,3 +1268,34 @@ Two things follow. Write `(eval-when-compile (defvar x))` for a foreign variable
 top-level `defvar` — and never a `require` in there (L-028). And run `just are-verify fast`
 before the long suites when a module gained new top-level forms: lint is half a second and
 would have caught this before the three-minute `full`.
+
+## L-042 — A request parameter built by `%s` over a structured value fails silently; the symptom is an empty column, not an error
+
+**2026-09-10**, while adding a Sprint column to the Jira list (D-018). jira.el describes
+every column by a path such as `(fields (custom "Sprint"))` and builds the search's `fields`
+parameter as `(format "%s" (cadr path))` for each — correct for `(fields summary)`, but for a
+custom field that yields the literal string `(custom Sprint)`. Jira ignores field names it
+does not know rather than rejecting the request, so upstream's `:sprints`, `:line` and
+`:cost-center` columns have been blank for everyone who ever enabled them, with nothing in
+`*Messages*` and a 200 on the wire. The detail view shows the same field fine because it
+fetches the whole issue.
+
+The general shape: **a serialiser applied uniformly to heterogeneous values produces a
+well-formed request that means something else,** and a lenient server turns that into an
+absence rather than a failure. Two habits follow. When a column or field comes back empty,
+read the outgoing request (`jira-debug` prints the params) before suspecting the data. And
+when adding a value of a new shape to such a list, test the *serialised* form —
+`rata-test-jira-custom-field-parent-resolves-to-its-id` asserts the string that reaches the
+`fields` parameter, not the Lisp that produced it. Related: L-038 (another jira.el defect
+where the symptom was truncation rather than an error).
+
+**Addendum, the same day (FAIL-0017).** The fix above was itself delivered broken, for a
+second silent-shape reason one layer down: Jira Server's `field` endpoint has `id` but no
+`key`, jira.el keeps `(NAME . key)`, and the fixture had been written from Cloud
+documentation. So the operative rule is narrower than "test the serialised form": **when a
+feature depends on the shape of an integration's response, take one read-only sample from
+the real instance before delivering, and write the fixture from that.** It cost one batch
+Emacs and one GET here, the credentials were already usable (the suite decrypts
+`~/.authinfo.gpg` on every run), and it would have turned a "does not work" report into a
+line in the first delivery. Nothing in `tests/` should contact the network — but the
+session that writes the fixture should.

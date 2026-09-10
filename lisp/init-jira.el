@@ -3,7 +3,9 @@
 ;;
 ;; A read-mostly second view onto work tasks: Jira stays in Jira and gets its own
 ;; buffer, `work_tasks.org' stays hand-written.  Nothing here writes into the
-;; org-roam tree.  Press `, e' in the issues list to export what is on screen to
+;; org-roam tree.  The list carries a Sprint column and is grouped into one heading
+;; per open sprint plus the backlog, so what is on the board is visible at a glance.
+;; Press `, e' in the issues list to export what is on screen to
 ;; Org-mode when a one-off bridge is wanted.  The one thing written back besides what
 ;; jira.el already offers is sprint membership (`, m', Agile REST API), because the
 ;; team board is a never-ending sprint.  Key-by-key usage: docs/jira-cheatsheet.org.
@@ -70,6 +72,11 @@ JQL argument for a one-off look at everything."
   ;; Raising the page size is the only mitigation that does not patch upstream.
   ;; Server-side cap is `jira.search.views.default.max' (1000 by default).
   (jira-issues-max-results 100)
+  ;; `:rata-sprint' is this module's own column (see "Sprint column and grouping"
+  ;; below): the sprint the issue is in now, blank for the backlog.
+  (jira-issues-table-fields '(:key :issue-type-name :status-name :rata-sprint
+                              :assignee-name :progress-percent :work-ratio
+                              :remaining-time :summary))
   (jira-detail-reuse-buffer t))
 
 ;; --- Default query: assigned to me, and not already finished ---
@@ -389,6 +396,304 @@ Shared by the list and detail buffers.  These are this module's own commands,
 not a mirror of upstream keys, so they sit outside
 `rata-jira-issues-key-mirror'.")
 
+;; --- Sprint column and grouping: which issues are on the board ---
+;;
+;; "Assigned to me" mixes the board and the backlog into one list.  The Sprint
+;; custom field tells them apart, and jira.el already knows it (`:sprints', shown
+;; in the detail view) -- but never manages to *request* it for the list:
+;; `jira-issues--api-get-issues' builds the `fields' parameter with `%s' on each
+;; field's parent, and a custom field's parent is the list `(custom "Sprint")', so
+;; the server is asked for a field literally named "(custom Sprint)", ignores it,
+;; and the column is blank with no error anywhere (L-042).  On Jira Server/DC a
+;; second gap sits underneath: the `field' endpoint sends `id' but no `key', and
+;; upstream keeps `(NAME . key)', so `jira-fields' is all nils and no custom field
+;; can be resolved by anyone (FAIL-0017 -- the first version of this column
+;; shipped against a Cloud-shaped fixture and showed every issue as backlog).
+;; Three advices fix that without touching upstream: `jira-table-field-parent'
+;; resolves a `(custom NAME)' parent to its `customfield_NNNNN' id through
+;; `jira-fields'; `jira-api-get-fields' is overridden to fall back to `id'; and
+;; the search fetches the field list synchronously while `jira-fields' cannot
+;; resolve anything -- on the first `jira-issues' of a session the search goes
+;; out before `jira-api-get-basic-data' has its answer, and a column that is
+;; blank on the first look and filled on the second is a bug report waiting to
+;; happen.
+;;
+;; The field's value is every sprint the issue has ever been in, closed ones
+;; included, so "in a sprint" means "has a sprint that is not closed"
+;; (`rata-jira-current-sprint').  Its shape depends on the deployment: Cloud and
+;; recent Server/DC send objects with `name' and `state'; older Server/DC sends
+;; the sprint's Java toString, `...Sprint@1a2b[id=7,state=ACTIVE,name=Board,...]'.
+;; `rata-jira-sprint-info' reads both.  Upstream's `jira-fmt-issue-sprints' would
+;; signal on the string form and lists the closed history as if it were current.
+;;
+;; Grouping is Emacs 30's `tabulated-list-groups': one heading per open sprint,
+;; active first, then "Backlog"; each group is sorted on its own by the current
+;; sort column, and `, m g' toggles it for the buffer.  tablist predates grouped
+;; tables, and three of its commands walk the buffer assuming every line is an
+;; entry: `tablist-sort' (`S') rearranges lines with `sort-subr' and would scatter
+;; the headings among the issues, `tablist-put-mark' (behind `m', `t', `U')
+;; signals "No entry at this position" on a heading, and a regexp filter indexes
+;; the heading's nil entry.  Each gets a guard that applies only while
+;; `tabulated-list-groups' is non-nil in the buffer, so no other tablist buffer
+;; sees any change.  `rata-test-jira-issues-list-groups-by-sprint' prints a
+;; fixture list through the real mode and exercises all three.
+
+(defcustom rata-jira-group-by-sprint t
+  "Non-nil groups the issue list by sprint: open sprints first, then Backlog.
+The default for a new list; `, m g' toggles it in the buffer at hand."
+  :type 'boolean
+  :group 'rata)
+
+(defface rata-jira-group-heading
+  '((t :inherit bold))
+  "Face of the sprint and backlog headings in the Jira issue list."
+  :group 'rata)
+
+(eval-when-compile
+  (defvar jira-fields)
+  (defvar jira-issues-fields)
+  (defvar jira-issues--raw-issues)
+  (defvar tabulated-list-groups)
+  (defvar tabulated-list-entries)
+  (defvar tabulated-list-format))
+(declare-function jira-table-extract-field "jira-table")
+(declare-function tabulated-list-sort "tabulated-list")
+(declare-function tabulated-list-print "tabulated-list")
+(declare-function tabulated-list-get-id "tabulated-list")
+
+(with-eval-after-load 'jira-utils
+  (unless (assq :rata-sprint jira-issues-fields)
+    (push '(:rata-sprint . ((:path . (fields (custom "Sprint")))
+                            (:columns . 16)
+                            (:name . "Sprint")
+                            (:formatter . rata-jira-fmt-sprint)))
+          jira-issues-fields)))
+
+(defun rata-jira-sprint-info (item)
+  "Return (NAME . STATE) for ITEM, one element of Jira's Sprint field, or nil.
+ITEM is either an alist with `name' and `state' (Cloud, recent Server/DC) or
+the sprint's Java toString (older Server/DC), which looks like
+`...greenhopper.service.sprint.Sprint@1a2b[id=7,state=ACTIVE,name=Board,...]'.
+STATE is returned lower-cased, \"\" when absent."
+  (cond
+   ((and (consp item) (consp (car item)))
+    (let ((name (alist-get 'name item))
+          (state (alist-get 'state item)))
+      (when (stringp name)
+        (cons name (if (stringp state) (downcase state) "")))))
+   ((stringp item)
+    (let ((name (and (string-match "[[,]name=\\(.*?\\)\\(?:,[A-Za-z]+=\\|\\]\\'\\)" item)
+                     (match-string 1 item)))
+          (state (and (string-match "[[,]state=\\([A-Za-z]+\\)" item)
+                      (match-string 1 item))))
+      (when name
+        (cons name (if state (downcase state) "")))))))
+
+(defun rata-jira-current-sprint (value)
+  "Return (NAME . STATE) of the sprint the issue is in now, or nil for the backlog.
+VALUE is the Sprint field: a vector or list of every sprint the issue has ever
+been in.  Closed sprints are history, not membership, so an issue whose sprints
+are all closed is in the backlog.  With an active and a future sprint both
+open, the active one wins."
+  (let* ((infos (delq nil (mapcar #'rata-jira-sprint-info
+                                  (and (sequencep value) (append value nil)))))
+         (open (seq-remove (lambda (info) (equal (cdr info) "closed")) infos)))
+    (or (seq-find (lambda (info) (equal (cdr info) "active")) open)
+        (car open))))
+
+(defun rata-jira-fmt-sprint (value)
+  "Format the Sprint field VALUE for the list: the current sprint's name, else \"\".
+A sprint that is not active carries its state, so a future sprint does not
+read as the board."
+  (let ((current (rata-jira-current-sprint value)))
+    (cond ((null current) "")
+          ((equal (cdr current) "active") (car current))
+          (t (format "%s (%s)" (car current) (cdr current))))))
+
+(defun rata-jira-group-heading (sprint count)
+  "Return the heading line of a group of COUNT issues.
+SPRINT is (NAME . STATE), or nil for the backlog."
+  (propertize (if sprint
+                  (format "%s  [%s]  (%d)" (car sprint) (cdr sprint) count)
+                (format "Backlog  (%d)" count))
+              'face 'rata-jira-group-heading))
+
+(defun rata-jira-group-issues (entries sprint-of)
+  "Group the tabulated-list ENTRIES by sprint, in `tabulated-list-groups' form.
+SPRINT-OF maps an entry's id (the issue key) to (NAME . STATE), or nil for
+the backlog.  Active sprints come first, then the other open ones by name,
+then the backlog; a group with nothing in it is not shown.  Entries keep
+their order within a group -- `tabulated-list-print' sorts each group by
+the current sort column afterwards."
+  (let ((groups nil))
+    (dolist (entry entries)
+      (let* ((sprint (funcall sprint-of (car entry)))
+             (cell (assoc sprint groups)))
+        (if cell
+            (push entry (cdr cell))
+          (push (cons sprint (list entry)) groups))))
+    (let ((rank (lambda (sprint)
+                  (cond ((null sprint) 2)
+                        ((equal (cdr sprint) "active") 0)
+                        (t 1)))))
+      (mapcar (lambda (group)
+                (cons (rata-jira-group-heading (car group) (length (cdr group)))
+                      (nreverse (cdr group))))
+              (sort groups
+                    (lambda (a b)
+                      (let ((ra (funcall rank (car a)))
+                            (rb (funcall rank (car b))))
+                        (or (< ra rb)
+                            (and (= ra rb)
+                                 (string< (or (car (car a)) "")
+                                          (or (car (car b)) "")))))))))))
+
+(defun rata-jira--sprint-lookup ()
+  "Return a function from issue key to its current sprint.
+Built once per print, over the issues on screen."
+  (let ((table (make-hash-table :test #'equal)))
+    (seq-doseq (issue jira-issues--raw-issues)
+      (puthash (jira-table-extract-field jira-issues-fields :key issue)
+               (rata-jira-current-sprint
+                (jira-table-extract-field jira-issues-fields :rata-sprint issue))
+               table))
+    (lambda (key) (gethash key table))))
+
+(defun rata-jira--issue-groups ()
+  "The issue list's `tabulated-list-groups' function.
+Returns the current entries grouped by sprint."
+  (rata-jira-group-issues (if (functionp tabulated-list-entries)
+                              (funcall tabulated-list-entries)
+                            tabulated-list-entries)
+                          (rata-jira--sprint-lookup)))
+
+(defun rata-jira--setup-issue-groups ()
+  "Group the issue list by sprint when `rata-jira-group-by-sprint' says so.
+On `jira-issues-mode-hook'; `tabulated-list-groups' is permanent-local, so
+this outlives the reverts the list does on every refresh."
+  (setq tabulated-list-groups (and rata-jira-group-by-sprint #'rata-jira--issue-groups)))
+
+(add-hook 'jira-issues-mode-hook #'rata-jira--setup-issue-groups)
+
+(defun rata-jira-toggle-sprint-grouping ()
+  "Toggle the sprint headings in this issue list.
+`rata-jira-group-by-sprint' is the default a fresh list starts from."
+  (interactive)
+  (unless (derived-mode-p 'jira-issues-mode)
+    (user-error "Not in a Jira issue list"))
+  (setq tabulated-list-groups (if tabulated-list-groups nil #'rata-jira--issue-groups))
+  (tabulated-list-print t)
+  (message "Jira issues: sprint grouping %s" (if tabulated-list-groups "on" "off")))
+
+;; Requesting the custom field.  `jira-table-field-parent' is what
+;; `jira-issues--api-get-issues' puts in the `fields' parameter, one per column.
+
+(defun rata-jira--resolve-custom-parent (parent)
+  "Turn a `(custom NAME)' field PARENT into its `customfield_NNN' id.
+Unknown NAME gives nil, which the caller drops from the request; any other
+PARENT is returned as is.  `:filter-return' advice on `jira-table-field-parent'."
+  (if (and (consp parent) (eq (car parent) 'custom))
+      (cdr (assoc (cadr parent) jira-fields))
+    parent))
+
+(defun rata-jira--fields-from-response (data)
+  "Return the (NAME . ID) alist jira.el keeps in `jira-fields'.
+DATA is the parsed body of the `field' endpoint.  Cloud sends both `key' and
+`id' for a field; Jira Server/DC sends only `id'.  Upstream reads `key'
+alone, so on Server every entry is (NAME . nil), no custom field can ever be
+resolved, and the Sprint line in the detail view is empty too (FAIL-0017)."
+  (mapcar (lambda (field)
+            (cons (cdr (assoc 'name field))
+                  (or (cdr (assoc 'key field)) (cdr (assoc 'id field)))))
+          data))
+
+(defun rata-jira--fields-usable-p (fields)
+  "Non-nil when FIELDS (a `jira-fields' value) can resolve a custom field.
+Empty, or every entry without an id, means no."
+  (and fields (seq-some #'cdr fields) t))
+
+(defun rata-jira--fetch-fields (&optional force callback)
+  "jira.el's `jira-api-get-fields', with the Server/DC id fallback.
+Fetch unless `jira-fields' is already usable or FORCE; then call CALLBACK.
+Installed as `:override' advice, so the detail view and `, u' see ids too."
+  (if (or force (not (rata-jira--fields-usable-p jira-fields)))
+      (jira-api-call "GET" "field"
+                     :callback (lambda (data _response)
+                                 (setq jira-fields (rata-jira--fields-from-response data)))
+                     :complete (lambda (&rest _) (when callback (funcall callback))))
+    (when callback (funcall callback))))
+
+(defun rata-jira--get-fields-advice (&rest args)
+  "`:override' for `jira-api-get-fields'; ARGS are its `:force' / `:callback'."
+  (rata-jira--fetch-fields (plist-get args :force) (plist-get args :callback)))
+
+(defun rata-jira--ensure-fields (&rest _)
+  "Fetch the field list synchronously while `jira-fields' cannot resolve anything.
+`:before' advice on `jira-issues--api-get-issues', so the first search of a
+session can already name the Sprint field's id: `jira-issues' fires the search
+and `jira-api-get-basic-data' at the same time, and the latter's field fetch
+is several requests down its chain.  It skips its own fetch once the list is
+filled, so this is not a duplicate; on failure nothing changes."
+  (unless (rata-jira--fields-usable-p jira-fields)
+    (let ((data (ignore-errors
+                  (request-response-data (jira-api-call "GET" "field" :sync t)))))
+      (when data
+        (setq jira-fields (rata-jira--fields-from-response data))))))
+
+(with-eval-after-load 'jira-table
+  (advice-add 'jira-table-field-parent :filter-return #'rata-jira--resolve-custom-parent))
+
+(with-eval-after-load 'jira-api
+  (advice-add 'jira-api-get-fields :override #'rata-jira--get-fields-advice))
+
+(with-eval-after-load 'jira-issues
+  (advice-add 'jira-issues--api-get-issues :before #'rata-jira--ensure-fields))
+
+;; tablist guards, live only in a grouped buffer.
+
+(defun rata-jira--tablist-sort-grouped (orig &rest args)
+  "Sort a grouped buffer through `tabulated-list-sort'; otherwise ORIG with ARGS.
+`tablist-sort' reorders the buffer's lines in place and would carry the group
+headings along.  `tabulated-list-sort' re-prints, and printing sorts each
+group on its own.  A column name in ARGS (tablist's prefix argument) is
+honoured; without one the column at point is used, as upstream does."
+  (if (not tabulated-list-groups)
+      (apply orig args)
+    (let ((column (car args)))
+      (cond
+       ((stringp column)
+        (tabulated-list-sort
+         (or (seq-position tabulated-list-format column
+                           (lambda (col name) (equal (car col) name)))
+             (user-error "No such column: %s" column))))
+       ((get-text-property (point) 'tabulated-list-column-name)
+        (tabulated-list-sort))
+       (t (user-error "Point is on a group heading; move onto an issue to pick the column"))))))
+
+(defun rata-jira--tablist-put-mark-grouped (orig &rest args)
+  "Do nothing on a group heading instead of signalling; otherwise ORIG with ARGS.
+`t' and `U' call `tablist-put-mark' on every line of the buffer."
+  (if (and tabulated-list-groups
+           (not (save-excursion
+                  (when (car args) (goto-char (car args)))
+                  (tabulated-list-get-id))))
+      nil
+    (apply orig args)))
+
+(defun rata-jira--tablist-filter-eval-grouped (orig filter id entry &rest more)
+  "A group heading -- no ID, no ENTRY -- matches no FILTER; otherwise ORIG.
+So a regexp filter neither hides nor marks a heading, and never indexes nil."
+  (if (and tabulated-list-groups (null id) (null entry))
+      nil
+    (apply orig filter id entry more)))
+
+(with-eval-after-load 'tablist
+  (advice-add 'tablist-sort :around #'rata-jira--tablist-sort-grouped)
+  (advice-add 'tablist-put-mark :around #'rata-jira--tablist-put-mark-grouped))
+
+(with-eval-after-load 'tablist-filter
+  (advice-add 'tablist-filter-eval :around #'rata-jira--tablist-filter-eval-grouped))
+
 ;; --- Evil: these buffers stay in evil normal state (D-015) ---
 ;;
 ;; jira.el has no evil support (upstream issue #31): `jira-issues-mode' derives from
@@ -482,6 +787,8 @@ EXTRA is key/definition pairs in `general-define-key' form, also prefixed."
 (with-eval-after-load 'jira-issues
   (apply #'rata-jira--bind-local-leader 'jira-issues-mode-map rata-jira-issues-key-mirror
          "r" '(tablist-revert :which-key "refresh")
+         ;; List-only: the detail buffer has nothing to group.
+         "mg" '(rata-jira-toggle-sprint-grouping :which-key "toggle sprint grouping")
          rata-jira-sprint-keys)
   ;; `RET' opens the issue.  `evil-ret' moves down one line, which is useless in a
   ;; read-only list, and RET is what every other list-like buffer here uses.

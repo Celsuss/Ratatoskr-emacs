@@ -316,6 +316,23 @@ init-present → init-dashboard
   session. Calls are synchronous and chunked at the API's 50-issue cap
   (`rata-jira-move-payloads`); every helper that shapes a request or a label is pure and
   tested.
+  **The list shows and groups by sprint** (D-018): a `:rata-sprint` column pushed onto
+  `jira-issues-fields`, and Emacs 30's `tabulated-list-groups` set from
+  `jira-issues-mode-hook` to one heading per open sprint plus Backlog (`, m g` toggles;
+  `rata-jira-group-by-sprint` is the default). Membership is "has a sprint that is not
+  closed" (`rata-jira-current-sprint`), because the field carries the whole sprint
+  history; `rata-jira-sprint-info` reads both the object form and the older Server/DC
+  Java-toString form. Two upstream gaps are patched by advice rather than forks: jira.el
+  formats a custom column's `(custom "Sprint")` parent with `%s` into the `fields`
+  request, so no custom column ever arrives (L-042) — `jira-table-field-parent` now
+  resolves it through `jira-fields`; and on Server/DC the `field` endpoint has `id` but no
+  `key`, so jira.el's `(NAME . key)` map is all nils — `jira-api-get-fields` is overridden
+  to fall back to `id` (FAIL-0017, which also revived the detail view's Sprint line), and
+  `jira-issues--api-get-issues` fetches the field list synchronously while it cannot
+  resolve anything, so the first search of a session gets it too. tablist predates grouped tables: `tablist-sort`, `tablist-put-mark` and
+  `tablist-filter-eval` each get a guard that applies only while `tabulated-list-groups`
+  is non-nil. `rata-test-jira-issues-list-groups-by-sprint` prints a fixture list through
+  the real mode and drives all three.
 - `init-org.el` — org-agenda with org-super-agenda, org-roam, org-transclusion. Owns the
   org-roam capture templates, including `blog-post` (key `b`) — whose `:blog:` filetag and
   non-empty `:export_file_name:` are a contract with `init-blog.el` and with the

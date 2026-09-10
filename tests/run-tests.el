@@ -1116,6 +1116,226 @@ symbol without checking it, so a typo here would be a dead key."
         (should (string-prefix-p "rata-jira-" (symbol-name (car def))))
         (should (plist-get (cdr def) :which-key))))))
 
+(ert-deftest rata-test-jira-sprint-info-reads-both-field-shapes ()
+  "The Sprint field element is read whether it is an object or a Java toString.
+Cloud and recent Server/DC send objects; older Server/DC sends
+`...Sprint@1a2b[id=7,...,state=ACTIVE,name=Board,...]'.  Upstream's formatter
+signals on the string form; this module must not."
+  (should (equal (rata-jira-sprint-info '((id . 7) (name . "Board") (state . "active")))
+                 '("Board" . "active")))
+  (should (equal (rata-jira-sprint-info '((name . "Board") (state . "CLOSED")))
+                 '("Board" . "closed")))
+  (should (equal (rata-jira-sprint-info '((name . "Board")))
+                 '("Board" . "")))
+  (should (equal (rata-jira-sprint-info
+                  (concat "com.atlassian.greenhopper.service.sprint.Sprint@1a2b"
+                          "[id=7,rapidViewId=3,state=ACTIVE,name=Board, week 2,"
+                          "startDate=2026-09-01T08:00:00.000+02:00,endDate=<null>,"
+                          "completeDate=<null>,sequence=7,goal=]"))
+                 '("Board, week 2" . "active")))
+  (should (equal (rata-jira-sprint-info "Sprint@1[id=1,state=FUTURE,name=Next]")
+                 '("Next" . "future")))
+  (should-not (rata-jira-sprint-info "not a sprint"))
+  (should-not (rata-jira-sprint-info nil))
+  (should-not (rata-jira-sprint-info 42)))
+
+(ert-deftest rata-test-jira-current-sprint-ignores-closed-history ()
+  "The Sprint field lists every sprint the issue was ever in; only an open one counts.
+An issue whose sprints are all closed is backlog, and active beats future."
+  (should-not (rata-jira-current-sprint nil))
+  (should-not (rata-jira-current-sprint ""))
+  (should-not (rata-jira-current-sprint []))
+  (should-not (rata-jira-current-sprint [((name . "Old") (state . "closed"))]))
+  (should (equal (rata-jira-current-sprint
+                  [((name . "Old") (state . "closed"))
+                   ((name . "Later") (state . "future"))
+                   ((name . "Board") (state . "active"))])
+                 '("Board" . "active")))
+  (should (equal (rata-jira-current-sprint '(((name . "Later") (state . "future"))))
+                 '("Later" . "future")))
+  ;; The column: name for the board, name plus state for anything else, "" for backlog.
+  (should (equal (rata-jira-fmt-sprint [((name . "Board") (state . "active"))]) "Board"))
+  (should (equal (rata-jira-fmt-sprint [((name . "Later") (state . "future"))])
+                 "Later (future)"))
+  (should (equal (rata-jira-fmt-sprint [((name . "Old") (state . "closed"))]) ""))
+  (should (equal (rata-jira-fmt-sprint "") "")))
+
+(ert-deftest rata-test-jira-group-issues-orders-board-then-backlog ()
+  "Groups come active sprint, other open sprints by name, then Backlog, with counts.
+Entries keep their order inside a group, and an empty group does not appear."
+  (let* ((sprints '(("A-1" . ("Zeta" . "future"))
+                    ("A-2" . nil)
+                    ("A-3" . ("Board" . "active"))
+                    ("A-4" . ("Alpha" . "future"))
+                    ("A-5" . nil)
+                    ("A-6" . ("Board" . "active"))))
+         (entries (mapcar (lambda (s) (list (car s) (vector (car s)))) sprints))
+         (groups (rata-jira-group-issues
+                  entries (lambda (key) (cdr (assoc key sprints))))))
+    (should (equal (mapcar (lambda (g) (substring-no-properties (car g))) groups)
+                   '("Board  [active]  (2)" "Alpha  [future]  (1)"
+                     "Zeta  [future]  (1)" "Backlog  (2)")))
+    (should (equal (mapcar (lambda (g) (mapcar #'car (cdr g))) groups)
+                   '(("A-3" "A-6") ("A-4") ("A-1") ("A-2" "A-5"))))
+    (should (eq (get-text-property 0 'face (car (car groups))) 'rata-jira-group-heading))
+    ;; Nothing in the backlog: no Backlog heading.
+    (should (equal (mapcar #'car (rata-jira-group-issues
+                                  (list (list "A-3" ["A-3"]))
+                                  (lambda (_) '("Board" . "active"))))
+                   (list (rata-jira-group-heading '("Board" . "active") 1))))
+    (should-not (rata-jira-group-issues nil #'ignore))))
+
+(ert-deftest rata-test-jira-custom-field-parent-resolves-to-its-id ()
+  "A `(custom NAME)' column parent reaches the search request as `customfield_NNN'.
+Without the advice, `jira-issues--api-get-issues' formats the parent with `%s'
+and asks the server for a field named \"(custom Sprint)\": the column is blank
+and nothing reports it (L-042).  The other advice fetches the field list
+before the first search, so the id is known on the first `jira-issues' too."
+  (should (require 'jira-issues nil t))
+  (should (advice-member-p #'rata-jira--resolve-custom-parent 'jira-table-field-parent))
+  (should (advice-member-p #'rata-jira--ensure-fields 'jira-issues--api-get-issues))
+  (should (memq :rata-sprint jira-issues-table-fields))
+  (should (equal (jira-table-field-name jira-issues-fields :rata-sprint) "Sprint"))
+  (let ((jira-fields '(("Sprint" . "customfield_10020"))))
+    (should (equal (jira-table-field-parent jira-issues-fields :rata-sprint)
+                   "customfield_10020"))
+    ;; Upstream's own custom columns are fixed by the same advice.
+    (should (equal (jira-table-field-parent jira-issues-fields :sprints)
+                   "customfield_10020"))
+    ;; Ordinary fields are untouched.
+    (should (eq (jira-table-field-parent jira-issues-fields :summary) 'summary)))
+  (let ((jira-fields nil))
+    (should-not (jira-table-field-parent jira-issues-fields :rata-sprint)))
+  ;; The field list is read out of the `field' endpoint: Cloud sends `key',
+  ;; Server/DC only `id'.  Upstream reads `key' alone, which is why every
+  ;; custom field was nil on the operator's instance (FAIL-0017).
+  (should (equal (rata-jira--fields-from-response
+                  [((id . "customfield_10020") (key . "customfield_10020") (name . "Sprint"))
+                   ((id . "summary") (key . "summary") (name . "Summary"))])
+                 '(("Sprint" . "customfield_10020") ("Summary" . "summary"))))
+  (should (equal (rata-jira--fields-from-response
+                  [((id . "customfield_10005") (name . "Sprint") (custom . t))
+                   ((id . "summary") (name . "Summary"))])
+                 '(("Sprint" . "customfield_10005") ("Summary" . "summary"))))
+  ;; ...and an all-nil list counts as unusable, so it is fetched again.
+  (should-not (rata-jira--fields-usable-p nil))
+  (should-not (rata-jira--fields-usable-p '(("Sprint" . nil) ("Summary" . nil))))
+  (should (rata-jira--fields-usable-p '(("Sprint" . "customfield_10005"))))
+  (should (advice-member-p #'rata-jira--get-fields-advice 'jira-api-get-fields)))
+
+(defun rata-test--jira-issue (key summary sprints)
+  "A raw Jira issue fixture with KEY, SUMMARY and a Sprint field of SPRINTS."
+  `((key . ,key)
+    (fields . ((summary . ,summary)
+               (status . ((name . "Open") (statusCategory . ((name . "To Do")))))
+               (customfield_10020 . ,sprints)))))
+
+(defun rata-test--jira-marked-lines ()
+  "Return the buffer lines carrying a tablist mark."
+  (save-excursion
+    (goto-char (point-min))
+    (let (marked)
+      (while (re-search-forward (tablist-marker-regexp) nil t)
+        (push (buffer-substring-no-properties (line-beginning-position) (line-end-position))
+              marked))
+      (nreverse marked))))
+
+(ert-deftest rata-test-jira-issues-list-groups-by-sprint ()
+  "The real `jira-issues-mode' prints sprint headings, and tablist survives them.
+Headings are Emacs's `tabulated-list-groups'; tablist predates them and three of
+its commands assume every line is an entry.  This prints a fixture list through
+the mode with no network and then marks (`m', `t', `U'), filters and sorts (`S')
+in it, all of which must neither signal nor move a heading."
+  (should (require 'jira-issues nil t))
+  (let* ((jira-fields '(("Sprint" . "customfield_10020")))
+         (jira-issues-table-fields '(:key :status-name :rata-sprint :summary))
+         (rata-jira-group-by-sprint t)
+         ;; The older Server/DC shape, as one issue among object-shaped ones.
+         (legacy (concat "com.atlassian.greenhopper.service.sprint."
+                         "Sprint@1a[id=9,rapidViewId=3,state=FUTURE,"
+                         "name=Next up,startDate=<null>,"
+                         "endDate=<null>,sequence=9,goal=]"))
+         (issues (vector
+                  (rata-test--jira-issue "A-3" "gamma" nil)
+                  (rata-test--jira-issue "A-2" "beta"
+                                         [((name . "Old") (state . "closed"))
+                                          ((name . "Board") (state . "active"))])
+                  (rata-test--jira-issue "A-1" "alpha" [((name . "Old") (state . "closed"))])
+                  (rata-test--jira-issue "A-4" "delta" (vector legacy)))))
+    (with-temp-buffer
+      (jira-issues-mode)
+      (should (eq tabulated-list-groups #'rata-jira--issue-groups))
+      (should (seq-position tabulated-list-format "Sprint"
+                            (lambda (col name) (equal (car col) name))))
+      (let ((jira-issues--raw-issues issues)
+            (lines (lambda ()
+                     (split-string (buffer-substring-no-properties (point-min) (point-max))
+                                   "\n" t))))
+        (setq tabulated-list-entries
+              (mapcar #'jira-issues--data-format-issue (append issues nil)))
+        (tabulated-list-print)
+        ;; Board first, then the future sprint, then the backlog; the closed
+        ;; sprint A-1 carries puts it in the backlog, not in a group of its own.
+        (let ((got (funcall lines)))
+          (should (= (length got) 7))
+          (should (string-prefix-p "Board  [active]  (1)" (nth 0 got)))
+          (should (string-match-p "\\`  A-2 .*Board.*beta" (nth 1 got)))
+          (should (string-prefix-p "Next up  [future]  (1)" (nth 2 got)))
+          (should (string-match-p "\\`  A-4 .*Next up (future).*delta" (nth 3 got)))
+          (should (string-prefix-p "Backlog  (2)" (nth 4 got)))
+          (should (string-match-p "\\`  A-3 " (nth 5 got)))
+          (should (string-match-p "\\`  A-1 " (nth 6 got))))
+        ;; Marking.  `m' on an issue marks it; `t' and `U' walk every line.
+        (goto-char (point-min))
+        (forward-line 1)
+        (tablist-mark-forward)
+        (should (equal (jira-utils-marked-items) '("A-2")))
+        (tablist-toggle-marks)
+        (should (equal (sort (jira-utils-marked-items) #'string<) '("A-1" "A-3" "A-4")))
+        (tablist-unmark-all-marks)
+        ;; Not `jira-utils-marked-items': with nothing marked, tablist falls back
+        ;; to the line at point, and that is the tablist convention, not a bug here.
+        (should-not (rata-test--jira-marked-lines))
+        ;; `m' on a heading is a no-op, not an error.
+        (goto-char (point-min))
+        (tablist-mark-forward)
+        (should-not (rata-test--jira-marked-lines))
+        ;; A regexp filter hides non-matching issues and leaves every heading alone.
+        (setq tablist-current-filter '(=~ "Summary" "^b"))
+        (tablist-apply-filter)
+        (goto-char (point-min))
+        (should-not (invisible-p (point)))
+        (search-forward "A-2")
+        (should-not (invisible-p (line-beginning-position)))
+        (search-forward "Next up  [future]")
+        (should-not (invisible-p (line-beginning-position)))
+        (search-forward "A-4")
+        (should (invisible-p (line-beginning-position)))
+        (search-forward "Backlog")
+        (should-not (invisible-p (line-beginning-position)))
+        (search-forward "A-1")
+        (should (invisible-p (line-beginning-position)))
+        (setq tablist-current-filter nil)
+        (tablist-apply-filter)
+        ;; `S' sorts inside each group; the headings stay where they are.
+        (tablist-sort "Summary")
+        (let ((got (funcall lines)))
+          (should (string-prefix-p "Board  [active]  (1)" (nth 0 got)))
+          (should (string-prefix-p "Next up  [future]  (1)" (nth 2 got)))
+          (should (string-prefix-p "Backlog  (2)" (nth 4 got)))
+          (should (string-match-p "\\`  A-1 " (nth 5 got)))
+          (should (string-match-p "\\`  A-3 " (nth 6 got))))
+        ;; Sorting from a heading names the problem instead of "Cannot sort by nil".
+        (goto-char (point-min))
+        (should-error (tablist-sort) :type 'user-error)
+        ;; Toggling grouping off prints a plain list, on brings the headings back.
+        (rata-jira-toggle-sprint-grouping)
+        (should-not tabulated-list-groups)
+        (should (= (length (funcall lines)) 4))
+        (should-not (seq-some (lambda (l) (string-prefix-p "Backlog" l)) (funcall lines)))
+        (rata-jira-toggle-sprint-grouping)
+        (should (= (length (funcall lines)) 7))))))
+
 (defun rata-test--use-package-forms-with-config ()
   "Return ((PKG . COMMANDS) ...) for `use-package\=' forms in lisp/ that have both.
 
@@ -1228,6 +1448,8 @@ So this asserts evil is live, the mirror is reachable, and `RET\=' opens an issu
           ;; This module's own sprint commands share the leader map (D-017).
           (should (eq (key-binding (kbd ", m s")) 'rata-jira-move-to-sprint))
           (should (eq (key-binding (kbd ", m b")) 'rata-jira-move-to-backlog))
+          ;; The grouping toggle is list-only (D-018).
+          (should (eq (key-binding (kbd ", m g")) 'rata-jira-toggle-sprint-grouping))
           ;; RET opens the issue rather than moving down a line.
           (should-not (eq (key-binding (kbd "RET")) 'evil-ret))
           (should (commandp (key-binding (kbd "RET"))))
@@ -1247,6 +1469,7 @@ So this asserts evil is live, the mirror is reachable, and `RET\=' opens an issu
           (should (eq (key-binding (kbd ", ?")) 'jira-detail--actions-menu))
           (should (eq (key-binding (kbd ", w")) 'jira-detail--watchers-menu))
           (should (eq (key-binding (kbd ", m s")) 'rata-jira-move-to-sprint))
+          (should-not (eq (key-binding (kbd ", m g")) 'rata-jira-toggle-sprint-grouping))
           (should (commandp (key-binding (kbd ", c"))))
           ;; magit-section folding survives, which is why `TAB\=' is left alone.
           (should (eq (key-binding (kbd "TAB")) 'magit-section-toggle)))

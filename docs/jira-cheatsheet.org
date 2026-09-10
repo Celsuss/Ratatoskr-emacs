@@ -52,6 +52,7 @@ nothing is marked (dired semantics, via tablist).
 | ~, h~   | ~H~        | Switch Jira host (needs =jira-secondary-urls=)               |
 | ~, r~   | ~G~        | Refresh the list (=tablist-revert=)                          |
 | ~, m~   | —        | *Sprint* prefix — see [[*Sprints — the board is a never-ending sprint][Sprints]] below                    |
+| ~, m g~ | —        | Toggle the sprint headings in this list (see Sprints)       |
 | ~M-n~ / ~M-p~ | same | Next / previous page — /Cloud only/, dead here (see Truncation) |
 
 Suffixes are mnemonic rather than upstream's letters: upstream separates ~c~ and ~C~ by case,
@@ -80,6 +81,12 @@ and a leader map does not need to. ~which-key~ lists the whole map after pressin
 
 Deliberately *not* mirrored: everything in this table already works. Re-binding it is the
 part that would drift on an evil-collection or tablist release.
+
+All of it also works with the sprint headings in the buffer: ~S~ sorts inside each group and
+leaves the headings in place, ~m~ on a heading does nothing, ~t~ / ~U~ skip the headings, and a
+~g / r~ filter hides issues but never a heading. Those four are guards this config adds to
+tablist for grouped buffers only (=lisp/init-jira.el=); ~S~ from a heading line asks you to
+move onto an issue first.
 
 ** Query menu (~, l~) — what it is
 
@@ -168,6 +175,7 @@ on the marked issues, else the one at point.
 | ~, m a~   | Say which sprint is active on the board, and when it ends                     |
 | ~, m o~   | Choose the board for this session (from the boards the instance lists)        |
 | ~, m r~   | Forget cached boards and sprints; the next command fetches them again         |
+| ~, m g~   | Toggle the sprint headings in the list (list buffer only)                     |
 
 The sprint prompt reads =Move PROJ-1 to sprint (default Board  [active]  ends 2030-01-01):=
 and the confirmation names the sprint it moved to, so a wrong sprint cannot pass for
@@ -176,6 +184,37 @@ success. ~C-u~ before ~, m s~ or ~, m a~ refetches the sprint list first.
 The board is =rata-jira-board-id= in =local.el= (=rapidView=NNN= in the board URL). Unset,
 the first sprint command asks once per session. Errors come back in Jira's own words
 (closed sprint, issue outside the board filter, no Jira Software licence).
+
+** Seeing what is on the board
+
+The list has a *Sprint* column and is grouped under one heading per open sprint, active
+first, with everything else under *Backlog*:
+
+: Board  [active]  (12)
+:   PROJ-1  Task   IN PROGRESS   Board          ...
+: Next up  [future]  (1)
+:   PROJ-7  Story  OPEN          Next up (future)
+: Backlog  (30)
+:   PROJ-9  Bug    OPEN
+:   ...
+
+Each group is sorted on its own by the current sort column. ~, m g~ toggles the headings for
+the buffer; =rata-jira-group-by-sprint= (default =t=) is what a fresh list starts with. An
+issue's Sprint field lists every sprint it has *ever* been in, closed ones included, so only
+a sprint that is not closed counts as membership: an issue that was in three finished
+sprints and is now in the backlog shows as backlog. After ~, m s~ or ~, m b~ the list
+refreshes, so the issue moves between groups on the spot — that is the confirmation.
+
+Why this needed code at all: jira.el has a =:sprints= column but cannot request it. It
+builds the search's =fields= parameter with =%s= on each column's parent, and a custom
+field's parent is the list =(custom "Sprint")=, so the server is asked for a field named
+"(custom Sprint)" and silently answers with nothing (L-042). Underneath that, on Jira
+Server/DC the field list carries an =id= but no =key=, and jira.el keeps only =key= — so on
+this instance every custom field resolved to nil, which is also why the detail view's
+Sprint line was always empty (FAIL-0017). This config resolves the custom field to its
+=customfield_NNNNN= id (falling back from =key= to =id=), overrides jira.el's field fetch
+with the same fallback, and fetches the field list before the first search of a session, so
+the column is filled on the first look and not only after a refresh.
 
 * Comment / description editor (=jira-edit-mode=)
 
@@ -235,6 +274,7 @@ as though the token were wrong. =init-jira.el= runs the value through
 | =jira-issues-table-fields=        | —       | Which columns the list shows                 |
 | =jira-issues-default-type=        | nil     | Pre-set =--type= in the query menu            |
 | =jira-issues-sort-key=            | Status  | Initial sort column                          |
+| =rata-jira-group-by-sprint=       | t       | Sprint headings in the list; ~, m g~ toggles per buffer |
 | =jira-detail-reuse-buffer=        | t here  | One detail buffer instead of one per issue    |
 | =jira-comments-display-recent-first= | —    | Comment order in the detail view              |
 | =jira-secondary-urls=             | nil     | Extra instances, switched with ~H~             |

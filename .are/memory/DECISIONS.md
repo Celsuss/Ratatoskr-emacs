@@ -442,3 +442,44 @@ one most likely to differ across Server/DC versions — if it 404s, the fix is
 Related: D-011 (a view, not a sync — this is the one deliberate write-back besides
 what jira.el already offers), D-015 (the `,` leader map), D-016 (`--jql=` narrowing).
 
+## D-018 — The Jira list groups by sprint with `tabulated-list-groups`, and patches tablist only while grouped
+
+**2026-09-10.** Operator request: the list of "my" issues does not say which are in a
+sprint and which are in the backlog; show it, and group the sprint issues together and
+everything else together.
+
+1. *A column and a grouping, not a second query.* The Sprint custom field is already in
+   jira.el's field table (`:sprints`) and in the detail view; the list gains a
+   `:rata-sprint` column (this module's own entry in `jira-issues-fields`, with a
+   formatter that survives the older Server/DC string form) and Emacs 30's
+   `tabulated-list-groups`, set from `jira-issues-mode-hook`. A `--current-sprint` query
+   would have shown the board *or* the backlog; the operator asked to see both, apart.
+2. *Membership is "has a sprint that is not closed."* The field lists every sprint the
+   issue has ever been in. Treating any non-empty value as "in a sprint" would have put
+   the whole finished history on the board.
+3. *Upstream's custom-field request is fixed by advice on `jira-table-field-parent`,
+   plus a synchronous field fetch before a search when `jira-fields` is empty.* Without
+   the second half, the very first `jira-issues` of a session has no Sprint data and the
+   second does — a column that fills itself on refresh reads as flaky. The sync fetch
+   costs one small GET once per session; `jira-api-get-basic-data` skips its own fetch
+   when the list is already filled. *Amended the same day (FAIL-0017):* `jira-api-get-fields`
+   itself is overridden, because on Server/DC it maps every field to `(NAME . nil)` — the
+   `field` endpoint has `id` but no `key` there — and that nil had also been emptying the
+   detail view's Sprint line and `, u` on Sprint since the package was installed.
+4. *tablist is patched by `:around` advice guarded on `tabulated-list-groups`, not
+   replaced or rebound.* Its `S`, `m`/`t`/`U` and regexp filters walk the buffer line by
+   line and predate group headings. Three advices in `init-jira.el`, each a no-op in
+   every ungrouped tablist buffer (pdf-tools, docker, …). Rebinding the keys in
+   `jira-issues-mode-map` was rejected: evil-collection owns those bindings and the same
+   commands are reached from the transient menus.
+5. *`, m g` is list-only* (bound in the list's leader map, not in
+   `rata-jira-sprint-keys`), and `rata-jira-group-by-sprint` is the default it starts
+   from — a `defcustom`, not a `local.el` value, since it names nothing corporate.
+
+**Not tested here.** The shape of the Sprint field on the instance (object vs. Java
+toString) and the custom field's actual id are only seen live; both paths are unit-tested
+on fixtures. First live check: `SPC J j` shows a `Board  [active]  (N)` heading on the
+first open, not only after `, r`.
+
+Related: D-011 (a view, not a sync), D-015 (evil stays live; evil-collection's tablist keys
+are exactly what the guards protect), D-017 (the moves whose result these headings show).
