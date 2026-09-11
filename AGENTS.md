@@ -333,6 +333,19 @@ init-present → init-dashboard
   `tablist-filter-eval` each get a guard that applies only while `tabulated-list-groups`
   is non-nil. `rata-test-jira-issues-list-groups-by-sprint` prints a fixture list through
   the real mode and drives all three.
+  **Issues can be imported into `work_tasks.org`, one way and append-only** (D-019, which
+  narrows D-011 rather than reversing it). `, i` in the list or detail buffer appends the
+  marked issues under `* Tasks` as `** TODO <summary> :work:jira:` headings whose
+  `:JIRA:` property is the identity; an issue the file already carries is skipped, no
+  existing heading is ever rewritten, nothing is sent to Jira, and there is no timer.
+  Only key, summary, link and a CREATED stamp are copied, because anything else would go
+  stale. The `Org` column (`:rata-org`, formatted from the key alone) marks issues the
+  file already has, read from disk and cached on mtime+size; `SPC J l` sets the property
+  on a hand-written heading so its ticket stops being offered. The kanban block is
+  refreshed after an import. All text shaping is pure (`rata-jira-org-entry`,
+  `rata-jira-org-keys-in-string`) and `rata-test-jira-import-appends-new-issues-only`
+  compares the file after an import byte-for-byte against a fixture; nothing in `tests/`
+  touches `~/workspace/second-brain/`.
 - `init-org.el` — org-agenda with org-super-agenda, org-roam, org-transclusion. Owns the
   org-roam capture templates, including `blog-post` (key `b`) — whose `:blog:` filetag and
   non-empty `:export_file_name:` are a contract with `init-blog.el` and with the

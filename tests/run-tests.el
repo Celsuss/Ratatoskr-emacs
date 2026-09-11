@@ -188,6 +188,7 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC f f" . find-file)
     ("SPC j d" . xref-find-definitions)
     ("SPC J j" . jira-issues)
+    ("SPC J l" . rata-jira-org-link-heading)
     ("SPC o b d d" . rata-dialogic-insert-block)
     ("SPC o b e" . org-hugo-export-wim-to-md)
     ("SPC o b s" . rata-blog-status)
@@ -1335,6 +1336,180 @@ in it, all of which must neither signal nor move a heading."
         (should-not (seq-some (lambda (l) (string-prefix-p "Backlog" l)) (funcall lines)))
         (rata-jira-toggle-sprint-grouping)
         (should (= (length (funcall lines)) 7))))))
+
+(ert-deftest rata-test-jira-org-keys-come-from-the-property-only ()
+  "`rata-jira-org-keys-in-string' reads `:JIRA:' properties and nothing else.
+A key in a title or a link is not a claim that the heading is that issue; the
+property name is case-insensitive as org treats it; duplicates collapse."
+  (should (equal (rata-jira-org-keys-in-string
+                  (concat "* TODO Fix A-1 for real\n"
+                          ":PROPERTIES:\n:JIRA: A-2\n:JIRA_URL: https://x/browse/A-3\n:END:\n"
+                          "[[https://x/browse/A-4][A-4]]\n"
+                          "** STRT other\n  :PROPERTIES:\n  :jira:   b-7  \n  :END:\n"
+                          "** DONE again\n:PROPERTIES:\n:JIRA: A-2\n:END:\n"))
+                 '("A-2" "B-7")))
+  (should-not (rata-jira-org-keys-in-string "* TODO nothing\n")))
+
+(ert-deftest rata-test-jira-org-entry-shape ()
+  "An imported entry is a TODO heading, a `:JIRA:' drawer and a link -- no more.
+The summary is one line, the tags are `rata-jira-org-tags', the key in the
+drawer is what `rata-jira-org-keys-in-string' reads back, and the base URL's
+trailing slash does not double up in the link."
+  (let* ((rata-jira-org-tags '("work" "jira"))
+         (issue (rata-test--jira-issue "PROJ-42" "Fix  the\n  thing  " nil))
+         ;; Local time; the fixture's LANG must not leak into the day name.
+         (entry (rata-jira-org-entry issue 2 "https://jira.example.com/"
+                                     (encode-time '(0 30 9 11 9 2026 nil -1 nil)))))
+    (should (string-prefix-p "** TODO Fix the thing :work:jira:\n:PROPERTIES:\n:JIRA: PROJ-42\n"
+                             entry))
+    (should (string-match-p "^:CREATED: \\[2026-09-11 Fri 09:30\\]\n:END:\n" entry))
+    (should (string-suffix-p "[[https://jira.example.com/browse/PROJ-42][PROJ-42]]\n" entry))
+    (should (equal (rata-jira-org-keys-in-string entry) '("PROJ-42")))
+    ;; Nothing that goes stale: no status, type or assignee line.
+    (should-not (string-match-p "Open\\|To Do" entry))
+    ;; No tags configured, no tag string; an empty summary falls back to the key.
+    (let ((rata-jira-org-tags nil))
+      (should (string-prefix-p "* TODO PROJ-42\n"
+                               (rata-jira-org-entry (rata-test--jira-issue "PROJ-42" "" nil)
+                                                    1 "https://j"))))))
+
+(defconst rata-test--jira-org-fixture
+  (concat ":PROPERTIES:\n:ID:       00000000-0000-0000-0000-000000000000\n:END:\n"
+          "#+title: work tasks\n#+filetags: :work:hastodo:\n"
+          "#+SEQ_TODO: TODO STRT WAIT | DONE\n\n"
+          "* Work tasks\nMy work tasks.\n** Kanban board\n"
+          "#+BEGIN: kanban :mirrored t\n| TODO |\n|------|\n#+END:\n\n"
+          "* Tasks                                                                :work:\n"
+          "** TODO Hand-written task                                            :zenml:\n"
+          "Quoted note from a colleague.\n#+begin_quote\nA brief for the loop.\n#+end_quote\n"
+          "*** Sub-step\n"
+          "** STRT Already linked\n:PROPERTIES:\n:JIRA: A-1\n:END:\n\n"
+          "* Notes\nA section after Tasks that must stay after Tasks.\n")
+  "A `work_tasks.org' look-alike: kanban block, hand-written entries, a linked one.")
+
+(defun rata-test--jira-import-into-fixture (issues &optional fixture)
+  "Import raw ISSUES into a temp copy of FIXTURE; return (RESULT . NEW-TEXT).
+Kills the visiting buffer and deletes the file afterwards."
+  (let ((file (make-temp-file "rata-jira-org-" nil ".org"
+                              (or fixture rata-test--jira-org-fixture)))
+        (rata-jira--org-keys-cache nil))
+    (unwind-protect
+        (let ((result (rata-jira-org-import-issues issues file "https://jira.example.com")))
+          (cons result
+                (with-temp-buffer (insert-file-contents file) (buffer-string))))
+      (when-let ((buf (find-buffer-visiting file))) (kill-buffer buf))
+      (delete-file file))))
+
+(ert-deftest rata-test-jira-import-appends-new-issues-only ()
+  "The import appends under `Tasks', skips issues already there and touches nothing else.
+Byte-for-byte: the file after the import is the fixture with the new entries
+inserted after the last line of the `Tasks' subtree and nothing else changed --
+not the hand-written body, not the quote, not the section after, not the
+blank line before it.  A second import adds nothing."
+  (let* ((rata-jira-org-tags '("work" "jira"))
+         (rata-jira-org-refresh-kanban nil)
+         (issues (list (rata-test--jira-issue "A-1" "already linked, must be skipped" nil)
+                       (rata-test--jira-issue "A-2" "beta" nil)
+                       (rata-test--jira-issue "A-3" "gamma" nil)
+                       (rata-test--jira-issue "A-2" "beta again, a duplicate" nil)))
+         (got (rata-test--jira-import-into-fixture issues))
+         (normalised (replace-regexp-in-string "^:CREATED: .*$" ":CREATED: X" (cdr got)))
+         (entry (lambda (key title)
+                  (format "** TODO %s :work:jira:\n:PROPERTIES:\n:JIRA: %s\n:CREATED: X\n:END:\n[[https://jira.example.com/browse/%s][%s]]\n"
+                          title key key key)))
+         (expected (replace-regexp-in-string
+                    (regexp-quote ":JIRA: A-1\n:END:\n\n* Notes")
+                    (concat ":JIRA: A-1\n:END:\n"
+                            (funcall entry "A-2" "beta") (funcall entry "A-3" "gamma")
+                            "\n* Notes")
+                    rata-test--jira-org-fixture t t)))
+    (should (equal (car got) '(("A-2" "A-3") . ("A-1" "A-2"))))
+    (should (equal normalised expected))
+    ;; Idempotent: the same import on the result changes nothing.
+    (let ((again (rata-test--jira-import-into-fixture issues (cdr got))))
+      (should (equal (car again) (cons nil '("A-1" "A-2" "A-3" "A-2"))))
+      (should (equal (cdr again) (cdr got))))
+    ;; No `Tasks' heading is an error naming it, not a silent append somewhere.
+    (should-error (rata-test--jira-import-into-fixture
+                   (list (rata-test--jira-issue "A-9" "x" nil))
+                   "* Not the heading\n")
+                  :type 'user-error)))
+
+(ert-deftest rata-test-jira-import-refreshes-the-kanban-block ()
+  "With `rata-jira-org-refresh-kanban', a new heading lands on the kanban board too.
+The fixture's block is `:mirrored t' with one TODO column, empty; after the
+import it has to list the new heading, or the board lies about the file."
+  (skip-unless (fboundp 'org-dblock-write:kanban))
+  (let* ((rata-jira-org-refresh-kanban t)
+         (got (rata-test--jira-import-into-fixture
+               (list (rata-test--jira-issue "A-5" "epsilon" nil)))))
+    (should (equal (car got) '(("A-5") . nil)))
+    (should (string-match-p "^#\\+BEGIN: kanban :mirrored t\n\\(?:.*\n\\)*?|.*epsilon.*|\n\\(?:.*\n\\)*?#\\+END:"
+                            (cdr got)))))
+
+(ert-deftest rata-test-jira-link-heading-sets-what-the-import-reads ()
+  "`rata-jira-org-link-heading' writes the property the import and the column key on.
+It also tags the heading; it refuses a string that is not an issue key, and
+a buffer with no heading at point."
+  (require 'org)
+  (let ((rata-jira-org-tags '("work" "jira")))
+    (with-temp-buffer
+      (org-mode)
+      (insert "* TODO Written before Jira\nsome body\n")
+      (goto-char (point-max))
+      (rata-jira-org-link-heading "proj-7")
+      (should (equal (org-entry-get (point-min) "JIRA") "PROJ-7"))
+      (should (equal (rata-jira-org-keys-in-string (buffer-string)) '("PROJ-7")))
+      (goto-char (point-min))
+      (should (equal (sort (org-get-tags nil t) #'string<) '("jira" "work")))
+      (should-error (rata-jira-org-link-heading "not a key") :type 'user-error))
+    (with-temp-buffer
+      (org-mode)
+      (insert "no heading here\n")
+      (should-error (rata-jira-org-link-heading "A-1") :type 'user-error))
+    (with-temp-buffer
+      (fundamental-mode)
+      (should-error (rata-jira-org-link-heading "A-1") :type 'user-error))))
+
+(ert-deftest rata-test-jira-issues-list-marks-issues-already-in-org ()
+  "The Org column marks exactly the issues whose key the org file carries.
+Printed through the real `jira-issues-mode' against a temp file, so the
+formatter, the field registration and the file cache are all exercised; the
+cache notices the file changing on disk."
+  (should (require 'jira-issues nil t))
+  (let* ((file (make-temp-file "rata-jira-org-" nil ".org"
+                               "* Tasks\n** TODO x\n:PROPERTIES:\n:JIRA: A-2\n:END:\n"))
+         (rata-jira-org-file file)
+         (rata-jira--org-keys-cache nil)
+         (rata-jira-org-mark "✓")
+         (rata-jira-group-by-sprint nil)
+         ;; `:status-name' stays: jira.el's initial sort column is Status.
+         (jira-issues-table-fields '(:key :rata-org :status-name :summary))
+         (issues (vector (rata-test--jira-issue "A-2" "beta" nil)
+                         (rata-test--jira-issue "A-3" "gamma" nil)))
+         (lines (lambda ()
+                  (split-string (buffer-substring-no-properties (point-min) (point-max))
+                                "\n" t))))
+    (unwind-protect
+        (with-temp-buffer
+          (jira-issues-mode)
+          (should (seq-position tabulated-list-format "Org"
+                                (lambda (col name) (equal (car col) name))))
+          (let ((jira-issues--raw-issues issues))
+            (setq tabulated-list-entries
+                  (mapcar #'jira-issues--data-format-issue (append issues nil)))
+            (tabulated-list-print)
+            (let ((got (funcall lines)))
+              (should (string-match-p "\\`  A-2 +✓ +Open +beta" (nth 0 got)))
+              (should (string-match-p "\\`  A-3 +Open +gamma" (nth 1 got))))
+            ;; Link A-3 on disk; the next print picks it up without a request.
+            (sleep-for 0.01)
+            (with-temp-file file
+              (insert "* Tasks\n** TODO x\n:PROPERTIES:\n:JIRA: A-2\n:END:\n"
+                      "** TODO y\n:PROPERTIES:\n:JIRA: A-3\n:END:\n"))
+            (rata-jira--redraw-issues)
+            (should (string-match-p "\\`  A-3 +✓ +Open +gamma" (nth 1 (funcall lines))))))
+      (delete-file file))))
 
 (defun rata-test--use-package-forms-with-config ()
   "Return ((PKG . COMMANDS) ...) for `use-package\=' forms in lisp/ that have both.

@@ -51,6 +51,7 @@ nothing is marked (dired semantics, via tablist).
 | ~, t~   | ~T~        | Jump to Tempo worklogs (kills this buffer)                  |
 | ~, h~   | ~H~        | Switch Jira host (needs =jira-secondary-urls=)               |
 | ~, r~   | ~G~        | Refresh the list (=tablist-revert=)                          |
+| ~, i~   | —        | *Import* the marked issues into =work_tasks.org= — see [[*Org: importing issues into work_tasks.org][Org]] below |
 | ~, m~   | —        | *Sprint* prefix — see [[*Sprints — the board is a never-ending sprint][Sprints]] below                    |
 | ~, m g~ | —        | Toggle the sprint headings in this list (see Sprints)       |
 | ~M-n~ / ~M-p~ | same | Next / previous page — /Cloud only/, dead here (see Truncation) |
@@ -153,11 +154,46 @@ between siblings, ~1~–~4~ set the global fold level, ~z a~ / ~z c~ / ~z o~ fol
 | ~, f~ | ~f~        | Find another issue by key or URL                       |
 | ~, y~ | ~c~        | Copy the issue key to the clipboard                    |
 | ~, r~ | ~g~        | Refresh                                                |
+| ~, i~ | —        | Import this issue into =work_tasks.org= (see Org)         |
 | ~, m~ | —        | *Sprint* prefix — same commands as in the list         |
 
 With point on a subtask or a linked-issue section, the actions menu (~, ?~) grows two
 entries: ~RET~ opens it in Emacs, ~o~ opens it in the browser — those are transient keys, so
 they are upstream's.
+
+* Org: importing issues into work_tasks.org
+
+One direction only — Jira to org, never back — and append-only. Nothing here changes a
+ticket, and no existing heading in the file is ever rewritten, re-titled or moved (D-019;
+D-011 is why a real sync was rejected).
+
+| Key       | Where            | Does                                                                 |
+|-----------+------------------+----------------------------------------------------------------------|
+| ~, i~       | list, detail     | Append the marked issues (or the one at point) under =* Tasks= in =work_tasks.org=. Asks first, naming the file; issues already there are skipped and said so |
+| ~SPC J l~   | any org buffer   | Record that the heading at point *is* a Jira issue: sets =:JIRA:=, adds the tags, saves. Offers the issues of the current list as completions; free text works too |
+
+The =Org= column in the list shows ~✓~ for every issue whose key the file already carries.
+It reads the file from disk (re-parsed only when the file changed), so what has not been
+saved is not counted — which is why both commands save.
+
+What one imported entry looks like:
+
+#+begin_example
+** TODO Summary of the ticket                                       :work:jira:
+:PROPERTIES:
+:JIRA: PROJ-42
+:CREATED: [2026-09-11 Fri 09:30]
+:END:
+[[https://jira.example.com/browse/PROJ-42][PROJ-42]]
+#+end_example
+
+The =:JIRA:= property is the identity. Titles are never compared, so rename the heading
+freely. Nothing else is copied on purpose: status, type and assignee change in Jira and
+would be stale in a week; the body is yours to write. After an import the file's
+=org-kanban= block is refreshed so the new heading shows on the board.
+
+Headings written before Jira do not carry the property, so the import would offer their
+tickets as new. ~SPC J l~ on such a heading fixes that once.
 
 * Sprints — the board is a never-ending sprint
 
@@ -275,6 +311,10 @@ as though the token were wrong. =init-jira.el= runs the value through
 | =jira-issues-default-type=        | nil     | Pre-set =--type= in the query menu            |
 | =jira-issues-sort-key=            | Status  | Initial sort column                          |
 | =rata-jira-group-by-sprint=       | t       | Sprint headings in the list; ~, m g~ toggles per buffer |
+| =rata-jira-org-file=              | nil     | Org file ~, i~ appends to; nil = =work_tasks.org= in the roam root |
+| =rata-jira-org-heading=           | =Tasks=   | Heading the imported entries go under                |
+| =rata-jira-org-tags=              | =work jira= | Tags on an imported or linked heading             |
+| =rata-jira-org-refresh-kanban=    | t       | Refresh the file's dynamic blocks after an import    |
 | =jira-detail-reuse-buffer=        | t here  | One detail buffer instead of one per issue    |
 | =jira-comments-display-recent-first= | —    | Comment order in the detail view              |
 | =jira-secondary-urls=             | nil     | Extra instances, switched with ~H~             |

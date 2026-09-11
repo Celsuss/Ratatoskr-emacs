@@ -1299,3 +1299,19 @@ Emacs and one GET here, the credentials were already usable (the suite decrypts
 `~/.authinfo.gpg` on every run), and it would have turned a "does not work" report into a
 line in the first delivery. Nothing in `tests/` should contact the network — but the
 session that writes the fixture should.
+
+## L-043 — A timestamp written with `%a` follows `LANG`; org stamps need `system-time-locale` bound to "C"
+
+**2026-09-11**, `lisp/init-jira.el`, `rata-jira-org-entry`. The first cut of the imported
+entry's `:CREATED:` stamp was `(format-time-string "[%Y-%m-%d %a %H:%M]")`. On this
+machine that gives `[2026-09-11 fre 11:30]` — a Swedish day name in a file whose every
+other stamp says `Sat`, `Fri`. Org parses either (`org-ts-regexp` accepts any word), so
+nothing breaks; the file just stops being consistent, and a later `grep Fri` misses the
+imported entries. The test caught it only because the fixture asserted the exact stamp,
+and the first version of that assertion was itself wrong twice: `(encode-time '(… t))`
+with `t` as the zone means UTC, so 09:30 came out 11:30 local, and `[A-Za-z]+` would have
+let the Swedish name through. Rules: bind `system-time-locale` to `"C"` around any
+`format-time-string` that lands in an org file (org does the same for its own stamps);
+build test times with zone `nil` (local) unless the code under test is UTC by design; and
+assert the day *name*, not a letter class, so the locale cannot leak silently. Related:
+L-027 (regexp traps), D-019.

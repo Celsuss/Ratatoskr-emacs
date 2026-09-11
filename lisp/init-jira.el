@@ -2,13 +2,15 @@
 ;;; init-jira.el --- Jira issue browsing (jira.el)
 ;;
 ;; A read-mostly second view onto work tasks: Jira stays in Jira and gets its own
-;; buffer, `work_tasks.org' stays hand-written.  Nothing here writes into the
-;; org-roam tree.  The list carries a Sprint column and is grouped into one heading
-;; per open sprint plus the backlog, so what is on the board is visible at a glance.
-;; Press `, e' in the issues list to export what is on screen to
-;; Org-mode when a one-off bridge is wanted.  The one thing written back besides what
-;; jira.el already offers is sprint membership (`, m', Agile REST API), because the
-;; team board is a never-ending sprint.  Key-by-key usage: docs/jira-cheatsheet.org.
+;; buffer, `work_tasks.org' stays hand-written.  The list carries a Sprint column
+;; and is grouped into one heading per open sprint plus the backlog, so what is on
+;; the board is visible at a glance, and an Org column marks the issues that already
+;; have a heading in `work_tasks.org'.  `, i' appends the ones that do not, as new
+;; TODO headings keyed on a `:JIRA:' property -- one direction, append-only, on
+;; demand (D-019); nothing is ever synced back and no existing heading is rewritten.
+;; The one thing written back to Jira besides what jira.el already offers is sprint
+;; membership (`, m', Agile REST API), because the team board is a never-ending
+;; sprint.  Key-by-key usage: docs/jira-cheatsheet.org.
 ;;
 ;; Credentials are never configured here.  Leaving `jira-username' and `jira-token'
 ;; unset is what makes jira.el fall back to `auth-source', i.e. ~/.authinfo.gpg:
@@ -72,9 +74,10 @@ JQL argument for a one-off look at everything."
   ;; Raising the page size is the only mitigation that does not patch upstream.
   ;; Server-side cap is `jira.search.views.default.max' (1000 by default).
   (jira-issues-max-results 100)
-  ;; `:rata-sprint' is this module's own column (see "Sprint column and grouping"
-  ;; below): the sprint the issue is in now, blank for the backlog.
-  (jira-issues-table-fields '(:key :issue-type-name :status-name :rata-sprint
+  ;; `:rata-org' and `:rata-sprint' are this module's own columns: whether the
+  ;; issue already has a heading in `work_tasks.org' (see "Org" below), and the
+  ;; sprint the issue is in now, blank for the backlog ("Sprint column" below).
+  (jira-issues-table-fields '(:key :rata-org :issue-type-name :status-name :rata-sprint
                               :assignee-name :progress-percent :work-ratio
                               :remaining-time :summary))
   (jira-detail-reuse-buffer t))
@@ -467,6 +470,13 @@ The default for a new list; `, m g' toggles it in the buffer at hand."
                             (:columns . 16)
                             (:name . "Sprint")
                             (:formatter . rata-jira-fmt-sprint)))
+          jira-issues-fields))
+  ;; The Org column is computed from the key alone (`rata-jira-fmt-org', below).
+  (unless (assq :rata-org jira-issues-fields)
+    (push '(:rata-org . ((:path . (key))
+                         (:columns . 3)
+                         (:name . "Org")
+                         (:formatter . rata-jira-fmt-org)))
           jira-issues-fields)))
 
 (defun rata-jira-sprint-info (item)
@@ -694,6 +704,302 @@ So a regexp filter neither hides nor marks a heading, and never indexes nil."
 (with-eval-after-load 'tablist-filter
   (advice-add 'tablist-filter-eval :around #'rata-jira--tablist-filter-eval-grouped))
 
+;; --- Org: one-way import into work_tasks.org (D-019) ---
+;;
+;; The operator keeps work tasks by hand in `work_tasks.org' and also has tickets
+;; in Jira.  D-011 rejected a sync: the org headings carry colleagues' notes, briefs
+;; and sub-checklists that a mirror would clobber, and Jira and the file disagree
+;; about what a task is.  What is wanted is narrower -- "which of my tickets have no
+;; heading yet, and add those" -- and that is what this section does, under three
+;; rules that make it safe where a sync would not be:
+;;
+;; 1. One direction.  Jira to org, never back.  Marking a heading DONE does not
+;;    transition the ticket; nothing here PUTs anything.
+;; 2. Append-only.  An existing heading is never rewritten, re-titled or moved.
+;;    Identity is the `:JIRA:' property, not the title -- titles get edited -- and
+;;    an issue whose key the file already carries is skipped, so running the import
+;;    twice adds nothing (`rata-test-jira-import-appends-new-issues-only').
+;; 3. On demand.  No timer.  `, i' in the issue list or detail buffer, on the
+;;    marked issues or the one at point, after a y-or-n-p naming the file.
+;;
+;; The `Org' column marks issues that are already in the file, so "new" is visible
+;; before anything is written; it reads the file from disk, re-parsing only when
+;; the file changed.  `SPC J l' on an org heading records which issue it is, for
+;; the headings that predate Jira -- once linked, the import stops treating that
+;; ticket as new.  Both commands save the buffer, because the column reads disk.
+;;
+;; Only the key, the summary and a link are copied.  Status, type and assignee
+;; change in Jira and would go stale here in a week, and the body under a heading
+;; is the operator's to write.  After an import the file's kanban dynamic block is
+;; refreshed, because `work_tasks.org' carries one that nothing else refreshes.
+;; Every function that shapes text is pure and tested against a fixture file in
+;; `temporary-file-directory'; nothing in tests/ touches ~/workspace/second-brain/.
+
+(defcustom rata-jira-org-file nil
+  "Org file `rata-jira-import-to-org' appends to.
+nil means `work_tasks.org' in `rata-org-roam-dir' (from `init-org.el'), the
+file the \"Work Task\" capture template also writes to."
+  :type '(choice (const :tag "work_tasks.org in the org-roam root" nil) file)
+  :group 'rata)
+
+(defcustom rata-jira-org-heading "Tasks"
+  "Heading in `rata-jira-org-file' under which imported issues are appended.
+Matched exactly, tags and TODO keyword aside.  New entries go one level below
+it, at the end of its subtree."
+  :type 'string
+  :group 'rata)
+
+(defcustom rata-jira-org-tags '("work" "jira")
+  "Tags put on an imported heading, and on a heading linked with
+`rata-jira-org-link-heading'.  `work' mirrors the capture template."
+  :type '(repeat string)
+  :group 'rata)
+
+(defcustom rata-jira-org-refresh-kanban t
+  "Non-nil refreshes the dynamic blocks of `rata-jira-org-file' after an import.
+`work_tasks.org' carries an `org-kanban' block that nothing else refreshes; a
+new heading that is not on the board would otherwise be invisible there."
+  :type 'boolean
+  :group 'rata)
+
+(defcustom rata-jira-org-mark "✓"
+  "What the Org column shows for an issue that is already in the org file."
+  :type 'string
+  :group 'rata)
+
+(defconst rata-jira-org-property "JIRA"
+  "Property whose value is the issue key an org heading stands for.
+The import and the Org column key on it; the title is never compared.")
+
+(defconst rata-jira-key-regexp "\\`[A-Za-z][A-Za-z0-9_]*-[0-9]+\\'"
+  "A Jira issue key on its own: project key, dash, number.")
+
+(defvar rata-org-roam-dir)              ; init-org.el, loaded after this module
+(defvar rata-jira--org-keys-cache nil
+  "(FILE (MODTIME SIZE) . KEYS): the last read of the org file.
+Re-read when the file's modification time or size changed.")
+
+(eval-when-compile
+  (defvar jira-detail--current)
+  (defvar jira-detail--current-key)
+  (defvar jira-base-url))
+(declare-function jira-issues--data-format-issue "jira-issues")
+(declare-function org-find-exact-headline-in-buffer "org")
+(declare-function org-current-level "org")
+(declare-function org-end-of-subtree "org")
+(declare-function org-back-to-heading "org")
+(declare-function org-set-property "org")
+(declare-function org-toggle-tag "org")
+(declare-function org-update-all-dblocks "org")
+
+(defun rata-jira--org-file ()
+  "Return the org file to import into, or nil while nothing can name one."
+  (let ((file (or rata-jira-org-file
+                  (and (boundp 'rata-org-roam-dir)
+                       (expand-file-name "work_tasks.org" rata-org-roam-dir)))))
+    (and file (expand-file-name file))))
+
+(defun rata-jira-org-keys-in-string (text)
+  "Return the issue keys TEXT carries as `rata-jira-org-property' values.
+One per property line, upper-cased, in order of appearance, without
+duplicates.  Only the property counts: a key mentioned in a title or a link
+is not a claim that the heading is that issue."
+  (let ((re (format "^[ \t]*:%s:[ \t]+\\([A-Za-z][A-Za-z0-9_]*-[0-9]+\\)[ \t]*$"
+                    (regexp-quote rata-jira-org-property)))
+        (case-fold-search t)
+        (start 0)
+        (keys nil))
+    (while (string-match re text start)
+      (let ((key (upcase (match-string 1 text))))
+        (unless (member key keys) (push key keys)))
+      (setq start (match-end 0)))
+    (nreverse keys)))
+
+(defun rata-jira-org-known-keys (&optional file)
+  "Return the issue keys FILE (default `rata-jira--org-file') already carries.
+Read from disk, not from a visiting buffer -- what is not saved is not in the
+agenda either -- and cached until the file changes on disk.  nil when there
+is no such file."
+  (let* ((file (or file (rata-jira--org-file)))
+         (attrs (and file (file-attributes file)))
+         (stamp (and attrs (list (file-attribute-modification-time attrs)
+                                 (file-attribute-size attrs)))))
+    (cond ((null attrs) nil)
+          ((and rata-jira--org-keys-cache
+                (equal (car rata-jira--org-keys-cache) file)
+                (equal (cadr rata-jira--org-keys-cache) stamp))
+           (cddr rata-jira--org-keys-cache))
+          (t (let ((keys (rata-jira-org-keys-in-string
+                          (with-temp-buffer
+                            (insert-file-contents file)
+                            (buffer-string)))))
+               (setq rata-jira--org-keys-cache (cons file (cons stamp keys)))
+               keys)))))
+
+(defun rata-jira-fmt-org (key)
+  "Format the Org column for issue KEY: `rata-jira-org-mark' when the file has it."
+  (if (and (stringp key) (member key (rata-jira-org-known-keys)))
+      rata-jira-org-mark
+    ""))
+
+(defun rata-jira-org-heading-text (summary)
+  "Return SUMMARY fit for one heading line: whitespace runs collapsed, trimmed."
+  (string-trim (replace-regexp-in-string "[ \t\n\r]+" " " (or summary ""))))
+
+(defun rata-jira-org-entry (issue level base-url &optional time)
+  "Return the org entry for the raw Jira ISSUE as a heading at LEVEL.
+A TODO heading with the summary and `rata-jira-org-tags'; a property drawer
+holding `rata-jira-org-property' (the key) and CREATED (TIME, default now,
+as the capture template writes it); then a link to the issue on BASE-URL.
+Ends with a newline.  Nothing else is copied: what changes in Jira would only
+go stale here, and the body is the operator's."
+  (let* ((key (alist-get 'key issue))
+         (title (rata-jira-org-heading-text
+                 (alist-get 'summary (alist-get 'fields issue))))
+         (tags (if rata-jira-org-tags
+                   (format " :%s:" (string-join rata-jira-org-tags ":"))
+                 "")))
+    (concat (make-string level ?*) " TODO "
+            (if (string-empty-p title) key title) tags "\n"
+            ":PROPERTIES:\n"
+            (format ":%s: %s\n" rata-jira-org-property key)
+            ;; "C" locale: org's own stamps say `Sat', whatever LANG says.
+            (let ((system-time-locale "C"))
+              (format-time-string ":CREATED: [%Y-%m-%d %a %H:%M]\n" time))
+            ":END:\n"
+            (format "[[%s/browse/%s][%s]]\n" (directory-file-name base-url) key key))))
+
+(defun rata-jira-org-import-issues (issues file base-url)
+  "Append the raw Jira ISSUES not yet in FILE under `rata-jira-org-heading'.
+Return (ADDED . SKIPPED), two lists of keys.  An issue whose key FILE already
+carries as `rata-jira-org-property' is skipped, so this is idempotent.
+Existing text is not touched: entries go after the last line of the
+heading's subtree, with links built on BASE-URL.  The buffer is saved, and
+its dynamic blocks refreshed first when `rata-jira-org-refresh-kanban'.
+Signals a `user-error' when FILE has no such heading."
+  (require 'org)
+  (with-current-buffer (find-file-noselect file)
+    (save-excursion
+      (save-restriction
+        (widen)
+        (let* ((known (rata-jira-org-keys-in-string (buffer-string)))
+               (pos (org-find-exact-headline-in-buffer rata-jira-org-heading nil t))
+               (added nil)
+               (skipped nil))
+          (unless pos
+            (user-error "No heading `%s' in %s" rata-jira-org-heading file))
+          (goto-char pos)
+          (let ((level (1+ (org-current-level))))
+            ;; End of the subtree's content, before any trailing blank lines,
+            ;; which stay where they are: between the new entries and the
+            ;; next heading.
+            (org-end-of-subtree t t)
+            (skip-chars-backward " \t\n")
+            (if (looking-at "[ \t]*\n")
+                (goto-char (match-end 0))
+              (insert "\n"))
+            (dolist (issue issues)
+              (let ((key (alist-get 'key issue)))
+                (if (or (member key known) (member key added))
+                    (push key skipped)
+                  (insert (rata-jira-org-entry issue level base-url))
+                  (push key added)))))
+          (when added
+            (when rata-jira-org-refresh-kanban
+              (org-update-all-dblocks))
+            (save-buffer))
+          (cons (nreverse added) (nreverse skipped)))))))
+
+(defun rata-jira--raw-issues-for (keys)
+  "Return the raw issues for KEYS, as the current jira.el buffer holds them.
+The list keeps every issue on screen in `jira-issues--raw-issues'; the detail
+buffer keeps its one issue in `jira-detail--current'."
+  (let ((pool (cond ((derived-mode-p 'jira-detail-mode)
+                     (and jira-detail--current (list jira-detail--current)))
+                    (t (append jira-issues--raw-issues nil)))))
+    (mapcar (lambda (key)
+              (or (seq-find (lambda (issue) (equal (alist-get 'key issue) key)) pool)
+                  (user-error "Jira: %s is not in this buffer; refresh and retry" key)))
+            keys)))
+
+(defun rata-jira--redraw-issues ()
+  "Re-print the issue list from the issues it already holds, no request."
+  (when (derived-mode-p 'jira-issues-mode)
+    (setq tabulated-list-entries
+          (mapcar #'jira-issues--data-format-issue (append jira-issues--raw-issues nil)))
+    (tabulated-list-print t)))
+
+(defun rata-jira-import-to-org ()
+  "Append the marked issues (or the one at point) to the work tasks org file.
+One direction only, Jira to org; issues already in the file are skipped and
+the file's existing text is never rewritten.  Asks first, naming the file."
+  (interactive)
+  (let* ((keys (rata-jira--target-issues))
+         (file (or (rata-jira--org-file)
+                   (user-error "Set `rata-jira-org-file'; init-org.el has not named the roam root")))
+         (issues (rata-jira--raw-issues-for keys))
+         (known (rata-jira-org-known-keys file))
+         (new (seq-remove (lambda (key) (member key known)) keys))
+         (name (file-name-nondirectory file)))
+    (cond
+     ((not (file-exists-p file))
+      (user-error "Jira: %s does not exist" file))
+     ((null new)
+      (message "Jira: %s already in %s" (string-join keys ", ") name))
+     ((y-or-n-p (format "Add %s to %s%s? " (string-join new ", ") name
+                        (if (< (length new) (length keys))
+                            (format " (%d already there)" (- (length keys) (length new)))
+                          "")))
+      (let ((result (rata-jira-org-import-issues issues file (jira-api--get-current-url))))
+        (message "Added %s to %s%s"
+                 (string-join (car result) ", ") name
+                 (if (cdr result)
+                     (format "; already there: %s" (string-join (cdr result) ", "))
+                   ""))
+        (rata-jira--redraw-issues))))))
+
+(defun rata-jira--issue-candidates ()
+  "Return (LABEL . KEY) for every issue the Jira list currently holds."
+  (mapcar (lambda (issue)
+            (let ((key (alist-get 'key issue)))
+              (cons (format "%s  %s" key
+                            (rata-jira-org-heading-text
+                             (alist-get 'summary (alist-get 'fields issue))))
+                    key)))
+          (append (and (boundp 'jira-issues--raw-issues) jira-issues--raw-issues) nil)))
+
+(defun rata-jira--read-key ()
+  "Read a Jira issue key, offering the issues in the list as candidates.
+Free text is accepted; the key at point is the default when there is one."
+  (let* ((candidates (rata-jira--issue-candidates))
+         (at-point (thing-at-point 'symbol t))
+         (default (and at-point (string-match-p rata-jira-key-regexp at-point)
+                       (upcase at-point)))
+         (pick (completing-read
+                (format "Jira issue key%s: " (if default (format " (default %s)" default) ""))
+                candidates nil nil nil nil default)))
+    (upcase (string-trim (or (cdr (assoc pick candidates)) (car (split-string pick)) "")))))
+
+(defun rata-jira-org-link-heading (key)
+  "Record that the org heading at point is Jira issue KEY.
+Sets `rata-jira-org-property', adds `rata-jira-org-tags' and saves, so the
+Org column shows the issue as present and the import stops offering it.  For
+headings written before Jira; nothing is sent to Jira."
+  (interactive (list (rata-jira--read-key)))
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Not in an org buffer"))
+  (unless (string-match-p rata-jira-key-regexp key)
+    (user-error "Not a Jira issue key: %s" key))
+  (setq key (upcase key))
+  (condition-case nil
+      (org-back-to-heading t)
+    (error (user-error "No org heading at point")))
+  (org-set-property rata-jira-org-property key)
+  (dolist (tag rata-jira-org-tags)
+    (org-toggle-tag tag 'on))
+  (when buffer-file-name (save-buffer))
+  (message "Heading is now Jira issue %s" key))
+
 ;; --- Evil: these buffers stay in evil normal state (D-015) ---
 ;;
 ;; jira.el has no evil support (upstream issue #31): `jira-issues-mode' derives from
@@ -787,6 +1093,7 @@ EXTRA is key/definition pairs in `general-define-key' form, also prefixed."
 (with-eval-after-load 'jira-issues
   (apply #'rata-jira--bind-local-leader 'jira-issues-mode-map rata-jira-issues-key-mirror
          "r" '(tablist-revert :which-key "refresh")
+         "i" '(rata-jira-import-to-org :which-key "import into work_tasks.org")
          ;; List-only: the detail buffer has nothing to group.
          "mg" '(rata-jira-toggle-sprint-grouping :which-key "toggle sprint grouping")
          rata-jira-sprint-keys)
@@ -799,6 +1106,7 @@ EXTRA is key/definition pairs in `general-define-key' form, also prefixed."
 
 (with-eval-after-load 'jira-detail
   (apply #'rata-jira--bind-local-leader 'jira-detail-mode-map rata-jira-detail-key-mirror
+         "i" '(rata-jira-import-to-org :which-key "import into work_tasks.org")
          rata-jira-sprint-keys))
 
 (with-eval-after-load 'jira-tempo
@@ -813,6 +1121,8 @@ EXTRA is key/definition pairs in `general-define-key' form, also prefixed."
     :states '(normal visual)
     "J"  '(:ignore t :which-key "jira")
     "Jj" '(jira-issues :which-key "issues")
-    "Jt" '(jira-tempo  :which-key "tempo worklogs")))
+    "Jt" '(jira-tempo  :which-key "tempo worklogs")
+    ;; Org-side: the heading at point stands for an issue (org buffers only).
+    "Jl" '(rata-jira-org-link-heading :which-key "link org heading to issue")))
 
 (provide 'init-jira)

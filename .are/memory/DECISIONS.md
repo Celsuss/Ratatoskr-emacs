@@ -483,3 +483,44 @@ first open, not only after `, r`.
 
 Related: D-011 (a view, not a sync), D-015 (evil stays live; evil-collection's tablist keys
 are exactly what the guards protect), D-017 (the moves whose result these headings show).
+
+## D-019 — Jira issues are imported into `work_tasks.org` one way, append-only, on demand
+
+**2026-09-11.** Operator request: "sync new tasks from Jira into `work_tasks.org`", then
+on being shown D-011: "only sync from Jira to org and never the other way around", with
+the marker column and the link-heading command included.
+
+D-011 stands. What it rejected was a *mirror*: idempotent rewrite of headings keyed on an
+issue id, plus `org-jira`. Its reasons — headings carry hand-written notes, briefs and
+sub-checklists; Jira and the file disagree about what a task is; the kanban block is
+refreshed by nothing — all argue against rewriting, not against appending. So:
+
+1. *One direction.* Jira → org. Nothing in the import PUTs anything; marking a heading
+   DONE does not transition the ticket. The one write-back in the module is still only
+   sprint membership (D-017).
+2. *Append-only, keyed on a property.* Identity is `:JIRA: KEY`, never the title. An
+   issue whose key the file already carries is skipped; an existing heading is never
+   rewritten, re-titled or moved. `rata-test-jira-import-appends-new-issues-only` asserts
+   the file after an import byte-for-byte against the fixture with the entries inserted
+   and nothing else changed, and that a second import is a no-op.
+3. *On demand, confirmed.* `, i` in the list or detail buffer, on the marked issues or the
+   one at point, after a `y-or-n-p` that names the file. No timer.
+4. *Only what does not go stale.* Key, summary, a link, a CREATED stamp in the capture
+   template's shape. Status, type and assignee are deliberately not copied — a one-way
+   import can never correct them.
+5. *The kanban block is refreshed* after an import (`rata-jira-org-refresh-kanban`), the
+   one D-011 concern that appending alone would not answer.
+
+Two companions make the dedupe honest. The `Org` column marks issues the file already
+has, read from disk and cached on mtime+size, so "new" is visible before anything is
+written. `SPC J l` on an org heading sets the property (and tags, and saves) for the
+headings written before Jira existed here — without it every such ticket would be
+offered as new forever.
+
+The file path is not corporate identity, so `rata-jira-org-file` defaults to
+`work_tasks.org` under `rata-org-roam-dir` rather than living in `local.el`. Tests use a
+fixture in `temporary-file-directory`; nothing under `~/workspace/second-brain/` is read
+or written by `tests/`.
+
+Related: D-011 (a view, not a sync — this narrows, it does not reverse), D-012 (why the
+path is not in `local.el`), D-017 (the one write-back).
