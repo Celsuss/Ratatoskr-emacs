@@ -192,6 +192,7 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC o b d d" . rata-dialogic-insert-block)
     ("SPC o b e" . org-hugo-export-wim-to-md)
     ("SPC o b s" . rata-blog-status)
+    ("SPC o s" . rata-org-sort-tasks)
     ("SPC i o p" . org-id-get-create)
     ("SPC i o a" . rata-roam-alias-add-to-file)
     ;; agent-shell's context senders are not autoloaded upstream, so these
@@ -2469,6 +2470,102 @@ take the first candidate rather than blocking on input."
       (ert-fail (concat (format "%d of %d snippets failed to expand:\n  "
                                 (length failures) checked)
                         (mapconcat #'identity (nreverse failures) "\n  "))))))
+
+;;; ============================================================
+;;; Org task ordering (init-org.el)
+;;; ============================================================
+;;
+;; The task files are flat `** TODO' lists that nothing kept in order; these
+;; pin the two things that now do: the stable sort and the move on state
+;; change.  Everything runs in a temp buffer — nothing under second-brain is
+;; touched — and `org-todo' is driven for real so the hook wiring itself is
+;; under test, not just the helper it calls.
+
+(defconst rata-test--task-file
+  (concat "#+filetags: :hastodo:\n"
+          "#+SEQ_TODO: TODO STRT WAIT | DONE\n\n"
+          "* Tasks\n"
+          "** DONE a\nCLOSED: [2026-01-01 Thu 10:00]\n"
+          "** TODO b\nbody b\n*** sub of b\n"
+          "** DONE c\nCLOSED: [2026-02-01 Sun 10:00]\n"
+          "** STRT d\n"
+          "** TODO e\n"
+          "** WAIT f\n"
+          "** DONE g\n")
+  "A task list in the shape of work_tasks.org, deliberately out of order.")
+
+(defun rata-test--task-order ()
+  "Titles of the level-2 headings in the current buffer, in order."
+  (mapcar #'substring-no-properties
+          (org-map-entries (lambda () (org-get-heading t t t t)) "LEVEL=2")))
+
+(defun rata-test--goto-task (title)
+  "Move point to the level-2 heading whose title is TITLE."
+  (goto-char (point-min))
+  (re-search-forward (concat "^\\*\\* [A-Z]+ " (regexp-quote title) "$")))
+
+(ert-deftest rata-test-org-sort-tasks-orders-by-state-then-closed ()
+  "`rata-org-sort-tasks' sorts siblings: open states in #+SEQ_TODO order,
+done states last with the newest CLOSED first, hand order otherwise kept.
+Invoked from a task heading so the *siblings* are what gets sorted; the
+sub-heading of b travels with its parent."
+  (require 'org)
+  (with-temp-buffer
+    (insert rata-test--task-file)
+    (org-mode)
+    (rata-test--goto-task "b")
+    (rata-org-sort-tasks)
+    (should (equal (rata-test--task-order) '("b" "e" "d" "f" "c" "a" "g")))
+    (rata-test--goto-task "b")
+    (should (looking-at-p "\nbody b\n\\*\\*\\* sub of b\n"))
+    ;; Idempotent: a second pass changes nothing.
+    (rata-org-sort-tasks)
+    (should (equal (rata-test--task-order) '("b" "e" "d" "f" "c" "a" "g")))))
+
+(ert-deftest rata-test-org-state-change-moves-task-across-boundary ()
+  "Finishing a task moves it to the head of the finished block with a CLOSED
+stamp; reopening one moves it to the end of the open block; a change that
+stays inside the open block (TODO -> STRT) leaves it where it is.  Driven
+through `org-todo', so a hook that was never added would fail here."
+  (require 'org)
+  (with-temp-buffer
+    (insert rata-test--task-file)
+    (org-mode)
+    (rata-test--goto-task "b")
+    (rata-org-sort-tasks)
+    (let ((org-log-done 'time)
+          (rata-org-order-tasks-on-state-change t))
+      (rata-test--goto-task "b")
+      (org-todo "DONE")
+      (should (equal (rata-test--task-order) '("e" "d" "f" "b" "c" "a" "g")))
+      (rata-test--goto-task "b")
+      (should (org-entry-get nil "CLOSED"))
+      (rata-test--goto-task "g")
+      (org-todo "TODO")
+      (should (equal (rata-test--task-order) '("e" "d" "f" "g" "b" "c" "a")))
+      (rata-test--goto-task "e")
+      (org-todo "STRT")
+      (should (equal (rata-test--task-order) '("e" "d" "f" "g" "b" "c" "a"))))))
+
+(ert-deftest rata-test-org-state-change-leaves-other-files-alone ()
+  "The move is scoped to `hastodo' files and to the variable that enables it."
+  (require 'org)
+  (dolist (case `((,(replace-regexp-in-string ":hastodo:" ":notes:" rata-test--task-file) . t)
+                  (,rata-test--task-file . nil)))
+    (with-temp-buffer
+      (insert (car case))
+      (org-mode)
+      (let ((org-log-done nil)
+            (rata-org-order-tasks-on-state-change (cdr case))
+            (before (rata-test--task-order)))
+        (rata-test--goto-task "b")
+        (org-todo "DONE")
+        (should (equal (rata-test--task-order) before))))))
+
+(ert-deftest rata-test-org-log-done-stamps-closed ()
+  "`org-log-done' is set once org loads; the finished block's order depends on it."
+  (require 'org)
+  (should (eq org-log-done 'time)))
 
 ;;; ============================================================
 ;;; Run all tests

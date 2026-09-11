@@ -524,3 +524,44 @@ or written by `tests/`.
 
 Related: D-011 (a view, not a sync — this narrows, it does not reverse), D-012 (why the
 path is not in `local.el`), D-017 (the one write-back).
+
+## D-020 — Task files are kept in state order by a stable sort and a boundary move, not by archiving
+
+**2026-09-11.** Operator: the `*_tasks.org` files are flat `** TODO` lists that nothing
+orders, so DONE headings sit wherever they were finished and appended captures and Jira
+imports (D-019) land after them. Asked for "a good solution to order these tasks", then
+"go ahead and implement this".
+
+Chosen:
+
+1. *`org-log-done` is `time`.* No task carried a `CLOSED` stamp, so there was nothing to
+   order the finished block by. This is the one setting that makes "newest finished
+   first" and a "done this week" review possible at all.
+2. *A stable sort, `rata-org-sort-tasks` (`SPC o s`).* `org-sort-entries` with a custom
+   key `(KEYWORD-INDEX . -CLOSED-SECONDS)`: open states in the file's own `#+SEQ_TODO`
+   order, done states last, newest `CLOSED` first. `sort` is stable, so the hand order
+   inside the open block is a first-class thing the sort preserves rather than
+   destroys. From a task heading the siblings are sorted; from the parent, its children.
+   Org's built-in `?o` key was not used: it is `(- 99 (± (length (member kw keywords))))`,
+   which puts done keywords *first* under `<`, and has no secondary key.
+3. *A move on the open/finished boundary only.* `org-after-todo-state-change-hook` moves
+   a task that becomes done to the head of the finished block and one that is reopened to
+   the end of the open block, in `hastodo` files only. It does **not** move on TODO → STRT:
+   that would make every state key in the file a re-shuffle, and the open block's order is
+   the operator's. The move is `org-move-subtree-down` with a signed count, because that
+   function saves and reinstalls markers — an agenda line's `org-hd-marker` follows the
+   entry, where a cut-and-paste would have left it pointing at whatever slid into the
+   old place and made the next `t` in the agenda hit the wrong task.
+
+Rejected: `org-archive-location "::* Done"` plus `C-c C-x C-s`. Zero code, but archived
+trees are skipped by the agenda by default, which would empty the "Finished" group in the
+`p` Project Dashboard, and every entry gains five `ARCHIVE_*` properties. Also rejected:
+re-sorting the whole parent from the hook — heavier, moves point off the task, and
+`org-sort-entries` does not reinstall markers.
+
+The one-time sort of the existing files is the operator's to run (`SPC o s` on `* Tasks`);
+`SAFETY_RULES.md` keeps `~/workspace/second-brain/` out of autonomous hands, and the
+tests use a temp buffer in the shape of `work_tasks.org` instead.
+
+Related: D-019 (the import that appends after the DONE block), L-043 (org's own `CLOSED`
+stamp carries the locale day name, as the existing files already do).

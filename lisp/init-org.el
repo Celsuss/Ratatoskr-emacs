@@ -109,6 +109,10 @@ days, so a DST boundary inside the span cannot shift the horizon by a day."
   (setq org-enforce-todo-dependencies t)
   (setq org-enforce-todo-checkbox-dependencies t)
 
+  ;; Stamp finished tasks with CLOSED.  Until now no task carried one, so the
+  ;; finished block had no order at all; `rata-org--task-sort-key' below reads it.
+  (setq org-log-done 'time)
+
   ;;;; Org Babel — source block execution
   (org-babel-do-load-languages
    'org-babel-load-languages
@@ -235,6 +239,130 @@ When present the file is included in org-agenda via the :hastodo: query."
         (message "Added #+filetags: :hastodo: — file included in agenda"))))
   (save-buffer)
   (org-roam-db-update-file))
+
+;;;; Task ordering — open tasks first, finished ones last, newest finished first
+;;
+;; The task files (work_tasks.org, homelab_tasks.org, ...) are flat `** TODO'
+;; lists under one parent, and a heading stays where it was written when it is
+;; finished — so DONE entries sit wherever they happened to be closed, and an
+;; appended capture or Jira import lands *after* them.  Nothing carried a CLOSED
+;; stamp, so there was nothing to order the finished ones by either.  Three
+;; pieces: `org-log-done' (in the `use-package org' :config above) stamps every
+;; finished task; `rata-org-sort-tasks' is a stable sort of the siblings by
+;; keyword then completion time; and a hook moves a task across the
+;; open/finished boundary as its done-ness changes, so a sorted file stays
+;; sorted on its own.  The hook deliberately ignores changes inside the open
+;; block (TODO -> STRT): hand order there is meaningful and only the explicit
+;; sort touches it.  Movement goes through `org-move-subtree-down', which
+;; saves and reinstalls markers, so an agenda line's marker follows the entry
+;; rather than pointing at whatever slid into its old place.
+
+(eval-when-compile
+  (defvar org-state)
+  (defvar org-last-state)
+  (defvar org-file-tags)
+  (defvar org-todo-keywords-1)
+  (defvar org-done-keywords))
+(declare-function org-back-to-heading "org")
+(declare-function org-before-first-heading-p "org")
+(declare-function org-up-heading-safe "org")
+(declare-function org-at-heading-p "org")
+(declare-function org-get-next-sibling "org")
+(declare-function org-get-todo-state "org")
+(declare-function org-entry-get "org")
+(declare-function org-entry-is-done-p "org")
+(declare-function org-time-string-to-time "org")
+(declare-function org-sort-entries "org")
+(declare-function org-move-subtree-down "org")
+
+(defvar rata-org-order-tasks-on-state-change t
+  "When non-nil, a task that becomes done or is reopened is moved among its
+siblings to the open/finished boundary.  Applies only in files whose
+#+filetags: carry `hastodo' — the same tag that puts them in the agenda.")
+
+(defun rata-org--task-sort-key ()
+  "Sort key for the entry at point: (KEYWORD-INDEX . NEGATED-CLOSED-SECONDS).
+Keywords sort in the order the file's #+SEQ_TODO: declares them; an entry
+without a keyword sorts after all of them.  Among equal keywords a later
+CLOSED sorts first; entries without one tie, and the sort is stable, so the
+hand order of the open block survives."
+  (let* ((kw (org-get-todo-state))
+         (n (length org-todo-keywords-1))
+         (index (if kw (- n (length (member kw org-todo-keywords-1))) n))
+         (closed (org-entry-get nil "CLOSED"))
+         (secs (if closed (float-time (org-time-string-to-time closed)) 0.0)))
+    (cons index (- secs))))
+
+(defun rata-org--task-key-lessp (a b)
+  "Order two `rata-org--task-sort-key' values."
+  (or (< (car a) (car b))
+      (and (= (car a) (car b)) (< (cdr a) (cdr b)))))
+
+(defun rata-org-sort-tasks ()
+  "Sort the task list around point by TODO state, then by completion time.
+On a heading that carries a TODO keyword the siblings are sorted; on one
+without (the `* Tasks' parent) its children are; before the first heading
+the top-level entries are.  Open states come first in #+SEQ_TODO: order,
+done states last with the most recently CLOSED first.  The sort is stable,
+so the hand order inside the open block is kept."
+  (interactive)
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Not in an org buffer"))
+  (save-excursion
+    (if (org-before-first-heading-p)
+        (goto-char (point-min))
+      (org-back-to-heading t)
+      (when (org-get-todo-state)
+        (unless (org-up-heading-safe)
+          (goto-char (point-min)))))
+    (org-sort-entries nil ?f #'rata-org--task-sort-key #'rata-org--task-key-lessp)))
+
+(defun rata-org--sibling-positions ()
+  "Positions of the heading at point and every sibling, in buffer order."
+  (save-excursion
+    (org-back-to-heading t)
+    (if (org-up-heading-safe)
+        (progn (outline-next-heading) t)
+      (goto-char (point-min))
+      (unless (org-at-heading-p) (outline-next-heading)))
+    (let (positions)
+      (while (progn (push (point) positions) (org-get-next-sibling)))
+      (nreverse positions))))
+
+(defun rata-org--move-task-to-boundary ()
+  "Move the task at point to just after its last open sibling.
+A task that has just been finished thereby heads the finished block (newest
+first, matching `rata-org--task-sort-key'); one that has just been reopened
+joins the end of the open block.  Return the number of siblings moved past,
+negative for upward, 0 when it was already in place."
+  (org-back-to-heading t)
+  (let* ((self (point))
+         (positions (rata-org--sibling-positions))
+         (index (seq-position positions self))
+         (last-open -1)
+         (k 0))
+    (dolist (pos positions)
+      (unless (= pos self)
+        (unless (save-excursion (goto-char pos) (org-entry-is-done-p))
+          (setq last-open k))
+        (setq k (1+ k))))
+    (let ((delta (- (1+ last-open) index)))
+      (unless (zerop delta)
+        (org-move-subtree-down delta))
+      delta)))
+
+(defun rata-org-order-task-on-state-change ()
+  "Keep the open/finished boundary when a task's done-ness changes.
+For `org-after-todo-state-change-hook'.  Runs only in `hastodo' files and
+only when the change crosses between an open and a done state, so a
+TODO -> STRT change leaves the entry where it is."
+  (when (and rata-org-order-tasks-on-state-change
+             (member "hastodo" org-file-tags)
+             (not (eq (and (member org-state org-done-keywords) t)
+                      (and (member org-last-state org-done-keywords) t))))
+    (rata-org--move-task-to-boundary)))
+
+(add-hook 'org-after-todo-state-change-hook #'rata-org-order-task-on-state-change)
 
 (use-package org-roam
   :after (org general)
@@ -739,7 +867,8 @@ Adding an alias for the note therefore has to widen and start from
     "od" '(org-deadline :which-key "deadline")
     "om" '(org-latex-preview :which-key "toggle math preview")
     "of" '(rata-org-capture-fleeting :which-key "fleeting note")
-    "oh" '(rata-toggle-hastodo-filetag :which-key "toggle agenda inclusion"))
+    "oh" '(rata-toggle-hastodo-filetag :which-key "toggle agenda inclusion")
+    "os" '(rata-org-sort-tasks :which-key "sort tasks by state"))
   (rata-leader
     :states '(normal visual)
     "or"  '(:ignore t :which-key "Org roam")

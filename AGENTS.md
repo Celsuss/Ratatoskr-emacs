@@ -351,6 +351,14 @@ init-present → init-dashboard
   non-empty `:export_file_name:` are a contract with `init-blog.el` and with the
   `(:name "Blog Posts" :tag "blog")` org-super-agenda group in this same file. Hugo export
   itself lives in `init-blog.el`.
+  **Task files are kept in state order** (`SPC o s`, `rata-org-sort-tasks`): open states in
+  `#+SEQ_TODO` order first, done states last with the newest `CLOSED` first, stable so hand
+  order inside the open block survives; `org-log-done` is `time` so finished tasks carry
+  the stamp that order depends on. `rata-org-order-task-on-state-change` on
+  `org-after-todo-state-change-hook` moves a task across the open/finished boundary when
+  its done-ness changes, in `hastodo` files only and never for a change inside the open
+  block. It moves with `org-move-subtree-down`, which reinstalls markers, so an agenda
+  line's marker follows the entry (D-020). Tests drive `org-todo` for real in a temp buffer.
 - `init-blog.el` — org-roam → Hugo export via `ox-hugo` under `SPC o b`. Posts are org-roam
   nodes in the flat roam root identified by the `rata-blog-tag` (`:blog:`) filetag, not by
   directory — the same design as `init-present.el`, and `rata-blog-files`,
