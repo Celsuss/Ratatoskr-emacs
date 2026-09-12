@@ -285,7 +285,10 @@ init-present → init-dashboard
   `~/.mbsyncrc` is `cp mbsyncrc.example ~/.mbsyncrc`, and
   `rata-test-mail-mbsyncrc-example-matches-module` keeps the template's channel, host,
   port and the two Proton exclusions in step with the module. `SPC a e d`
-  (`rata-mail-doctor`) reports each piece as present or missing. **Proton's traps are
+  (`rata-mail-doctor`) reports each piece as present or missing, and every command it prints is
+  derived from the host (`rata-mail-bridge-command`): on Arch `protonmail-bridge` on PATH is a Qt
+  launcher that hangs on `--cli`, so the Go binary under `/usr/lib/protonmail/bridge/` is named
+  instead; Bridge 3.x writes no `cert.pem` until `cert export` (FAIL-0018). **Proton's traps are
   settings, not lore**: Bridge files sent mail itself (`mu4e-sent-messages-behavior`
   `delete`), "All Mail" and "Labels/*" are the same messages again (excluded in the
   template), mbsync renames on move (`mu4e-change-filenames-when-moving`), and the cert

@@ -22,18 +22,24 @@ install-deps-arch:
         # wrapfig/capt-of -> latexextra, ulem -> plaingeneric)
         texlive-binextra texlive-latex texlive-latexrecommended
         texlive-latexextra texlive-plaingeneric
-        # Mail (init-mail.el): mu ships the matching mu4e elisp in
-        # /usr/share/emacs/site-lisp/mu4e; isync provides mbsync.
-        mu isync
+        # Mail (init-mail.el): isync provides mbsync. protonmail-bridge is in
+        # [extra], not the AUR. It needs a paid Proton plan and a Secret Service
+        # keychain (gnome-keyring); after install, log in once with
+        # `protonmail-bridge --cli'. mu itself is AUR-only, below.
+        isync protonmail-bridge
     )
 
     # The ACP adapters are NOT here: they are npm/bun packages, and the AUR entry
     # that used to stand in for the Claude one named an abandoned third party's
     # package whose bin was not even the expected name (FAIL-0014). `_deps-acp'
     # installs both, the same way on every distro.
-    # protonmail-bridge needs a paid Proton plan and a Secret Service keychain
-    # (gnome-keyring); after install, log in once with `protonmail-bridge --cli'.
-    aur_pkgs=(gomodifytags protonmail-bridge)
+    # mu is not in the official repos (archlinux.org has no `mu' package; the
+    # last binary was dropped from [extra]). The AUR `mu' is current (1.14.3,
+    # the version D-021 pins on the Ubuntu host) and installs the matching mu4e
+    # elisp under /usr/share/emacs/site-lisp/mu4e, which rata-mail-mu4e-dir
+    # finds beside the binary. `maildir-utils' in the AUR is the same upstream
+    # abandoned at 1.6.2 (2021) -- do not use it.
+    aur_pkgs=(gomodifytags mu)
 
     # --- Pacman packages ---
     missing_pacman=()

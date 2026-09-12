@@ -21,9 +21,12 @@ User CHANGE-ME@proton.me
 #     machine 127.0.0.1 port 1025 login CHANGE-ME@proton.me password <bridge-password>
 PassCmd "gpg --quiet --for-your-eyes-only --no-tty --decrypt ~/.authinfo.gpg | awk '$1==\"machine\" && $2==\"127.0.0.1\" { p=0; for (i=1;i<=NF;i++) if ($i==\"port\" && $(i+1)==\"1143\") p=1; if (p) for (i=1;i<=NF;i++) if ($i==\"password\") print $(i+1) }'"
 TLSType STARTTLS
-# Bridge's self-signed certificate.  This is the Flatpak path; a native package
-# writes ~/.config/protonmail/bridge-v3/cert.pem instead.
-CertificateFile ~/.var/app/ch.protonmail.protonmail-bridge/config/protonmail/bridge-v3/cert.pem
+# Bridge's self-signed certificate.  Bridge 3.x keeps it in its encrypted vault
+# and writes no file until you run `cert export' in the Bridge CLI, pointed at
+# the directory below.  This is the Flatpak path; for a native package export
+# to ~/.config/protonmail/bridge-v3 and use that cert.pem here.
+# CertificateFile ~/.var/app/ch.protonmail.protonmail-bridge/config/protonmail/bridge-v3/cert.pem
+CertificateFile ~/.config/protonmail/bridge-v3/cert.pem
 
 IMAPStore proton-remote
 Account proton

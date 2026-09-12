@@ -2626,6 +2626,42 @@ listening socket, nil against a closed port."
           (should-not (rata-mail-port-open-p "127.0.0.1" port)))
       (when (process-live-p server) (delete-process server)))))
 
+(ert-deftest rata-test-mail-bridge-command-prefers-the-native-binary ()
+  "The doctor's Bridge hints must be commands the host can run.  On Arch
+`protonmail-bridge --cli' is the Qt launcher, which times out waiting for
+a gRPC config the CLI frontend never writes -- so the Go binary wins
+whenever it exists, the Flatpak is next, and a bare host is told how to
+install rather than handed a command that is not there."
+  (let ((rata-mail-bridge-native-binary "/usr/lib/protonmail/bridge/bridge")
+        (rata-mail-bridge-flatpak-id "ch.protonmail.protonmail-bridge"))
+    (should (equal (rata-mail-bridge-command-for "--cli" t t)
+                   "/usr/lib/protonmail/bridge/bridge --cli"))
+    (should (equal (rata-mail-bridge-command-for "--noninteractive" nil t)
+                   "flatpak run ch.protonmail.protonmail-bridge --noninteractive"))
+    (let ((bare (rata-mail-bridge-command-for "--cli" nil nil)))
+      (should (string-prefix-p "protonmail-bridge --cli" bare))
+      (should (string-match-p "pacman -S protonmail-bridge" bare))
+      (should (string-match-p "flatpak install" bare)))
+    ;; Never the launcher on PATH when the real binary is known.
+    (should-not (string-prefix-p "protonmail-bridge "
+                                 (rata-mail-bridge-command-for "--cli" t nil)))))
+
+(ert-deftest rata-test-mail-cert-dir-matches-template ()
+  "`cert export' is pointed at the directory of a `rata-mail-bridge-cert-candidates'
+entry, and mbsyncrc.example's CertificateFile names one of those same
+candidates -- otherwise the doctor's hint and the template disagree about
+where the certificate lives."
+  (let ((text (with-temp-buffer
+                (insert-file-contents
+                 (expand-file-name "mbsyncrc.example" user-emacs-directory))
+                (buffer-string)))
+        (dirs (mapcar (lambda (c) (file-name-directory (expand-file-name c)))
+                      rata-mail-bridge-cert-candidates)))
+    (should (member (rata-mail-bridge-cert-dir) dirs))
+    (should (string-match-p "^CertificateFile " text))
+    (should (seq-some (lambda (c) (string-match-p (concat "^CertificateFile " (regexp-quote c) "$") text))
+                      rata-mail-bridge-cert-candidates))))
+
 (ert-deftest rata-test-mail-mbsyncrc-example-matches-module ()
   "mbsyncrc.example and init-mail.el describe the same Bridge.
 The channel name is what `mu4e-get-mail-command' runs, host and port are

@@ -25,6 +25,19 @@
 ;;   4. The mu index -- `mu init --maildir=~/Mail --my-address=you@proton.me',
 ;;      then `mbsync proton' and `mu index' once.  `rata-mail-doctor' (SPC a e d)
 ;;      walks through what is still missing.
+;;   5. Bridge's certificate -- Bridge 3.x keeps it inside its encrypted vault
+;;      and writes no cert.pem until told: `cert export' in the Bridge CLI, to
+;;      the directory named first in `rata-mail-bridge-cert-candidates' that
+;;      applies to the host.  mbsync and smtpmail both read that file.
+;;
+;; The Bridge command itself is per-host too.  On Ubuntu it is the Flatpak
+;; (`flatpak run ch.protonmail.protonmail-bridge').  On Arch the package puts a
+;; Qt launcher on PATH as `protonmail-bridge', and `protonmail-bridge --cli'
+;; does not work: the launcher waits for a gRPC config that the CLI frontend
+;; never writes, times out, and leaves the backend orphaned.  The Go binary at
+;; /usr/lib/protonmail/bridge/bridge takes `--cli' and `--noninteractive'
+;; directly.  `rata-mail-bridge-command' picks the right spelling, so every
+;; hint the doctor prints is one the host can run.
 ;;
 ;; mu4e is NOT an elpaca package.  Its elisp is version-locked to the `mu' binary
 ;; (the two speak a private protocol), so it is loaded from wherever the binary's
@@ -97,9 +110,11 @@ mbsyncrc.example uses this value and a test keeps the two in step."
 (defcustom rata-mail-bridge-cert-candidates
   '("~/.var/app/ch.protonmail.protonmail-bridge/config/protonmail/bridge-v3/cert.pem"
     "~/.config/protonmail/bridge-v3/cert.pem")
-  "Where Bridge writes its self-signed certificate: the Flatpak sandbox
-first, then a native package.  The first that exists is trusted for the
-SMTP connection.  mbsync needs the same path in its CertificateFile."
+  "Where Bridge's self-signed certificate is exported to: the Flatpak
+sandbox first, then a native package's config directory.  The first that
+exists is trusted for the SMTP connection; mbsync needs the same path in
+its CertificateFile.  Bridge 3.x does not write this file by itself --
+`cert export' in its CLI does (see `rata-mail-bridge-cert-dir')."
   :type '(repeat file)
   :group 'rata)
 
@@ -137,6 +152,49 @@ a symlink into the Cellar, and the elisp is reachable from either side."
   "The first existing certificate in `rata-mail-bridge-cert-candidates', or nil."
   (seq-find #'file-exists-p
             (mapcar #'expand-file-name rata-mail-bridge-cert-candidates)))
+
+(defcustom rata-mail-bridge-native-binary "/usr/lib/protonmail/bridge/bridge"
+  "Bridge's Go binary as the Arch package installs it, behind the Qt
+launcher that `protonmail-bridge' on PATH runs.  The launcher cannot drive
+`--cli'; this binary can."
+  :type 'file
+  :group 'rata)
+
+(defcustom rata-mail-bridge-flatpak-id "ch.protonmail.protonmail-bridge"
+  "The Flatpak application id of Bridge, on hosts that run it that way."
+  :type 'string
+  :group 'rata)
+
+(defun rata-mail-bridge-command-for (flag native flatpak)
+  "The shell command that runs Bridge with FLAG on a host described by
+NATIVE (the Go binary exists at `rata-mail-bridge-native-binary') and
+FLATPAK (the Flatpak is installed).  Pure, so the choice is testable:
+the native binary wins because it is the only spelling on such a host
+that works for `--cli'; otherwise the Flatpak; otherwise the install
+command, so a hint on a bare host still says what to do."
+  (cond (native (format "%s %s" rata-mail-bridge-native-binary flag))
+        (flatpak (format "flatpak run %s %s" rata-mail-bridge-flatpak-id flag))
+        (t (format "protonmail-bridge %s  (install: pacman -S protonmail-bridge, or flatpak install flathub %s)"
+                   flag rata-mail-bridge-flatpak-id))))
+
+(defun rata-mail-bridge-command (flag)
+  "`rata-mail-bridge-command-for' FLAG, probing this host.
+The Flatpak is detected by its sandbox directory rather than by running
+`flatpak info', so the doctor never spawns a process to print a hint."
+  (rata-mail-bridge-command-for
+   flag
+   (file-executable-p rata-mail-bridge-native-binary)
+   (file-directory-p (expand-file-name
+                      (concat "~/.var/app/" rata-mail-bridge-flatpak-id)))))
+
+(defun rata-mail-bridge-cert-dir ()
+  "The directory `cert export' should be pointed at on this host: the
+Flatpak candidate when the sandbox exists, else the native one."
+  (file-name-directory
+   (expand-file-name
+    (or (seq-find (lambda (c) (file-directory-p (file-name-directory (expand-file-name c))))
+                  rata-mail-bridge-cert-candidates)
+        (car (last rata-mail-bridge-cert-candidates))))))
 
 (defun rata-mail-port-open-p (host port)
   "Non-nil when something accepts a TCP connection on HOST:PORT.
@@ -196,8 +254,9 @@ command that fixes it."
   (interactive)
   (rata-mail--require)
   (unless (rata-mail-bridge-running-p)
-    (user-error "Proton Mail Bridge is not running (nothing on %s:%d).  Start it: flatpak run ch.protonmail.protonmail-bridge --noninteractive"
-                rata-mail-bridge-host rata-mail-bridge-imap-port))
+    (user-error "Proton Mail Bridge is not running (nothing on %s:%d).  Start it: %s"
+                rata-mail-bridge-host rata-mail-bridge-imap-port
+                (rata-mail-bridge-command "--noninteractive")))
   (mu4e-update-mail-and-index nil))
 
 (defun rata-mail-doctor ()
@@ -210,7 +269,7 @@ for a new host; it prints the command that supplies each missing one."
           (list "rata-mail-address" rata-mail-address
                 "set it in local.el (see local.el.example)")
           (list "mu binary" (executable-find "mu")
-                "just install-deps  (Homebrew on Ubuntu -- apt's mu is too old)")
+                "just install-deps  (AUR `mu' on Arch; Homebrew on Ubuntu -- apt's is too old)")
           (list "mu4e elisp" rata-mail--mu4e-dir
                 "comes with mu; restart Emacs after installing")
           (list "mbsync binary" (executable-find "mbsync")
@@ -218,11 +277,13 @@ for a new host; it prints the command that supplies each missing one."
           (list "~/.mbsyncrc" (and (file-exists-p "~/.mbsyncrc") "~/.mbsyncrc")
                 "cp mbsyncrc.example ~/.mbsyncrc, then fill in the address")
           (list "Bridge certificate" (rata-mail-bridge-cert)
-                "log in to Bridge once: flatpak run ch.protonmail.protonmail-bridge --cli")
+                (format "in `%s': login (once), then `cert export' to %s"
+                        (rata-mail-bridge-command "--cli")
+                        (rata-mail-bridge-cert-dir)))
           (list "Bridge listening" (and (rata-mail-bridge-running-p)
                                         (format "%s:%d" rata-mail-bridge-host
                                                 rata-mail-bridge-imap-port))
-                "flatpak run ch.protonmail.protonmail-bridge --noninteractive")
+                (rata-mail-bridge-command "--noninteractive"))
           (list "Maildir" (and (file-directory-p rata-mail-maildir) rata-mail-maildir)
                 (format "mu init --maildir=%s --my-address=<address>; mbsync %s; mu index"
                         rata-mail-maildir rata-mail-mbsync-channel))
@@ -232,8 +293,9 @@ for a new host; it prints the command that supplies each missing one."
                                          :port (number-to-string rata-mail-bridge-smtp-port)
                                          :user rata-mail-address :max 1)
                      "~/.authinfo.gpg")
-                (format "machine %s port %d login <address> password <bridge-password>"
-                        rata-mail-bridge-host rata-mail-bridge-smtp-port)))))
+                (format "machine %s port %d login %s password <bridge-password>  (login must equal rata-mail-address exactly)"
+                        rata-mail-bridge-host rata-mail-bridge-smtp-port
+                        (or rata-mail-address "<address>"))))))
     (with-current-buffer (get-buffer-create "*rata-mail-doctor*")
       (let ((inhibit-read-only t))
         (erase-buffer)

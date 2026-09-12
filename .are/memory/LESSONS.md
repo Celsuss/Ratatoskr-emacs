@@ -1329,3 +1329,34 @@ checklist of things that **must** be filled in before a feature works at all, an
 rule only means anything if every name on it is nil in the tracked sources. Put a value
 there only when the module refuses to run without it (`rata-mail-address`,
 `rata-jira-base-url`, the six Snowflake parameters). Related: D-012, D-021.
+
+## L-045 — A package's repo is a fact to look up, not to assume; `just/deps-arch.just` is written blind from the Ubuntu checkout
+
+**Date:** 2026-09-12. `protonmail-bridge` was added to `aur_pkgs` in `just/deps-arch.just`
+when `init-mail.el` landed (2026-09-11), on the assumption that anything Proton ships
+lives in the AUR. It is in `[extra]`. The operator caught it on review; `yay -S` would
+have installed it anyway, so nothing broke — but the file's header already says it is
+NOT TESTED from the Ubuntu checkout, which is exactly why a guess there stays a guess.
+The same review found the opposite error one line up: `mu` was in `pacman_pkgs`, and
+archlinux.org has no `mu` package at all — it is AUR-only now (1.14.3, maintained; the
+older `maildir-utils` AUR entry is the same upstream abandoned at 1.6.2). Before placing
+a package in either list, check: `pacman -Si <pkg>` on an Arch host, or
+`https://archlinux.org/packages/search/json/?name=<pkg>` from anywhere. A miss there
+means the AUR list — and the AUR web/RPC is behind Anubis, which blocks non-browser
+fetches, so probe it with `git ls-remote https://aur.archlinux.org/<pkg>.git` and read
+the PKGBUILD from a `--depth 1` clone. Related: L-033, FAIL-0014 (the AUR entry that
+stood in for an npm package).
+
+## L-046 — A hint the doctor prints must be derived from the host it is printed on
+
+**Date:** 2026-09-12. `rata-mail-doctor` existed so that a new host would be told what
+is missing and how to supply it. Its hints were literal strings from the host it was
+written on — `flatpak run ch.protonmail.protonmail-bridge --cli` — so on the first host
+that actually needed them, every one was wrong the same way, and the one that was
+tried (`protonmail-bridge --cli`) hangs (FAIL-0018). A check that probes the machine
+(`executable-find`, `file-exists-p`, a port) and then prints a fixed sentence has done
+half its job. Derive the sentence from the same probes: `rata-mail-bridge-command-for`
+is pure and tested, and the doctor calls it. The same applies to the value being
+matched — the auth-source row now prints `rata-mail-address` itself, because "MISSING"
+next to a line the operator can see in the file is only a puzzle until the hint shows
+what it was compared to (the 1025 login had a typo). Related: L-033, FAIL-0014.
