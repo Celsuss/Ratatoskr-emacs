@@ -64,6 +64,9 @@ install-deps-debian:
         [kubectl]="sudo snap install kubectl --classic   (or the pkgs.k8s.io apt repo)"
         [hugo]="sudo snap install hugo, or the .deb from https://github.com/gohugoio/hugo/releases (needs the *extended* build)"
         [shfmt]="go install mvdan.cc/sh/v3/cmd/shfmt@latest"
+        [mu]="brew install mu      (apt's maildir-utils is 1.6 on jammy -- predates the mu4e API init-mail.el uses)"
+        [mbsync]="brew install isync   (apt's 1.4 lacks the TLSType keyword mbsyncrc.example uses)"
+        [protonmail-bridge]="flatpak install flathub ch.protonmail.protonmail-bridge   (paid Proton plan; then log in once with --cli)"
     )
 
     # --- apt packages, filtered by what this release actually has ---------------
@@ -169,6 +172,21 @@ install-deps-debian:
         fi
     fi
 
+    # --- Mail: mu (mu4e) and isync (mbsync) for init-mail.el -------------------
+    # Neither comes from apt on an LTS: jammy's maildir-utils is 1.6, which
+    # predates `mu4e-search' and the 1.10+ API the module is written against,
+    # and its isync 1.4 rejects the TLSType keyword in mbsyncrc.example. Homebrew
+    # has both current and puts the mu4e elisp beside the binary, which is
+    # exactly where init-mail.el looks for it. Without brew they go to the
+    # manual section below with the same instruction.
+    mail_missing=()
+    command -v mu     &>/dev/null || mail_missing+=(mu)
+    command -v mbsync &>/dev/null || mail_missing+=(isync)
+    if [ ${#mail_missing[@]} -gt 0 ] && command -v brew &>/dev/null; then
+        echo "brew install ${mail_missing[*]}"
+        brew install "${mail_missing[@]}" || echo "WARN: mail tooling failed to install." >&2
+    fi
+
     # --- ACP adapters (npm/bun on every distro) --------------------------------
     just _deps-acp
 
@@ -190,6 +208,13 @@ install-deps-debian:
     done
     command -v hugo &>/dev/null || manual+=("hugo")
     command -v rustup &>/dev/null || manual+=("rustup")
+    command -v mu &>/dev/null || manual+=("mu")
+    command -v mbsync &>/dev/null || manual+=("mbsync")
+    # Bridge is a Flatpak, so it is never on PATH: ask flatpak, then the native name.
+    if ! flatpak info ch.protonmail.protonmail-bridge &>/dev/null \
+       && ! command -v protonmail-bridge &>/dev/null; then
+        manual+=("protonmail-bridge")
+    fi
 
     if [ ${#manual[@]} -gt 0 ]; then
         echo ""

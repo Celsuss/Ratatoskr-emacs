@@ -1,0 +1,46 @@
+# mbsyncrc.example -- isync 1.5 configuration for Proton Mail Bridge.
+#
+# Copy this to ~/.mbsyncrc and replace CHANGE-ME with your address:
+#
+#     cp mbsyncrc.example ~/.mbsyncrc
+#
+# The Emacs side is lisp/init-mail.el; the channel name, host and port here must
+# match `rata-mail-mbsync-channel', `rata-mail-bridge-host' and
+# `rata-mail-bridge-imap-port' there (a test in tests/run-tests.el checks).
+#
+# Needs isync >= 1.5 for the TLSType keyword (apt's 1.4 spells it SSLType).
+# Ubuntu LTS: `brew install isync'.
+
+IMAPAccount proton
+Host 127.0.0.1
+Port 1143
+User CHANGE-ME@proton.me
+# The Bridge password (Bridge > your account > Mailbox details), read from the
+# same ~/.authinfo.gpg line smtpmail uses -- one secret, one place:
+#     machine 127.0.0.1 port 1143 login CHANGE-ME@proton.me password <bridge-password>
+#     machine 127.0.0.1 port 1025 login CHANGE-ME@proton.me password <bridge-password>
+PassCmd "gpg --quiet --for-your-eyes-only --no-tty --decrypt ~/.authinfo.gpg | awk '$1==\"machine\" && $2==\"127.0.0.1\" { p=0; for (i=1;i<=NF;i++) if ($i==\"port\" && $(i+1)==\"1143\") p=1; if (p) for (i=1;i<=NF;i++) if ($i==\"password\") print $(i+1) }'"
+TLSType STARTTLS
+# Bridge's self-signed certificate.  This is the Flatpak path; a native package
+# writes ~/.config/protonmail/bridge-v3/cert.pem instead.
+CertificateFile ~/.var/app/ch.protonmail.protonmail-bridge/config/protonmail/bridge-v3/cert.pem
+
+IMAPStore proton-remote
+Account proton
+
+MaildirStore proton-local
+Path ~/Mail/
+Inbox ~/Mail/INBOX
+SubFolders Verbatim
+
+Channel proton
+Far :proton-remote:
+Near :proton-local:
+# "All Mail" is Proton's virtual view of every message: syncing it duplicates the
+# whole store, and Bridge rejects mbsync's expunge on it.  "Labels/*" are the
+# same messages again, once per label.  Both stay out.
+Patterns * !"All Mail" !"Labels/*"
+# Folders are created on the Proton side, not from a stray local directory.
+Create Near
+Expunge Both
+SyncState *

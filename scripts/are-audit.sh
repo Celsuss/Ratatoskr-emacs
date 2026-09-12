@@ -285,7 +285,7 @@ echo "=== Check: stray-files ==="
 while IFS= read -r p; do
     [ -n "$p" ] || continue
     case "$p" in
-        *.el | *.md | *.org | *.sh | *.yaml | *.yml | *.json | *.png | snippets/*) continue ;;
+        *.el | *.md | *.org | *.sh | *.yaml | *.yml | *.json | *.png | *.example | snippets/*) continue ;;
     esac
     warn "unexpected untracked file: '$p' (FAIL-0007)"
 done < <(git ls-files --others --exclude-standard 2>/dev/null || true)

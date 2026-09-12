@@ -22,13 +22,18 @@ install-deps-arch:
         # wrapfig/capt-of -> latexextra, ulem -> plaingeneric)
         texlive-binextra texlive-latex texlive-latexrecommended
         texlive-latexextra texlive-plaingeneric
+        # Mail (init-mail.el): mu ships the matching mu4e elisp in
+        # /usr/share/emacs/site-lisp/mu4e; isync provides mbsync.
+        mu isync
     )
 
     # The ACP adapters are NOT here: they are npm/bun packages, and the AUR entry
     # that used to stand in for the Claude one named an abandoned third party's
     # package whose bin was not even the expected name (FAIL-0014). `_deps-acp'
     # installs both, the same way on every distro.
-    aur_pkgs=(gomodifytags)
+    # protonmail-bridge needs a paid Proton plan and a Secret Service keychain
+    # (gnome-keyring); after install, log in once with `protonmail-bridge --cli'.
+    aur_pkgs=(gomodifytags protonmail-bridge)
 
     # --- Pacman packages ---
     missing_pacman=()

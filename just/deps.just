@@ -146,6 +146,8 @@ check-deps:
         "claude|init-claude-loop.el"
         "claude-agent-acp|agent-shell, SPC a i c c"
         "pi-acp|agent-shell, SPC a i c p"
+        "mu|init-mail.el (mu4e indexer; the mu4e elisp ships beside it)"
+        "mbsync|init-mail.el fetch (isync >= 1.5)"
     )
 
     present=0
@@ -172,6 +174,13 @@ check-deps:
             echo "  note: rust-analyzer is not on PATH but the nightly toolchain has it:"
             echo "        $ra"
         fi
+    fi
+
+    # Proton Mail Bridge is a Flatpak on Ubuntu and so never on PATH; ask flatpak.
+    if flatpak info ch.protonmail.protonmail-bridge &>/dev/null; then
+        printf '  %-18s %s\n' "protonmail-bridge" "flatpak: ch.protonmail.protonmail-bridge"
+    elif ! command -v protonmail-bridge &>/dev/null; then
+        printf '  %-18s MISSING — %s\n' "protonmail-bridge" "init-mail.el fetch/send (flatpak install flathub ch.protonmail.protonmail-bridge)"
     fi
 
     # The blog export needs the extended build (SCSS); the plain one fails at render.

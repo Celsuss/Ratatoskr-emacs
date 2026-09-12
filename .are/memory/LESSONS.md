@@ -1315,3 +1315,17 @@ let the Swedish name through. Rules: bind `system-time-locale` to `"C"` around a
 build test times with zone `nil` (local) unless the code under test is UTC by design; and
 assert the day *name*, not a letter class, so the locale cannot leak silently. Related:
 L-027 (regexp traps), D-019.
+
+## L-044 — `local.el.example` is the list of values that are *nil in git*, not of every tunable
+
+**2026-09-11**, from building `init-mail.el`. `rata-mail-maildir` defaults to `~/Mail`,
+which is not identity and has no reason to be hidden, so the module kept the default and
+the template offered a commented `(setq rata-mail-maildir ...)` "in case yours differs".
+`are-audit`'s `local-example-in-sync` failed the build: a name in the template with a
+non-nil tracked value is, by that rule's definition, a value that leaked. The rule is
+right and the template line was wrong — a tunable with a safe default is a `defcustom`
+the operator can `setq` in `local.el` *without* being told to; the template is the
+checklist of things that **must** be filled in before a feature works at all, and its
+rule only means anything if every name on it is nil in the tracked sources. Put a value
+there only when the module refuses to run without it (`rata-mail-address`,
+`rata-jira-base-url`, the six Snowflake parameters). Related: D-012, D-021.

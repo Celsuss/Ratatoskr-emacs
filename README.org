@@ -23,6 +23,7 @@ A modular, Evil-based Emacs configuration built for speed and productivity.
 - *Khoj* — self-hosted semantic search and chat over your org-roam notes
 - *IRC* — Circe client
 - *RSS* — elfeed reader with tagged feeds
+- *Email* — mu4e over Proton Mail Bridge (mbsync in, smtpmail out)
 - *Casual* — transient menus for built-in utility modes
 - *Snippets* — yasnippet with 64 custom snippets across 9 modes
 - *Multiple cursors* via =evil-mc=
@@ -280,6 +281,7 @@ also runs the verification levels on pull requests and pushes to =master=
 | =init-khoj=       | Self-hosted semantic search / chat over org-roam        |
 | =init-irc=        | Circe IRC client                                        |
 | =init-elfeed=     | Elfeed RSS reader with tagged feeds                     |
+| =init-mail=       | mu4e over Proton Mail Bridge; mbsync fetch, smtpmail send |
 | =init-persp=      | Workspace management via persp-mode                     |
 | =init-org=        | Org-roam, org-super-agenda, org-kanban, org-transclusion |
 | =init-present=    | Reveal.js slide export from org (org-re-reveal)          |

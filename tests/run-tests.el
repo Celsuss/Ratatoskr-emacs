@@ -199,7 +199,13 @@ so deferred packages (loaded via :commands) pass correctly."
     ;; resolve only while their symbols stay in init-llm.el's :commands list.
     ("SPC a i c f" . rata-agent-shell-send-file)
     ("SPC a i c r" . agent-shell-send-region)
-    ("SPC a i c d" . agent-shell-send-dwim))
+    ("SPC a i c d" . agent-shell-send-dwim)
+    ;; init-mail.el binds its own wrappers, never mu4e symbols directly, so
+    ;; these resolve on a host with no mu installed too (the wrapper then
+    ;; explains what is missing instead of the key being dead).
+    ("SPC a e e" . rata-mail)
+    ("SPC a e u" . rata-mail-update)
+    ("SPC a e d" . rata-mail-doctor))
   "Leader keys that must resolve immediately after init, with their commands.
 Not exhaustive — a contract for the keys most likely to be broken by the
 failure mode in .are/memory/failures/FAIL-0009.md.  Extend it when a
@@ -2566,6 +2572,83 @@ through `org-todo', so a hook that was never added would fail here."
   "`org-log-done' is set once org loads; the finished block's order depends on it."
   (require 'org)
   (should (eq org-log-done 'time)))
+
+;;; ============================================================
+;;; init-mail.el -- pure helpers and the per-machine contract
+;;; ============================================================
+;;
+;; Nothing here touches Bridge, mu or the network: mu4e's elisp is
+;; version-locked to a binary that may not be on the test host, so the tests
+;; cover the parts that decide *whether* mu4e loads and *what* the operator
+;; is told when it cannot.
+
+(ert-deftest rata-test-mail-mu4e-dir-candidates ()
+  "The install prefix is derived from `bin/mu', for both packager layouts."
+  (should (equal (rata-mail-mu4e-dir-candidates "/usr/bin/mu")
+                 '("/usr/share/emacs/site-lisp/mu/mu4e"
+                   "/usr/share/emacs/site-lisp/mu4e"
+                   "/usr/share/emacs/site-lisp/mu")))
+  ;; Homebrew's Cellar path, as `file-truename' of the bin/mu symlink yields it.
+  (should (member "/home/linuxbrew/.linuxbrew/Cellar/mu/1.14.3/share/emacs/site-lisp/mu/mu4e"
+                  (rata-mail-mu4e-dir-candidates
+                   "/home/linuxbrew/.linuxbrew/Cellar/mu/1.14.3/bin/mu")))
+  ;; And the prefix-level symlink farm the PATH entry lives in.
+  (should (member "/home/linuxbrew/.linuxbrew/share/emacs/site-lisp/mu/mu4e"
+                  (rata-mail-mu4e-dir-candidates "/home/linuxbrew/.linuxbrew/bin/mu"))))
+
+(ert-deftest rata-test-mail-mu4e-dir-found-when-mu-installed ()
+  "If `mu' is on PATH, its mu4e must be found -- otherwise the module
+silently degrades to `rata-mail-unavailable' on a host that has the tool.
+Skipped where mu is absent: the check is about the candidate list matching
+the packager, which only a real install can show."
+  (skip-unless (executable-find "mu"))
+  (should rata-mail--mu4e-dir)
+  (should (file-exists-p (expand-file-name "mu4e.el" rata-mail--mu4e-dir))))
+
+(ert-deftest rata-test-mail-unconfigured-names-the-checklist ()
+  "With no address set, every entry point stops with a `user-error' that
+names local.el.example -- the same contract as `rata-sql-snowflake-uri'."
+  (let ((rata-mail-address nil))
+    (dolist (cmd '(rata-mail rata-mail-compose rata-mail-search rata-mail-update))
+      (let ((err (should-error (funcall cmd) :type 'user-error)))
+        (should (string-match-p "local\\.el\\.example" (cadr err)))))))
+
+(ert-deftest rata-test-mail-port-probe ()
+  "`rata-mail-port-open-p' is the `is Bridge up' question: true against a
+listening socket, nil against a closed port."
+  (let ((server (make-network-process :name "rata-test-mail-listener"
+                                      :server t :host "127.0.0.1" :service t
+                                      :noquery t)))
+    (unwind-protect
+        (let ((port (process-contact server :service)))
+          (should (rata-mail-port-open-p "127.0.0.1" port))
+          (delete-process server)
+          (should-not (rata-mail-port-open-p "127.0.0.1" port)))
+      (when (process-live-p server) (delete-process server)))))
+
+(ert-deftest rata-test-mail-mbsyncrc-example-matches-module ()
+  "mbsyncrc.example and init-mail.el describe the same Bridge.
+The channel name is what `mu4e-get-mail-command' runs, host and port are
+what `rata-mail-update' probes, and the two Proton-specific exclusions are
+the difference between a mailbox and a duplicated one."
+  (let ((text (with-temp-buffer
+                (insert-file-contents
+                 (expand-file-name "mbsyncrc.example" user-emacs-directory))
+                (buffer-string))))
+    (should (string-match-p (format "^Channel %s$" (regexp-quote rata-mail-mbsync-channel)) text))
+    (should (string-match-p (format "^Host %s$" (regexp-quote rata-mail-bridge-host)) text))
+    (should (string-match-p (format "^Port %d$" rata-mail-bridge-imap-port) text))
+    (should (string-match-p (format "port %d" rata-mail-bridge-imap-port) text))
+    (should (string-match-p (format "port %d" rata-mail-bridge-smtp-port) text))
+    (should (string-match-p "^Patterns .*!\"All Mail\"" text))
+    (should (string-match-p "^Patterns .*!\"Labels/\\*\"" text))
+    (should (string-match-p "^TLSType STARTTLS$" text))
+    ;; The Flatpak certificate path in the template is one the module also trusts.
+    (should (seq-some (lambda (cand)
+                        (string-match-p (regexp-quote (string-remove-prefix "~/" cand)) text))
+                      rata-mail-bridge-cert-candidates))
+    ;; No real address leaked into the template.
+    (should (string-match-p "CHANGE-ME@proton.me" text))))
 
 ;;; ============================================================
 ;;; Run all tests
