@@ -1,9 +1,20 @@
 #+title: jira.el cheat sheet (Ratatoskr-emacs)
 #+options: toc:2 num:nil
 
-Keys below are what jira.el itself binds (v2.21.1), not this config. This config only
-adds the ~SPC J~ leader keys and puts the three Jira buffers in *emacs state*, so every
-key works as upstream documents it. ~C-z~ toggles back to evil normal state.
+Keys as they resolve *in this config*, measured in a live buffer — not as jira.el's readme
+lists them. Two layers make up what you press:
+
+- **evil stays live in the Jira buffers** (D-015): normal state, so ~j~/~k~, ~/~, ~q~ and the
+  ~SPC~ leader work as everywhere else, and evil-collection supplies the tablist half
+  (marking, filtering, sorting, refresh).
+- **jira.el's own keys sit under the local leader ~,~**, because evil's normal state shadows
+  the single-letter keys of a =tabulated-list-mode= / =magit-section-mode= child (L-017). The
+  mirror is built by ~lookup-key~ out of jira.el's own maps, so it carries no upstream
+  internals; ~rata-jira-*-key-mirror~ in the config is the source of truth for the table
+  below, and =rata-test-jira-mirrored-keys-exist-upstream= fails if upstream renames one.
+
+Inside a transient (the ~?~ and ~l~ popups) upstream's own letters apply unchanged: transient
+takes over the keyboard, so evil is not in the way there.
 
 Config: [[file:../lisp/init-jira.el][lisp/init-jira.el]] · package source:
 =elpaca/sources/jira/= · upstream: https://github.com/unmonoqueteclea/jira.el
@@ -20,29 +31,86 @@ those buffers.
 
 * Issue list — =*Jira Issues*= (=jira-issues-mode=)
 
-Acts on the *marked* issue, falling back to the issue on the current line when nothing
-is marked (dired semantics, via tablist).
+Actions act on the *marked* issues, falling back to the issue on the current line when
+nothing is marked (dired semantics, via tablist).
 
-| Key   | Does                                                              |
-|-------+-------------------------------------------------------------------|
-| ~?~ / ~h~ | *Actions menu* (transient) — the discoverable index of everything  |
-| ~l~     | *Query menu* (transient) — build the filter, then ~l~ to run it     |
-| ~RET~ / ~I~ | Show issue detail                                                 |
-| ~f~     | Find an issue by key or URL (prompts, completing-read)             |
-| ~O~     | Open the issue in the browser                                      |
-| ~C~     | Change issue — status / resolution / remaining estimate            |
-| ~W~     | Add a worklog to the issue                                          |
-| ~c~     | Copy the issue key to the clipboard                                 |
-| ~e~     | Export menu → Markdown / Org-mode / CSV of what is on screen        |
-| ~T~     | Jump to Tempo worklogs (kills this buffer)                          |
-| ~H~     | Switch Jira host (needs =jira-secondary-urls=)                       |
-| ~M-n~ / ~M-p~ | Next / previous page of results                               |
-| ~n~ / ~p~ | Next / previous issue (~j~/~k~ do *not* move — see the last section)   |
-| ~{~ / ~}~ | Narrow / widen the current column                                   |
-| ~G~     | Refresh the list                                                    |
-| ~q~     | Quit the buffer                                                     |
+** jira.el actions, under ~,~
 
-** Query menu (~l~) — arguments
+| Key   | Upstream | Does                                                       |
+|-------+----------+------------------------------------------------------------|
+| ~RET~   | ~RET~ / ~I~  | Show issue detail                                          |
+| ~, d~   | ~I~        | Show issue detail (same command, from the leader map)       |
+| ~, ?~   | ~?~ / ~h~    | *Actions menu* (transient) — index of everything            |
+| ~, l~   | ~l~        | *Query menu* (transient) — build the filter, then ~l~ to run  |
+| ~, f~   | ~f~        | Find an issue by key or URL (prompts, completing-read)      |
+| ~, o~   | ~O~        | Open the issue in the browser                               |
+| ~, c~   | ~C~        | Change issue — status / resolution / remaining estimate     |
+| ~, w~   | ~W~        | Add a worklog to the issue                                  |
+| ~, y~   | ~c~        | Copy the issue key to the clipboard                         |
+| ~, e~   | ~e~        | Export menu → Markdown / Org-mode / CSV of what is on screen |
+| ~, t~   | ~T~        | Jump to Tempo worklogs (kills this buffer)                  |
+| ~, h~   | ~H~        | Switch Jira host (needs =jira-secondary-urls=)               |
+| ~, r~   | ~G~        | Refresh the list (=tablist-revert=)                          |
+| ~, i~   | —        | *Import* the marked issues into =work_tasks.org= — see [[*Org: importing issues into work_tasks.org][Org]] below |
+| ~, m~   | —        | *Sprint* prefix — see [[*Sprints — the board is a never-ending sprint][Sprints]] below                    |
+| ~, m g~ | —        | Toggle the sprint headings in this list (see Sprints)       |
+| ~M-n~ / ~M-p~ | same | Next / previous page — /Cloud only/, dead here (see Truncation) |
+
+Suffixes are mnemonic rather than upstream's letters: upstream separates ~c~ and ~C~ by case,
+and a leader map does not need to. ~which-key~ lists the whole map after pressing ~,~.
+
+** Movement, marking, filtering — evil and evil-collection, not re-bound
+
+| Key       | Does                                                     |
+|-----------+----------------------------------------------------------|
+| ~j~ / ~k~     | Line down / up (ordinary evil motion)                     |
+| ~gg~ / ~G~    | First / last line                                         |
+| ~/~ ~n~ ~N~     | evil search within the buffer                             |
+| ~q~         | Quit the buffer                                           |
+| ~g r~       | Refresh (same as ~, r~)                                     |
+| ~m~         | Mark issue, move down                                     |
+| ~u~ / ~DEL~   | Unmark forward / backward                                 |
+| ~U~         | Unmark all                                                |
+| ~t~         | Toggle all marks                                          |
+| ~S~         | Sort by a column                                          |
+| ~s~         | *Hide* (kill) the lines at point — not "substitute" here    |
+| ~g * m~ ~g * n~ ~g * r~ | Mark forward / by number / by regexp            |
+| ~g / r~ ~g / p~ ~g / /~ | Push a regexp filter / pop it / show the filter |
+| ~g / C~     | Clear all filters                                         |
+| ~g h~ / ~g l~ | Previous / next column                                    |
+| ~{~ / ~}~     | Narrow / widen the current column                          |
+
+Deliberately *not* mirrored: everything in this table already works. Re-binding it is the
+part that would drift on an evil-collection or tablist release.
+
+All of it also works with the sprint headings in the buffer: ~S~ sorts inside each group and
+leaves the headings in place, ~m~ on a heading does nothing, ~t~ / ~U~ skip the headings, and a
+~g / r~ filter hides issues but never a heading. Those four are guards this config adds to
+tablist for grouped buffers only (=lisp/init-jira.el=); ~S~ from a heading line asks you to
+move onto an issue first.
+
+** Query menu (~, l~) — what it is
+
+~, l~ opens a *transient*: a temporary window at the bottom of the frame listing one letter
+per JQL argument, exactly like a magit popup. Inside it, upstream's own keys apply — evil is
+not involved. It is a two-stage interaction, and the second stage is the one that is easy to
+miss:
+
+1. Press an argument's letter. It prompts (with completion from live instance data) and
+   the chosen value is then shown next to that letter in the popup. The popup stays open;
+   set as many arguments as you like.
+2. Press ~l~ — plain ~l~, inside the popup — to run the query. Nothing is sent to Jira until
+   you do.
+
+~C-g~ dismisses the popup. *The arguments are not sticky:* transient re-initialises the
+prefix from its default value on every invocation — here =--myself=, the status exclusion
+in =--jql== (see below), and =jira-issues-default-type= if set
+(=jira-issues--transient-default-value=, plus this config's advice on it) — so a filter you
+built by hand is gone the next time you open it. That is what ~C-x s~ (this session) and
+~C-x C-s~ (all sessions) are for: they store the current argument set in the prefix itself, and
+only then does reopening the menu show what you last ran. ~C-x C-k~ goes back to the default.
+
+** Query menu — the arguments (all pressed inside the popup)
 
 Each argument prompts with completion from live instance data (statuses, projects,
 users, versions, types). Set what you want, then press ~l~ to run the query.
@@ -58,53 +126,131 @@ users, versions, types). Set what you want, then press ~l~ to run the query.
 | ~R~       | =--reporter=        |                                                 |
 | ~r~       | =--resolution=      |                                                 |
 | ~v~       | =--version=         | Fix version                                     |
-| ~j~       | =--jql=             | Raw JQL — escape hatch for anything above        |
+| ~j~       | =--jql=             | Raw JQL — escape hatch. *Pre-filled* with the status exclusion; clear it to see finished issues |
 | ~l~       | —                  | *Run the query*                                  |
 | ~F~       | —                  | Apply a saved Jira filter (ignores the args above) |
 | ~C-x s~   | —                  | Remember these args for this Emacs session       |
 | ~C-x C-s~ | —                  | Persist these args across sessions               |
-| ~C-x C-k~ | —                  | Reset args to the defaults                       |
-
-** Marking, filtering, sorting (from =tablist=, shared with other tablist buffers)
-
-| Key   | Does                                            |
-|-------+-------------------------------------------------|
-| ~m~     | Mark issue, move down                            |
-| ~u~ / ~DEL~ | Unmark forward / backward                       |
-| ~U~     | Unmark all                                       |
-| ~t~     | Toggle all marks                                 |
-| ~*~     | Mark prefix map (mark by regexp, numeric, …)     |
-| ~/~     | Filter prefix map — narrow the displayed rows    |
-| ~%~     | Regexp prefix map                                |
-| ~s~     | Sort by a column                                 |
-| ~k~     | Kill (hide) the lines at point                   |
-| ~TAB~ / ~S-TAB~ | Next / previous column                    |
-| ~<~ / ~>~ | Shrink / enlarge the current column              |
 
 * Issue detail — =*Jira Issue*= (=jira-detail-mode=)
 
-A =magit-section= buffer, so the usual magit section keys work: ~TAB~ folds the section at
-point, ~n~ / ~p~ move between sections, ~M-n~ / ~M-p~ between siblings, ~^~ goes to the parent,
-~1~–~4~ set the global fold level and ~q~ quits.
+A =magit-section= buffer in evil normal state. Folding and section motion come from
+evil-collection and are not re-bound: ~TAB~ folds the section at point, ~M-n~ / ~M-p~ move
+between siblings, ~1~–~4~ set the global fold level, ~z a~ / ~z c~ / ~z o~ fold as in vim, ~q~ quits.
+~j~ / ~k~ move by line.
 
-| Key | Does                                                     |
-|-----+----------------------------------------------------------|
-| ~?~ / ~h~ | *Actions menu* (transient), context-aware                |
-| ~+~   | Add a comment                                             |
-| ~e~   | Edit the comment at point                                 |
-| ~-~   | Remove the comment at point                               |
-| ~C~   | Change issue status / resolution / estimate               |
-| ~U~   | Update an arbitrary issue field                            |
-| ~w~   | Watchers submenu — ~+~ add, ~-~ remove                       |
-| ~S~   | Add a subtask (asks for the subtask type if several)       |
-| ~P~   | Show the parent issue                                      |
-| ~O~   | Open in the browser                                        |
-| ~f~   | Find another issue by key or URL                           |
-| ~c~   | Copy the issue key to the clipboard                        |
-| ~g~   | Refresh                                                    |
+| Key | Upstream | Does                                                  |
+|-----+----------+-------------------------------------------------------|
+| ~, ?~ | ~?~ / ~h~    | *Actions menu* (transient), context-aware              |
+| ~, c~ | ~+~        | Add a comment                                          |
+| ~, e~ | ~e~        | Edit the comment at point                              |
+| ~, x~ | ~-~        | Remove the comment at point                            |
+| ~, s~ | ~C~        | Change issue status / resolution / estimate            |
+| ~, u~ | ~U~        | Update an arbitrary issue field                        |
+| ~, w~ | ~w~        | Watchers submenu — ~+~ add, ~-~ remove                    |
+| ~, S~ | ~S~        | Add a subtask (asks for the type if several)            |
+| ~, p~ | ~P~        | Show the parent issue                                  |
+| ~, o~ | ~O~        | Open in the browser                                    |
+| ~, f~ | ~f~        | Find another issue by key or URL                       |
+| ~, y~ | ~c~        | Copy the issue key to the clipboard                    |
+| ~, r~ | ~g~        | Refresh                                                |
+| ~, i~ | —        | Import this issue into =work_tasks.org= (see Org)         |
+| ~, m~ | —        | *Sprint* prefix — same commands as in the list         |
 
-With point on a subtask or a linked-issue section, the actions menu grows two entries:
-~RET~ opens it in Emacs, ~o~ opens it in the browser.
+With point on a subtask or a linked-issue section, the actions menu (~, ?~) grows two
+entries: ~RET~ opens it in Emacs, ~o~ opens it in the browser — those are transient keys, so
+they are upstream's.
+
+* Org: importing issues into work_tasks.org
+
+One direction only — Jira to org, never back — and append-only. Nothing here changes a
+ticket, and no existing heading in the file is ever rewritten, re-titled or moved (D-019;
+D-011 is why a real sync was rejected).
+
+| Key       | Where            | Does                                                                 |
+|-----------+------------------+----------------------------------------------------------------------|
+| ~, i~       | list, detail     | Append the marked issues (or the one at point) under =* Tasks= in =work_tasks.org=. Asks first, naming the file; issues already there are skipped and said so |
+| ~SPC J l~   | any org buffer   | Record that the heading at point *is* a Jira issue: sets =:JIRA:=, adds the tags, saves. Offers the issues of the current list as completions; free text works too |
+
+The =Org= column in the list shows ~✓~ for every issue whose key the file already carries.
+It reads the file from disk (re-parsed only when the file changed), so what has not been
+saved is not counted — which is why both commands save.
+
+What one imported entry looks like:
+
+#+begin_example
+** TODO Summary of the ticket                                       :work:jira:
+:PROPERTIES:
+:JIRA: PROJ-42
+:CREATED: [2026-09-11 Fri 09:30]
+:END:
+[[https://jira.example.com/browse/PROJ-42][PROJ-42]]
+#+end_example
+
+The =:JIRA:= property is the identity. Titles are never compared, so rename the heading
+freely. Nothing else is copied on purpose: status, type and assignee change in Jira and
+would be stale in a week; the body is yours to write. After an import the file's
+=org-kanban= block is refreshed so the new heading shows on the board.
+
+Headings written before Jira do not carry the property, so the import would offer their
+tickets as new. ~SPC J l~ on such a heading fixes that once.
+
+* Sprints — the board is a never-ending sprint
+
+The team board is a Scrum board in Jira with one sprint that is never closed, used as a
+kanban board. "Put this on the board" therefore means "move it into the active sprint",
+and jira.el has no command for it (it only reads the Sprint field). These are this
+config's own commands (=lisp/init-jira.el=, Agile REST API through jira.el's request
+layer), available under ~, m~ in both the issue list and the issue detail buffer. They act
+on the marked issues, else the one at point.
+
+| Key     | Does                                                                          |
+|---------+-------------------------------------------------------------------------------|
+| ~, m s~   | Move to a sprint. The *active* sprint is the default and labelled =[active]= — RET takes it |
+| ~, m b~   | Move to the backlog, i.e. off the board (asks first)                          |
+| ~, m a~   | Say which sprint is active on the board, and when it ends                     |
+| ~, m o~   | Choose the board for this session (from the boards the instance lists)        |
+| ~, m r~   | Forget cached boards and sprints; the next command fetches them again         |
+| ~, m g~   | Toggle the sprint headings in the list (list buffer only)                     |
+
+The sprint prompt reads =Move PROJ-1 to sprint (default Board  [active]  ends 2030-01-01):=
+and the confirmation names the sprint it moved to, so a wrong sprint cannot pass for
+success. ~C-u~ before ~, m s~ or ~, m a~ refetches the sprint list first.
+
+The board is =rata-jira-board-id= in =local.el= (=rapidView=NNN= in the board URL). Unset,
+the first sprint command asks once per session. Errors come back in Jira's own words
+(closed sprint, issue outside the board filter, no Jira Software licence).
+
+** Seeing what is on the board
+
+The list has a *Sprint* column and is grouped under one heading per open sprint, active
+first, with everything else under *Backlog*:
+
+: Board  [active]  (12)
+:   PROJ-1  Task   IN PROGRESS   Board          ...
+: Next up  [future]  (1)
+:   PROJ-7  Story  OPEN          Next up (future)
+: Backlog  (30)
+:   PROJ-9  Bug    OPEN
+:   ...
+
+Each group is sorted on its own by the current sort column. ~, m g~ toggles the headings for
+the buffer; =rata-jira-group-by-sprint= (default =t=) is what a fresh list starts with. An
+issue's Sprint field lists every sprint it has *ever* been in, closed ones included, so only
+a sprint that is not closed counts as membership: an issue that was in three finished
+sprints and is now in the backlog shows as backlog. After ~, m s~ or ~, m b~ the list
+refreshes, so the issue moves between groups on the spot — that is the confirmation.
+
+Why this needed code at all: jira.el has a =:sprints= column but cannot request it. It
+builds the search's =fields= parameter with =%s= on each column's parent, and a custom
+field's parent is the list =(custom "Sprint")=, so the server is asked for a field named
+"(custom Sprint)" and silently answers with nothing (L-042). Underneath that, on Jira
+Server/DC the field list carries an =id= but no =key=, and jira.el keeps only =key= — so on
+this instance every custom field resolved to nil, which is also why the detail view's
+Sprint line was always empty (FAIL-0017). This config resolves the custom field to its
+=customfield_NNNNN= id (falling back from =key= to =id=), overrides jira.el's field fetch
+with the same fallback, and fetches the field list before the first search of a session, so
+the column is filled on the first look and not only after a refresh.
 
 * Comment / description editor (=jira-edit-mode=)
 
@@ -120,14 +266,14 @@ Opened by the comment and field-update actions above.
 
 * Tempo worklogs — =*Jira Tempo*= (=jira-tempo-mode=)
 
-Also a tablist buffer, so the marking/filtering table above applies.
+Also a tablist buffer in normal state, so the movement/marking table above applies.
 
-| Key | Does                              |
-|-----+-----------------------------------|
-| ~?~   | Actions menu                       |
-| ~g~ / ~G~ | Refresh the list                   |
-| ~D~   | Delete the marked worklog          |
-| ~I~   | Jump back to the issue list        |
+| Key | Upstream | Does                        |
+|-----+----------+-----------------------------|
+| ~, ?~ | ~?~        | Actions menu                 |
+| ~, x~ | ~D~        | Delete the marked worklog    |
+| ~, i~ | ~I~        | Jump back to the issue list  |
+| ~, r~ | ~G~        | Refresh the list             |
 
 Tempo needs its own token: a =machine tempo.io= line in =~/.authinfo.gpg=, separate from
 the Jira credential.
@@ -160,10 +306,15 @@ as though the token were wrong. =init-jira.el= runs the value through
 
 | Variable                         | Default | Notes                                       |
 |----------------------------------+---------+---------------------------------------------|
-| =jira-issues-max-results=         | 30      | Page size; ~M-n~ / ~M-p~ page through          |
+| =jira-issues-max-results=         | *100*   | Raised from 30: this is the whole list, not a page |
 | =jira-issues-table-fields=        | —       | Which columns the list shows                 |
 | =jira-issues-default-type=        | nil     | Pre-set =--type= in the query menu            |
 | =jira-issues-sort-key=            | Status  | Initial sort column                          |
+| =rata-jira-group-by-sprint=       | t       | Sprint headings in the list; ~, m g~ toggles per buffer |
+| =rata-jira-org-file=              | nil     | Org file ~, i~ appends to; nil = =work_tasks.org= in the roam root |
+| =rata-jira-org-heading=           | =Tasks=   | Heading the imported entries go under                |
+| =rata-jira-org-tags=              | =work jira= | Tags on an imported or linked heading             |
+| =rata-jira-org-refresh-kanban=    | t       | Refresh the file's dynamic blocks after an import    |
 | =jira-detail-reuse-buffer=        | t here  | One detail buffer instead of one per issue    |
 | =jira-comments-display-recent-first= | —    | Comment order in the detail view              |
 | =jira-secondary-urls=             | nil     | Extra instances, switched with ~H~             |
@@ -175,12 +326,63 @@ as though the token were wrong. =init-jira.el= runs the value through
 * Things worth knowing
 
 - *Nothing here writes into org-roam.* This is a second view onto work, not a sync
-  (D-011). ~e~ → Org-mode in the issue list is the one-off bridge when you want the
+  (D-011). ~, e~ → Org-mode in the issue list is the one-off bridge when you want the
   rows as text.
-- *The two transients are the documentation.* ~?~ in any Jira buffer and ~l~ in the issue
-  list list every available action with its key; nothing needs to be memorised.
-- *These buffers are in emacs state*, not normal state, because jira.el has no evil
-  support and its keymaps sit in =tabulated-list-mode= / =magit-section-mode= children
-  that evil shadows (L-017). So ~j~/~k~ are *not* motion here: ~j~ is unbound and ~k~ kills
-  (hides) the line in the issue list. Move with ~n~ / ~p~, ~C-n~ / ~C-p~ or the arrows, and
-  press ~C-z~ when you want evil back.
+- *The two transients are the documentation.* ~, ?~ in any Jira buffer and ~, l~ in the issue
+  list list every available action with its key; nothing needs to be memorised. Inside them,
+  upstream's letters apply.
+- *`,` is the local leader, `SPC` is the global one*, and both work here because these
+  buffers are in evil normal state. ~which-key~ after ~,~ is the fastest way back into this
+  document.
+- *Two keys read oddly if you know vim*: ~s~ hides the lines at point (evil-collection maps it
+  to =tablist-do-kill-lines=, not =evil-substitute=), and ~S~ sorts. Both are evil-collection's
+  choices, shared with every other tablist buffer.
+- *The design changed twice, on purpose.* Until 2026-09-08 these buffers were put in *emacs
+  state* — and even that never took effect, because the `evil-set-initial-state` call sat in
+  the =use-package jira= =:config= block, which never runs: the feature =jira= is never
+  loaded here (elpaca autoloads ~jira-issues~ from =jira-issues.el=, and nothing requires the
+  =jira= umbrella). So every documented key was dead — ~l~ moved the cursor right, ~?~ searched
+  backwards, ~c C I O p~ resolved to ~ignore~. The dead-`:config` bug is
+  [[file:../.are/memory/failures/FAIL-0016.md][FAIL-0016]] / L-039; the choice to keep evil
+  and mirror the keys instead of switching to emacs state is D-015. Covered by
+  =rata-test-jira-buffers-keep-evil-and-mirror-keys= and
+  =rata-test-jira-mirrored-keys-exist-upstream=.
+
+* Truncation: the list is one page, and the page is all you get
+
+On this instance =rata-jira-api-version= is 2, i.e. Jira Server/DC.  jira.el
+tries the =search/jql= endpoint first and falls back to the legacy =search= one
+on a 404 (=jira-api.el:238=), which is what Server/DC returns — =search/jql= is
+Cloud-only.
+
+The legacy endpoint paginates with =startAt= and reports =total=.  jira.el reads
+neither: it only looks for =nextPageToken= in the response (=jira-issues.el:179=)
+and only ever sends one (=jira-issues.el:107=).  Consequences here:
+
+- ~M-n~ always answers "No more pages."  There is no second page to reach.
+- The row count is never compared against =total=, so a truncated list looks
+  exactly like a complete one.
+- The default query is =assignee = currentUser()= with *no* =ORDER BY=, so the
+  rows you get are an arbitrary subset, not "the newest" or "the open ones".
+  The ~s~ sort only reorders what already arrived.
+
+Mitigations, in order of effort:
+
+1. =jira-issues-max-results= is set to 100 in =lisp/init-jira.el=.  Raise it
+   further if you routinely have more than that assigned; the server-side cap
+   is =jira.search.views.default.max= (1000 by default).
+2. Narrow the query instead of paging it: ~, l~ then ~c~ (current sprint) or ~s~
+   (status), or ~j~ for a JQL with an explicit ~ORDER BY~ so the truncation at
+   least cuts off the end you care least about.
+3. ~F~ applies a saved Jira filter, which is also subject to the same cap.
+
+Note that ~m~ (=--myself=) is on by default, so issues where you are only the
+reporter or a watcher never appear at all — that is scope, not truncation.
+Turn it off with ~, l~ then ~m~, and set ~R~ (reporter) instead.
+
+The same goes for finished work: =rata-jira-excluded-statuses= (=lisp/init-jira.el=,
+default =CLOSED=, =DEPLOYED=, =DONE=, =REJECTED=) is injected as
+=status not in (...)= in the =--jql== argument, so the default list is open work only.
+Clear ~j~ in the query menu for a one-off look at everything, or trim the variable in
+=local.el=. A status name that no status in the instance carries makes Jira reject the
+*whole* query with a 400 — an empty list rather than an unfiltered one is the symptom.

@@ -65,11 +65,17 @@
   (corfu-history-mode))
 
 ;; --- Corfu Terminal (child-frame fallback for TUI) ---
-(use-package corfu-terminal
-  :after corfu
-  :config
-  (unless (display-graphic-p)
-    (corfu-terminal-mode 1)))
+;; Emacs 31 gained `tty-child-frames', so corfu's own popup renders in a
+;; terminal and corfu-terminal is redundant -- corfu itself warns as much the
+;; moment it is loaded.  Guarding the whole `use-package' rather than its body
+;; also stops elpaca queueing the order (and its `popon' dependency) at all.
+;; CI still runs Emacs 30.2, so this is a runtime feature check, not a deletion.
+(unless (featurep 'tty-child-frames)
+  (use-package corfu-terminal
+    :after corfu
+    :config
+    (unless (display-graphic-p)
+      (corfu-terminal-mode 1))))
 
 ;; --- Cape (completion-at-point extensions) ---
 (use-package cape

@@ -15,18 +15,19 @@ credentials and a homelab.
 | Service | Endpoint | Used by | Auth | Notes |
 |---|---|---|---|---|
 | Anthropic API, via the `claude` CLI | CLI-managed | `init-claude-loop.el` | the CLI's own login | metered spend; see [CLAUDE_LOOP.md](CLAUDE_LOOP.md) |
-| Claude Code over ACP | `claude-code-acp` binary | `init-llm.el` (`agent-shell`) | web login | AUR package on Arch; not present on this Ubuntu host |
+| Claude Code over ACP | `claude-agent-acp` binary | `init-llm.el` (`agent-shell`) | web login (`authMethods: []` in the handshake, so no key in this repo) | `@agentclientprotocol/claude-agent-acp` 0.73.0, `bun install -g`; installed on this host 2026-09-03 as `~/.bun/bin/claude-agent-acp`. Renamed from `claude-code-acp` (`@zed-industries`, dead since 2026-03) — FAIL-0014. `install-deps` no longer names the old one: the AUR entry is gone and both adapters come from the shared `_deps-acp` recipe (`just/deps.just`) on every distro |
+| Pi coding agent over ACP | `pi-acp` binary, which spawns `pi --mode rpc` | `init-llm.el` (`agent-shell`) | pi's own provider config (`pi auth check --provider <p>`); no key in this repo | `pi-acp` is a *separate* npm package from `pi` (`bun install -g pi-acp`, needs pi >= 0.80.4). Installed on this host: `~/.bun/bin/{pi,pi-acp}`. Both agents work here as of 2026-09-03; before that only Pi did (FAIL-0014). `pi-acp` keeps nested `@agentclientprotocol/sdk@0.26.0` and `zod@3.25.76` because the Claude adapter hoisted 1.4.0 and zod 4 to the top of `~/node_modules` — check that nesting survives any reinstall of either |
 | Ollama (local models) | `localhost:11434` | `init-llm.el` (`gptel`, `ellama`, `aidermacs`) | none | local only; models `deepseek-coder`, `mistral`, `nomic-embed-text` |
 | Khoj (self-hosted) | `http://khoj.homelab.local` | `init-khoj.el` | none configured | **indexes `~/workspace/second-brain/org-roam/`** — sends the operator's notes to the homelab host |
 | Snowflake | `<rata-sql-snowflake-account>.snowflakecomputing.com` over JDBC, set in `local.el` | `init-sql.el` | SSO, `authenticator=externalbrowser` | corporate. nil in the tracked sources since D-012, so `SPC a d s` refuses to build a URI until `local.el` exists; see [SECRETS_AND_SENSITIVE_DATA.md](SECRETS_AND_SENSITIVE_DATA.md) |
 | GitHub | api.github.com | `init-dev.el` (`forge`) | `~/.authinfo.gpg`, `USER^forge` | |
 | Jira REST API | `rata-jira-base-url`, set in the gitignored `local.el` | `init-jira.el` (`jira.el`) | `~/.authinfo.gpg`, `machine <instance> login <email> port https` | corporate. Unset by default, so the module loads inert. Cloud API token or on-prem PAT (`jira-token-is-personal-access-token`) |
-| Libera.Chat IRC | port 6697, TLS | `init-irc.el` (`circe`) | SASL password from `auth-source` | nick `celsuss` |
-| QuakeNet IRC | port 6667, **no TLS** | `init-irc.el` | none | plaintext by protocol choice |
-| Hugo dev server | `localhost:1313` | `init-org.el` | none | `start-process "hugo"` |
+| Libera.Chat IRC | port 6697, TLS | `init-irc.el` (`circe`) | `~/.authinfo.gpg`, `machine irc.libera.chat login celsuss` | SASL PLAIN, read by the `:sasl-password` lambda at connect. nick `celsuss` |
+| QuakeNet IRC | port 6667, **no TLS** | `init-irc.el` | `~/.authinfo.gpg`, `machine quakenet login Celsuss` | `rata-irc-quakenet-auth` PRIVMSGs `AUTH Celsuss <pass>` to `Q@CServe.quakenet.org` on `circe-server-connected-hook` — **in clear text**, plaintext by protocol choice. `machine` is the literal string `quakenet`, not the server host, and the login is capitalised where Libera's is not: `rata-auth-get` matching is case-sensitive |
+| Hugo dev server | `localhost:1313` | `init-blog.el` | none | `start-process "hugo" "server" "-D"`. Liveness is `process-live-p` on the process, never the buffer — hugo exits on a config error and leaves `*hugo-server*` behind, and gating on the buffer made `SPC o b p` browse a dead port. The browser opens from a process filter watching for "Web Server is available", not a fixed delay |
 | reveal.js CDN | `cdn.jsdelivr.net/npm/reveal.js@4.6.1` | `init-present.el` | none | `rata-reveal-install-local` clones a local copy instead |
 | reveal.js repo | `github.com/hakimel/reveal.js.git` | `init-present.el` | none | on-demand clone |
-| RSS/Atom feeds | 93 URLs | `init-elfeed.el` + `feeds.org` | none | auto-refreshed every 30 min |
+| RSS/Atom feeds | 94 URLs | `init-elfeed.el` + `feeds.org` | none | auto-refreshed every 30 min. Feed *tags* are a contract: `rata-elfeed-views` filters on them and elfeed-org needs the root `:elfeed:` tag. Guarded by `rata-test-elfeed-*`. Tags are stamped onto an entry at *fetch* time, so a `feeds.org` tag edit is **not** retroactive — `rata-elfeed-retag` (`SPC a r t`, also on `elfeed-search-mode-hook`) backfills the existing db. See FAIL-0011 / L-026. A human-facing cheat sheet for these keys and views lives *outside* this repo at `~/workspace/second-brain/org-roam/emacs-elfeed.org`; it mirrors `rata-elfeed-views` by hand and second-brain is off-limits autonomously (`SAFETY_RULES.md`), so it drifts until the operator asks for an update |
 | tree-sitter grammar repos | 10 GitHub repos | `init-lang.el` | none | `just install-grammars` **downloads and compiles C** |
 | Maven Central | via Leiningen | `init-sql.el` | none | resolves `snowflake-jdbc` 3.28.0 into `~/.m2` on first connect |
 | elpaca package sources | 132 declared, 197 built (incl. transitive) | `init-pkg.el` / every module | none | see §3 |
@@ -42,17 +43,87 @@ still works on-premise. Packages pinned to `rest/api/2/search` — `jiralib2`, a
 why they were rejected in D-011. If `SPC J j` ever returns nothing, read that probe before
 suspecting credentials.
 
+**But the fallback covers the request only, not the response — this checkout is on the
+truncating side of it.** `local.el` sets `rata-jira-api-version` 2, so the probe lands on
+legacy `search`, which paginates with `startAt` and reports `total`. `jira.el` contains
+neither string: it reads `nextPageToken` (`jira-issues.el:179`) and sends `nextPageToken`
+(`jira-issues.el:107`), the Cloud contract. So `M-n` always answers "No more pages.", the
+row count is never checked against `total`, and `SPC J j` silently shows the first
+`jira-issues-max-results` rows of an `ORDER BY`-less query — an arbitrary subset that the
+client-side sort then makes look deliberate. The symptom is *missing issues with no error*,
+not an empty list, so it does not look like the endpoint problem above. Mitigation is the
+page size, raised to 100 in `init-jira.el` with the reasoning inline;
+`rata-test-jira-issues-single-page-assumption-still-holds` fails when upstream gains
+`startAt`, so the workaround is retired rather than inherited. Narrowing the query helps
+for the same reason: since 2026-09-08 the default excludes `rata-jira-excluded-statuses`
+(D-016), so the 100 rows are open work rather than an arbitrary slice of all history.
+A status name the instance does not carry makes Jira reject the whole query with a 400 —
+that failure is an *empty* list, which is the endpoint-shaped symptom above, not this one.
+See L-038, L-040, D-016 and `docs/jira-cheatsheet.org`.
+
+**A second API family is in use since 2026-09-09: the Agile REST API** (`/rest/agile/1.0/`
+— `board`, `board/{id}/sprint`, `sprint/{id}/issue`, `backlog/issue`), for the `, m` sprint
+commands in `init-jira.el`. It is the same host, the same credentials and the same
+`jira-api-call`: `jira-api--url` passes a URL that already starts with the base through
+untouched (`jira-api.el:174`), which `rata-test-jira-agile-url-passes-through-jira-api`
+pins. Two things to know when it breaks. It needs a Jira *Software* licence on the
+instance — a plain Jira Core instance 404s every Agile endpoint — and `backlog/issue`
+without a board id is the call most likely to differ across Server/DC versions; the
+alternative spelling is `backlog/<board-id>/issue`. Errors surface as a `user-error` in
+Jira's own `errorMessages`. The board is `rata-jira-board-id` in `local.el`, asked once
+per session when unset. See D-017.
+
+**How a file reaches either ACP agent — read this before writing any Elisp for it.**
+`agent-shell` already ships the whole context-send family and *nothing in it is
+autoloaded*, so a leader key bound to one of those commands resolves to nothing unless the
+symbol is also in `init-llm.el`'s `:commands` list. The senders are bound under
+`SPC a i c`: `f` current file (via `rata-agent-shell-send-file`), `F` file to a chosen
+shell, `r`/`R` region, `d` dwim (region, else the flycheck/flymake error at point, else the
+current line, per `agent-shell-context-sources`), `t` toggle, `b` switch shell. On the wire
+a file is *not* pasted: the senders insert a clickable `@relative/path` mention, and at
+submit time agent-shell turns each mention into an ACP content block — an embedded
+`resource` when the agent advertises `embeddedContext` and the file is under
+`agent-shell-embed-file-size-limit` (100 KB), else a `resource_link`, else an `image`
+block. `acp.el` has no content-block constructors at all; that translation is agent-shell's.
+`@` completion in the shell needs no configuration — `agent-shell-file-completion-enabled`
+defaults to `t`. See L-032.
+
+Which block you get is the *agent's* choice, and Pi's answer is verified here: its
+`initialize` result advertises `promptCapabilities` `{image: true, audio: false,
+embeddedContext: false}` (pi-acp 0.0.33, probed 2026-09-02). So a file sent to Pi arrives as
+a `resource_link` — a pointer it must then read with its own fs tools — never as inlined
+text, whatever the file's size. Do not debug that as a truncation or a size-limit problem;
+re-probe the capability. Claude Code's answer is the opposite: `claude-agent-acp` 0.73.0 advertises
+`promptCapabilities` `{image: true, embeddedContext: true}` (probed 2026-09-03), so the same
+file mention reaches Claude Code as inlined text and Pi as a pointer. The senders are
+identical; the two agents are not.
+
 ## 2. External binaries
 
-Assumed on `PATH`, declared in `justfile install-deps` (Arch-only, never run on this host):
+Assumed on `PATH`, declared in `install-deps`, which is no longer Arch-only: it reads
+`/etc/os-release` and dispatches to `just/deps-arch.just` (pacman + yay) or
+`just/deps-debian.just` (apt-get + `go install` / `bun` / `rustup`). Both paths remain a
+statement about what *should* be present. **`just check-deps` is the only statement about
+this host** — it resolves each binary and prints the path, which is what would have caught
+FAIL-0014 in one command:
 
-- **Core:** `git`, `ripgrep`, `fd`, `enchant` (jinx spellcheck), `shfmt`, `editorconfig`
+- **Core:** `git`, `ripgrep`, `fd`, `enchant` (jinx spellcheck), `shfmt`, `editorconfig`.
+  Debian ships `fd-find` as the binary `fdfind` and `python3-pytest` as `pytest-3`;
+  `install-deps-debian` symlinks both into `~/.local/bin` under the names Emacs calls,
+  because a package installed under a name nothing calls is a missing dependency
 - **Language servers:** `pyright`, `gopls`, `rust-analyzer` (rustup nightly), `terraform-ls`
 - **Formatters:** `black`, `prettier` (apheleia drives these; lsp formatting is disabled)
 - **Tools:** `kubectl` (kubel), `docker`, `hugo`, `delve` (dap-go), `pytest`, `go-tools`, `gomodifytags`
 - **SQL:** `jdk-openjdk`, `leiningen` — ejc-sql drives JDBC through a Clojure nREPL
 - **LaTeX:** `texlive-*` for org math preview (`dvisvgm`)
-- **Agents:** `claude` (claude-loop), `claude-code-acp` (agent-shell)
+- **Agents:** `claude` (claude-loop), `claude-agent-acp` and `pi-acp` (agent-shell). Both
+  ACP adapters belong to npm/bun, not pacman, and both are installed globally with bun on
+  this host so they land next to `pi` on `PATH` rather than under an nvm-versioned npm
+  prefix. Both are now installed by `install-deps` on every distro through the shared
+  private `_deps-acp` recipe in `just/deps.just` — never as a distro package, and **only
+  when the binary is missing**, because the two adapters disagree about
+  `@agentclientprotocol/sdk` and zod versions and a working pair depends on how npm/bun
+  nested them (§1). The abandoned `claude-code-acp` AUR entry is gone (FAIL-0014 closed).
 
 A missing binary degrades one feature; it does not break startup, because every consumer
 is deferred. `just batch` and `just test-ert` therefore pass with all of them absent —

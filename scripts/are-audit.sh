@@ -133,13 +133,31 @@ fi
 # `just are-verify` delegates to scripts/are-verify.sh, so the justfile recipe body cannot
 # show reachability — the script is where the steps actually are. (The first version of
 # this check grepped the justfile recipe and reported two false failures. L-008.)
+#
+# The recipe list comes from `just --summary', never from a grep of the justfile: the
+# recipes live in just/*.just and are imported flat (D-013), so a grep of one file would
+# find nothing and pass silently. --summary resolves imports and hides private recipes,
+# which is exactly the set the docs and the gates may name. L-034.
 echo "=== Check: gate-covers-tests ==="
-if [ -f justfile ] && [ -f scripts/are-verify.sh ]; then
-    for target in $(grep -oE '^test-[a-z-]+:' justfile | tr -d ':'); do
+just_recipes=""
+if command -v just &>/dev/null && [ -f justfile ]; then
+    if just_recipes="$(just --summary 2>&1 | tr ' ' '\n')"; then
+        :
+    else
+        fail "the justfile does not parse, so no target can be checked: $just_recipes"
+        just_recipes=""
+    fi
+elif [ -f justfile ]; then
+    warn "just is not on PATH — the justfile target checks are skipped"
+fi
+
+if [ -n "$just_recipes" ] && [ -f scripts/are-verify.sh ]; then
+    while IFS= read -r target; do
+        [ -n "$target" ] || continue
         if ! grep -q "just $target\b" scripts/are-verify.sh; then
             fail "justfile target '$target' is not run by scripts/are-verify.sh, so no gate covers it (see FAIL-0004)"
         fi
-    done
+    done < <(printf '%s\n' "$just_recipes" | grep -E '^test-' || true)
 fi
 
 # --- Check: docs-commands --------------------------------------------------------
@@ -149,12 +167,12 @@ fi
 # name is actually reachable. This checks the mechanical half of that: a `just <target>`
 # named in the docs must exist in the justfile.
 echo "=== Check: docs-commands ==="
-if [ -f justfile ]; then
+if [ -n "$just_recipes" ]; then
     for doc in README.org AGENTS.md .are/INDEX.md .are/SYSTEM.md; do
         [ -f "$doc" ] || continue
         while IFS= read -r target; do
             [ -n "$target" ] || continue
-            grep -qE "^${target}( [a-z_]+=?.*)?:" justfile \
+            printf '%s\n' "$just_recipes" | grep -qxF "$target" \
                 || fail "$doc names 'just $target', which is not a target in the justfile"
         # Only code context counts: a backtick/org-verbatim marker, or the start of a
         # line in a shell block. Bare prose has "just the ..." in it, and English is not
@@ -217,6 +235,49 @@ if [ "$hooks_path" = ".githooks" ]; then
     fi
 fi
 
+# --- Check: build-artifact-emacs-version -----------------------------------------
+# FAIL-0015: an Emacs upgrade silently invalidates everything under `elpaca/builds'
+# and `eln-cache', because macros resolve at byte-compile time. `compat-call' is the
+# worst of them: it expands to `compat--FOO' only when that shim is fbound *while
+# compiling*, so a package built under Emacs 30 hard-calls a symbol that compat
+# deliberately stops defining on Emacs 31. Nothing failed to load and nothing exited
+# non-zero -- marginalia just signalled `void-function compat--seconds-to-string' the
+# next time you pressed a key in `find-file'.
+#
+# The evidence is in the artifacts themselves: every .elc carries a plain-text
+# ";;; in Emacs version N.N" header, so this needs no Emacs to read. It does need one
+# to know what is running now; `emacs --version' loads no config and is skipped
+# entirely if there is no binary or no build tree (CI, fresh clone).
+#
+# Warning, not error: a mid-rebuild tree is a normal transient state, and this checkout
+# is the only thing that can fix it.
+echo "=== Check: build-artifact-emacs-version ==="
+audit_emacs_bin="${EMACS_BIN:-}"
+if [ -z "$audit_emacs_bin" ]; then
+    for p in /usr/bin/emacs /snap/bin/emacs; do
+        [ -x "$p" ] && { audit_emacs_bin="$p"; break; }
+    done
+    [ -n "$audit_emacs_bin" ] || audit_emacs_bin="$(command -v emacs || true)"
+fi
+if [ -z "$audit_emacs_bin" ] || [ ! -d elpaca/builds ]; then
+    echo "skipped: no emacs binary or no elpaca/builds in this checkout"
+else
+    running="$("$audit_emacs_bin" --version 2>/dev/null | sed -n '1s/^GNU Emacs //p')"
+    # Sorted and deduplicated, so the message names every vintage present, not a sample.
+    built="$(find elpaca/builds -name '*.elc' -print0 2>/dev/null \
+        | xargs -0r grep -haom1 ';;; in Emacs version [0-9][0-9.]*' 2>/dev/null \
+        | sed 's/.*version //' | sort -u | tr '\n' ' ' | sed 's/ $//')"
+    if [ -z "$built" ]; then
+        # Distinguish "not built yet" from "built wrong". Zero .elc is the normal state
+        # between the delete and the rebuild, and an unbuilt tree is not a stale one.
+        echo "skipped: elpaca/builds holds no .elc yet (deleted, or rebuild not run)"
+    elif [ -z "$running" ]; then
+        echo "skipped: could not read a version from '$audit_emacs_bin'"
+    elif [ "$built" != "$running" ]; then
+        warn "elpaca/builds was byte-compiled by Emacs [$built] but Emacs $running is running; macro expansions baked into those artifacts are wrong (FAIL-0015). Fix: rm -rf eln-cache/*; find elpaca/builds -name '*.elc' -delete; then M-x elpaca-manager, mark all with B, execute with x. Wiping eln-cache is not optional -- elns are keyed by source hash, so a bad one is reused verbatim."
+    fi
+fi
+
 # --- Check: stray-files ----------------------------------------------------------
 # FAIL-0007: nothing noticed an accidental untracked file. Warning only — work in progress
 # is normal.
@@ -228,6 +289,58 @@ while IFS= read -r p; do
     esac
     warn "unexpected untracked file: '$p' (FAIL-0007)"
 done < <(git ls-files --others --exclude-standard 2>/dev/null || true)
+
+# --- Check: snippet-headers ------------------------------------------------------
+# A yasnippet file whose `# key:' duplicates another one in the same mode directory
+# never expands: `yas-expand' resolves a key to a single template, so the loser is
+# reachable only through `SPC i s'. Nothing signals, nothing warns — it is exactly the
+# silent-shadowing shape of FAIL-0002, one directory over. A missing `# --' separator is
+# checked in the same pass because yasnippet then treats the header as body text.
+echo "=== Check: snippet-headers ==="
+for mode_dir in snippets/*/; do
+    [ -d "$mode_dir" ] || continue
+    for snippet in "$mode_dir"*; do
+        [ -f "$snippet" ] || continue
+        grep -q '^# --' "$snippet" || fail "$snippet has no '# --' header separator; yasnippet reads its header as body"
+        grep -q '^# name:' "$snippet" || fail "$snippet has no '# name:' line, so 'SPC i s' cannot label it"
+    done
+    dupes=$(grep -h '^# key:' "$mode_dir"* 2>/dev/null | sed 's/^# key:[[:space:]]*//' \
+        | sort | uniq -d || true)
+    for key in $dupes; do
+        owners=$(grep -l "^# key:[[:space:]]*${key}\$" "$mode_dir"* | tr '\n' ' ')
+        fail "duplicate snippet key '$key' in $mode_dir: $owners(only one can expand)"
+    done
+done
+
+# --- Check: snippet-symbol-refs --------------------------------------------------
+# A snippet may embed elisp — backtick-quoted forms and `$$(...)' fields — and the ones
+# here reach into this config's own variables (snippets/org-mode/dialogue reads
+# `rata-dialogic-characters'). A `rata-' symbol in one of those positions that no source
+# file mentions is a typo or a rename, and the snippet then errors halfway through
+# expanding, leaving a half-written block in the buffer. Found exactly that on the run
+# that added this check: a draft calling `rata-dialogic-speakers' when the function is
+# `rata-dialogic--speakers'.
+#
+# Only evaluated segments are scanned. A `${1:rata-command}' placeholder is text the
+# user types over, and a snippet body may legitimately *insert* a call to something
+# defined elsewhere (snippets/emacs-lisp-mode/rata-leader inserts a `rata-leader' form),
+# so scanning the whole file reports both as errors — it did, on the first draft here.
+#
+# Presence in the tracked elisp is all that is required: a name can be defined by
+# `defun', `defcustom', `general-create-definer' or `defalias', and enumerating those
+# would fail open the moment a new form is used. Typos and renames are the failure mode,
+# and presence alone catches both.
+echo "=== Check: snippet-symbol-refs ==="
+for snippet in snippets/*/*; do
+    [ -f "$snippet" ] || continue
+    while IFS= read -r sym; do
+        [ -n "$sym" ] || continue
+        if ! grep -rqF -- "$sym" lisp/ init.el early-init.el 2>/dev/null; then
+            fail "$snippet evaluates '$sym', which appears nowhere in lisp/ — expansion will error"
+        fi
+    done < <({ grep -oE '`[^`]+`' "$snippet" || true; grep -oE '\$\$?\(.*' "$snippet" || true; } \
+        | grep -oE 'rata-[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?' | sort -u)
+done
 
 # --- Check: knowledge-line-refs --------------------------------------------------
 # The knowledge pages cite source lines as `symbol`, `:NNN`. Those drift the moment
@@ -313,6 +426,84 @@ if hits="$(grep -rniE "(set|configure|put)[^.]{0,40}\`?custom\.el" \
     if [ -n "$hits" ]; then
         echo "$hits"
         fail "a module tells the reader to set a value in custom.el; per-machine values go in local.el (D-012)"
+    fi
+fi
+
+# --- Check: no-conflict-markers --------------------------------------------------
+# A merge conflict marker can be committed and survive every gate here: `lint' does
+# not read Elisp, and `>>>>>>> <sha>' parses as two ordinary symbols, so the reader
+# in tests/run-tests.el sees no parse error either. It only shows up at runtime, as
+# a void-variable that aborts the module load after `provide' has already run — so
+# `featurep' says the module is fine while half of it never executed. Cost:
+# lisp/init-org.el carried one from merge b510337.
+echo "=== Check: no-conflict-markers ==="
+# Two paths are exempt because quoting a marker verbatim is their job: this script,
+# which has to contain the patterns to search for them, and the failure records, which
+# reproduce the offending bytes as evidence. Both are prose or tooling, never loaded as
+# configuration, so a *real* conflict in one is a cosmetic defect rather than a module
+# that half-executes. Everything else — including LESSONS.md — stays in scope, so a
+# lesson that discusses markers must keep them inline rather than at column 0.
+lt="<<<<<<<"; gt=">>>>>>>"; eq="======="
+if hits="$(git ls-files -z -- '*.el' '*.sh' '*.md' '*.org' '*.yml' '*.yaml' 'justfile' \
+    | xargs -0 grep -nE "^($lt|$gt) |^$eq\$" -- 2>/dev/null \
+    | grep -vE '^(scripts/are-audit\.sh|\.are/memory/failures/)')"; then
+    if [ -n "$hits" ]; then
+        echo "$hits"
+        fail "a tracked file contains an unresolved merge conflict marker"
+    fi
+fi
+
+# --- Check: acp-adapters-on-path -------------------------------------------------
+# L-033: agent-shell spawns an ACP *adapter* binary, never the agent CLI itself, and
+# no adapter arrives from pacman, elpaca or anything in this repo -- they are npm/bun
+# installs. A missing one is invisible until the leader key is pressed: the whole
+# suite stays green because nothing in tests/ execs the adapter. Cost: the Claude
+# adapter was only ever installed by `install-deps' aur_pkgs, which is Arch-only, so
+# `SPC a i c c' had never worked on the Ubuntu host (FAIL-0014).
+#
+# Warn, never fail. A machine that does not use one of the agents is not broken, and
+# this check must keep working with no Emacs, no packages and no network. The names
+# are read out of the config rather than hardcoded so this cannot drift from
+# init-llm.el; `rata-test-acp-adapter-commands-match-upstream' ties that config to
+# agent-shell's own defaults, so reading the config transitively covers both.
+echo "=== Check: acp-adapters-on-path ==="
+acp_found=0
+while read -r adapter; do
+    [ -n "$adapter" ] || continue
+    acp_found=$((acp_found + 1))
+    command -v "$adapter" >/dev/null 2>&1 \
+        || warn "agent-shell adapter '$adapter' is not on PATH, so that agent's shell cannot start (lisp/init-llm.el). Install it with bun/npm (L-033)"
+done < <(grep -oE "agent-shell-[a-z-]+acp-command '\(\"[^\"]+\"" lisp/init-llm.el 2>/dev/null \
+             | grep -oE '"[^"]+' | tr -d '"' || true)
+# Extracting nothing would make the loop above pass for the wrong reason, and the
+# config does pin at least one adapter.
+if [ "$acp_found" -eq 0 ]; then
+    warn "could not read any adapter name out of lisp/init-llm.el — the :custom block was reformatted and this check is now blind (L-033)"
+fi
+
+# --- Check: install-deps-covers-this-host ----------------------------------------
+# The reported bug behind D-013/D-014: `install-deps' was pacman-only, so on the Ubuntu
+# laptop the one command that is supposed to make a machine ready did nothing but fail.
+# That is invisible to every other check here — nothing else in the audit knows what
+# distro it is standing on.
+#
+# Warn, never fail: a distro with no branch is a gap to fill, not a broken checkout, and
+# the two per-OS targets can still be forced by name. The family patterns are duplicated
+# from just/deps.just on purpose — what this proves is that THIS host resolves to a target
+# that EXISTS, which catches both a renamed recipe and an unrecognised distro.
+echo "=== Check: install-deps-covers-this-host ==="
+if [ -n "$just_recipes" ]; then
+    audit_os_id="$(just --evaluate os_id 2>/dev/null || echo unknown)"
+    audit_os_like="$(just --evaluate os_like 2>/dev/null || echo '')"
+    case "$audit_os_id $audit_os_like" in
+        *arch*)   expect_target="install-deps-arch" ;;
+        *debian*|*ubuntu*) expect_target="install-deps-debian" ;;
+        *)        expect_target="" ;;
+    esac
+    if [ -z "$expect_target" ]; then
+        warn "install-deps has no branch for this host (ID='$audit_os_id' ID_LIKE='$audit_os_like'); it will print the binary list and exit 1 (D-013)"
+    elif ! printf '%s\n' "$just_recipes" | grep -qxF "$expect_target"; then
+        warn "install-deps would dispatch to '$expect_target' on this host, but no such target exists — the recipe was renamed or its import dropped (D-013)"
     fi
 fi
 

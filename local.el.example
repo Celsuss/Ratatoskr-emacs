@@ -40,6 +40,11 @@
 ;; Server/DC authenticates with a Personal Access Token, sent as `Bearer'.
 ;; Cloud uses an API token as basic auth, where this stays nil.
 ;; (setq jira-token-is-personal-access-token nil)
+;;
+;; The Agile board whose sprints `, m s' offers -- `rapidView=NNN' in the board's
+;; URL.  Unset, the first sprint command asks which board and remembers it for
+;; the session; set, it never asks.  Not a secret, but it names a team.
+;; (setq rata-jira-board-id 123)
 
 ;; --- Snowflake (lisp/init-sql.el) ---
 ;; No password: `authenticator=externalbrowser' does SSO in the browser.  These

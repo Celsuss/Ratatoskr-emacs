@@ -22,7 +22,7 @@ A personal GNU Emacs configuration, written entirely in Emacs Lisp, loaded from
 | Package manager | `elpaca`, bootstrapped in `init.el`; `package.el` disabled in `early-init.el` | `init.el`, `early-init.el` |
 | Task runner | `just` (`justfile`) | `justfile` |
 | Tests | ERT (`tests/run-tests.el`), bespoke e2e harness (`tests/claude-loop-e2e.el`) | `tests/` |
-| CI/CD | GitHub Actions on PR + push to `master` (fast-gate + full-load jobs) | `.github/workflows/ci.yml` |
+| CI/CD | GitHub Actions on PR + push to `master` — the **`fast-gate` job only**, on Emacs 30.2. The `full-load` job was removed in `97417e2` as too heavy for free Actions, so **CI never loads a package**: it proves lint, syntax-compile, claude-loop e2e and are-audit, and nothing about module health. | `.github/workflows/ci.yml` |
 | Deployment | **none** — it *is* the deployed artifact; `git pull` is the deploy | repo structure |
 | Server / backend / HTTP API | **none** | verified absent |
 | Database | **none owned.** A SQL *client* (ejc-sql → Snowflake) is configured | `lisp/init-sql.el` |
@@ -101,8 +101,9 @@ Ranked. Full detail in the linked records.
 4. **A fresh clone starts ungated.** `core.hooksPath` is per-clone config and cannot be
    committed, so the shipped `.githooks/pre-commit` is off in any new checkout until
    `just install-hooks` runs. *This* checkout is installed (`.githooks`, verified
-   2026-08-25) and gates every commit with `just are-verify full`; `are-audit` warns when a
-   checkout is not. → [FAIL-0005](memory/failures/FAIL-0005.md)
+   2026-08-25) and gates every commit with `just are-verify fast` (~4 s — it loads no
+   packages on purpose, so a partially built elpaca cannot block an unrelated commit);
+   `are-audit` warns when a checkout is not. → [FAIL-0005](memory/failures/FAIL-0005.md)
 5. **Corporate identifiers are committed** in `lisp/init-sql.el` (work email, Snowflake
    account/role/warehouse/database/schema) in a repo with a public GitHub remote. No
    secret is exposed; SSO is used. → [knowledge/SECRETS_AND_SENSITIVE_DATA.md](knowledge/SECRETS_AND_SENSITIVE_DATA.md)

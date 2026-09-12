@@ -68,10 +68,30 @@ never run either to "fix" a test failure. See [../rules/SAFETY_RULES.md](../rule
 
 ## 4. Machine assumptions
 
-`just install-deps` is Arch-specific (`pacman`, `yay`, `rustup`). The host this was
-bootstrapped on is **Ubuntu 22.04.5** with no `pacman` and no `yay` on `PATH`, so
-`just install-deps` cannot have been run here and its package list is aspirational on this
-machine. Verified: `/etc/os-release`, `command -v pacman yay`.
+**Two machines, two package managers.** The operator's desktop is Arch; the host this was
+bootstrapped on is **Ubuntu 22.04.5** (`ID=ubuntu`, `ID_LIKE=debian`) with no `pacman` and no
+`yay` on `PATH`. `just install-deps` used to be Arch-only, so it had never been run here and
+its package list was aspirational on this machine — which is one of the three things that
+made FAIL-0014 possible.
+
+Since 2026-09-03 it reads `/etc/os-release` and dispatches: `install-deps-arch`
+(pacman + yay) or `install-deps-debian` (apt-get + `go install` / `bun` / `rustup`). The
+family match uses `ID` **and** `ID_LIKE`, so derivatives resolve (Manjaro → arch, Mint → ubuntu),
+and it checks that the matched package manager is actually on `PATH` before using it — "os-release
+says arch" and "pacman exists" are different claims. An unrecognised distro prints the required
+binaries and exits 1; the two per-OS targets stay public so an odd derivative can force one.
+
+What a Debian family host gets from apt is deliberately narrower than what Arch gets from
+pacman: apt's language tooling is years old on an LTS (jammy ships gopls 0.1.9 from 2022, and
+has no `prettier` or `kubectl` at all), so the toolchains install their own. Debian also
+*renames binaries* — `fd-find` installs `fdfind`, `python3-pytest` installs `pytest-3` — and
+the recipe symlinks both into `~/.local/bin` under the names Emacs calls. Verified on this
+host: `/etc/os-release`, `apt-cache policy` over the whole list, `command -v`.
+
+**`just check-deps` is the only claim about the machine you are on.** It resolves each
+dependency *binary* and prints its path; on this host that shows tools arriving from apt,
+linuxbrew, cargo, bun and `~/.local/bin` at once. A dependency list read as an inventory is
+what FAIL-0014 was made of.
 
 The `justfile` picks the Emacs binary from `/usr/bin/emacs`, then `/snap/bin/emacs`, then
 `PATH`, overridable with `EMACS_BIN`. Here `/usr/bin/emacs` does not exist and it resolves

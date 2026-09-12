@@ -59,6 +59,22 @@
     (when (> (count-windows) 1)
       (delete-window)))
 
+  (defun rata-window-columns (n)
+    "Collapse to a single window, then split into N equal side-by-side columns."
+    (delete-other-windows)
+    (dotimes (_ (1- n))
+      (split-window-right))
+    (balance-windows))
+
+  ;; Named commands rata-window-columns-1 .. rata-window-columns-5 so each key
+  ;; resolves to a `commandp' symbol (required by the leader-key regression tests).
+  (dotimes (i 5)
+    (let ((n (1+ i)))
+      (defalias (intern (format "rata-window-columns-%d" n))
+        (lambda () (interactive) (rata-window-columns n))
+        (format "Arrange the frame as %d equal side-by-side column%s."
+                n (if (= n 1) "" "s")))))
+
   (defun rata-delete-current-file ()
     "Delete the file visited by the current buffer, then kill the buffer."
     (interactive)
@@ -117,6 +133,11 @@
    "ww"  '(other-window :which-key "cycle window")
    "wr"  '(evil-window-rotate-downwards :which-key "rotate windows")
    "wu"  '(winner-undo :which-key "winner undo")
+   "w1"  '(rata-window-columns-1 :which-key "1 window")
+   "w2"  '(rata-window-columns-2 :which-key "2 columns")
+   "w3"  '(rata-window-columns-3 :which-key "3 columns")
+   "w4"  '(rata-window-columns-4 :which-key "4 columns")
+   "w5"  '(rata-window-columns-5 :which-key "5 columns")
 
    "s"   '(:ignore t :which-key "search")
    "sg"  '(consult-grep :which-key "grep")
@@ -201,6 +222,15 @@
    "qq"  '(save-buffers-kill-terminal :which-key "quit emacs")
    "qQ"  '(kill-emacs :which-key "quit without saving")
    "qr"  '(rata-reload-init-file :which-key "reload init.el"))
+
+  ;; Collapse the SPC w 1..5 column-layout keys into a single which-key entry,
+  ;; the same trick winum uses for SPC 0..9 below.  Pushed AFTER the rata-leader
+  ;; above so these land in front of general.el's own rules.
+  ;; Hide w2..w5, show only w1 renamed to the "1..5 columns" range.
+  (push '((nil . "rata-window-columns-[2-5]") . t)
+        which-key-replacement-alist)
+  (push '(("1" . "rata-window-columns-1") . ("1..5" . "columns"))
+        which-key-replacement-alist)
 
   ;; Vim-idiomatic goto keys in normal state. xref plugs into LSP, Elisp and
   ;; etags, so these work regardless of backend. Bound in the global normal

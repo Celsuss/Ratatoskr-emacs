@@ -276,6 +276,14 @@ state shadows both — the same mechanism that made plain `define-key` dead in t
   ships `?`, `l`, `C`, `U`, `E`, `H`, `S` and adds more on a monthly cadence. A hand-written
   `evil-define-key*` table for them is a promise to track someone else's keymap forever.
   Emacs state costs two lines and never drifts; `C-z` is the way out.
+  **Decided the other way for jira.el on 2026-09-08 (D-015), on operator instruction:** emacs
+  state also takes `j`/`k`, `/` and the `SPC` leader away inside the buffer, which is the
+  larger loss in a vim-first config. What makes the re-binding affordable is *not* writing the
+  table by hand: `rata-jira--mirror-args` reads each definition out of the package's own mode
+  map with `lookup-key` (as `init-evil.el` already does for dashboard), mirrors only the keys
+  evil-collection does not already cover, and `rata-test-jira-mirrored-keys-exist-upstream`
+  turns an upstream rename into a failing test rather than a dead key. Prefer that shape over
+  either extreme when a package's keymap has to coexist with evil.
 - **This is the third distinct shape of the same root cause** (deferred `:config` leader keys
   in FAIL-0009, `define-key` in a `special-mode` child, an upstream package's own keymap).
   When adding any module whose buffer is not an editing buffer, ask which of the three
@@ -409,3 +417,901 @@ re-run fixes it) from "recipe conflict" (deterministic, needs the reorder above)
 recipe elsewhere in the config, place the new declaration *after* that dependency's
 `use-package`, in load order — not in whichever module feels topical. An elpaca *build*
 error naming a "dependent … in past queue" is this, not a code bug.
+
+---
+
+## L-023 — A block agenda's tag filter belongs in the command's global slot, and a `:name`-only super-agenda group names nothing
+
+**From:** the work-agenda session, 2026-08-26, giving the `"w"` command a dated `agenda`
+block so deadlines appear under day headers instead of in a flat "Due Soon" bucket
+(`lisp/init-org.el`).
+
+Three things in `org-agenda-custom-commands` fail *silently* — the view still opens, it is
+just wrong — and all three were found only by rendering the agenda and reading the output:
+
+1. **`org-agenda-tag-filter-preset` must sit in the entry's 4th element**, the general
+   settings slot shared by every block. Its own docstring (`org-agenda.el:3834`) says that
+   defining it for one block of a block agenda "will not work reliably". `org-agenda-run-series`
+   `eval`s the general props once (`org-agenda.el:3347`) and binds them across all blocks.
+2. **A super-agenda group carrying only `:name` and `:order` selects nothing.** The
+   `(:name "Other Projects & Tasks" :order 99)` that had been in this config since it was
+   written was inert: the leftovers fell into org-super-agenda's own catch-all, printed as
+   `org-super-agenda-unmatched-name` — "Other items". `:anything t` is what claims them under
+   the intended name. `"p"` and `"d"` still have inert copies of this shape.
+3. **Groups are applied in list order, `:order` only sorts the output.** A `:discard` placed
+   before a group swallows that group's items. Here `(:discard (:scheduled t :deadline t))`
+   had to come *after* "Due later", or deadlines beyond the calendar's horizon appeared in
+   neither block. Selectors *inside* one group are OR'ed, not AND'ed
+   (`org-super-agenda.el:1222`); AND needs the explicit `:and` selector.
+
+Two facts worth not re-deriving: block *and* general settings are `eval`ed at agenda-build
+time (`org-agenda.el:3347,3371`), so a backquoted value form recomputes on every `g`. And a
+deadline's prewarning is only ever shown on **today's** line, never repeated across the span
+(`org-agenda-get-deadlines`, the `((not today?) (throw :skip nil))` branch) — so a long span
+does not multiply prewarnings, and `org-deadline-warning-days 0` in a block removes just the
+one echo under today.
+
+**Apply:** treat any change to `org-agenda-custom-commands` as untested until the agenda has
+been *rendered*. `just test-work-agenda` (`tests/work-agenda-render.el`) does that headlessly
+over fixtures in `temporary-file-directory`. Two traps in writing such a test: `--batch`
+implies `-q`, so it must load `init.el` itself; and `org-agenda` here is advised to append
+every org-roam `:hastodo:` file (`rata-org-agenda-files-advice`), so `rata-org-roam-agenda-files`
+has to be stubbed or the operator's real second-brain tree enters the assertions.
+
+## L-024 — A child frame is not a window: no `display-buffer` rule places it, and lsp-ui measures against the frame
+
+**From:** the lsp-ui-doc session, 2026-08-26. The hover documentation popup appeared in the
+top-left corner of the *frame*, over whichever window happened to be there, rather than in
+the window holding point (`lisp/init-dev.el`).
+
+Two things to not re-derive:
+
+1. **`shackle-rules` and `display-buffer-alist` have no say over a child frame.** They are
+   consulted by `display-buffer`, and a child frame never goes through it. Every popup in
+   this config that "ignores shackle" — lsp-ui-doc, corfu, flycheck-posframe, evil-owl — is
+   a child frame positioned by its own package. Searching `init-system.el` for the cause of
+   a misplaced popup is wasted time; find the package that owns the frame.
+2. **`lsp-ui-doc` positions horizontally against the whole Emacs frame in every mode.**
+   `lsp-ui-doc-alignment 'window` reaches only the `top`/`bottom` positions, and even then
+   only the `right` side: `lsp-ui-doc-side 'left` is a literal `10`-pixel x in
+   `lsp-ui-doc--move-frame`, and `at-point` puts x at the symbol's own column. With the
+   defaults (`position 'top`, `alignment 'frame`, `max-width 150`) the popup's x is
+   `(max (- (frame-pixel-width) width char-w) 10)` — a popup as wide as the frame hits the
+   `10` floor, which is why "top-right by default" presents as top-left.
+
+**Apply:** "put this popup where point is" is an advice, not a setting. Take `at-point` for
+the vertical placement (it is already window-relative and dodges the current line), and
+override x with an `:around` on `lsp-ui-doc--mv-at-point` reading
+`(nth 2 (window-edges nil t nil t))` — the same frame-relative pixel measurement upstream
+takes for its own START-X, so the two agree about the coordinate space.
+`rata-lsp-ui-doc--align-right` in `lisp/init-dev.el` is the worked example, and
+`rata-test-lsp-ui-doc-aligns-to-window-right` in `tests/run-tests.el` is the executable form
+of this lesson: it stubs `window-edges`/`frame-pixel-width` and fails for any implementation
+that measures against the frame. Verification is genuinely split here — placement arithmetic
+is testable headlessly, the child frame itself is in the `gui` NOT TESTED bucket, so the
+visual result still has to be looked at.
+
+## L-025 — A data file that code filters on is code, and its every failure mode is silent
+
+**From:** the feeds.org retagging session, 2026-08-26. `feeds.org` gained three tag axes
+(content type, topic, cadence) and a per-feed slug on all 94 entries; `init-elfeed.el` was
+rewritten to generate its filter commands and keys from `rata-elfeed-views`.
+
+Three things to not re-derive:
+
+1. **`feeds.org` was classified LOW / `fast` while the code reading it was MEDIUM.** Twelve
+   of its tags are string literals in `init-elfeed.el`, so a rename in the "data" file
+   breaks the "code" file — and the break is *invisible*: elfeed answers a filter that
+   matches nothing with an empty entry list, which looks exactly like having read
+   everything. The root `:elfeed:` tag is worse. It has no reference anywhere in this
+   repo's Elisp — it matches `elfeed-org`'s default `rmh-elfeed-org-tree-id`, which is
+   never set here — so grep finds nothing to protect it, and removing it hides all 94
+   feeds with no error at all. `feeds.org` is now MEDIUM / `relevant`.
+2. **Org tags are `[[:alnum:]_@#%]` only, and they fail closed on the whole group.** A
+   hyphen does not produce a malformed tag; it stops the trailing `:a:b:` being read as a
+   tag group at all, so the feed silently inherits only its section's tags. This is why the
+   existing tag is `tech_radar`. Tags are also interned symbols and case-sensitive: the
+   pre-existing `:Ntietz:` could never be matched by typing `+ntietz`.
+3. **The `f`-prefix filter keys were invisible to the test suite.** They go through
+   `general-define-key`, and `rata-test--walk-form` (`tests/run-tests.el:82`) only descends
+   into `rata-leader` forms. So the 14 keys had no `commandp` coverage of any kind — the
+   FAIL-0009 blind spot, one keymap over.
+
+**Apply:** when code filters on strings living in a data file, the contract needs an
+executable check, not a comment — parse the data file in a test and assert every string the
+code names actually occurs. `rata-test-elfeed-view-tags-exist-in-feeds-org`,
+`rata-test-elfeed-root-tag-present`, `rata-test-elfeed-views-well-formed` and
+`rata-test-feeds-org-tag-conventions` in `tests/run-tests.el` are the worked example; each
+was confirmed to fail against a deliberately mutated `feeds.org` before being kept, because
+a contract test that cannot go red is worse than no test. The second half of the lesson is
+structural: `rata-elfeed-views` had already drifted into dead code duplicated by hand into
+13 defuns and 13 keybindings. Generating the commands and keys from the one list removes the
+drift, and generating the *commands* at module top level while binding the *keys* in
+`use-package`'s `:config` is what keeps them testable — a mode-scoped keymap genuinely needs
+`:config`, a command does not, and putting both there would have reproduced FAIL-0009.
+
+## L-026 — Config-derived state is a third copy, and a config-vs-code test cannot see it
+
+**From:** [`FAIL-0011`](failures/FAIL-0011.md), 2026-08-26 — the session immediately after
+the one that produced L-025. `feeds.org` was correct, `rata-elfeed-views` was correct, all
+four `rata-test-elfeed-*` tests were green, and 22 of 36 elfeed views returned an empty
+list.
+
+**Mechanism.** Elfeed applies a feed's tags to an entry **once, at fetch time**
+(`elfeed.el:312,337`), then stores them on the entry in `elfeed-db/index`. `elfeed-feeds` —
+which elfeed-org rebuilds from `feeds.org` on every `M-x elfeed` — therefore only governs
+entries that have not arrived yet. Editing the tag vocabulary is not retroactive, and 8833
+existing entries kept the old symbols. The views that still worked were exactly the ones
+whose tag predated the change; that pattern is what made it look like a filter-string bug
+rather than a database one.
+
+**The generalisation, which is the part worth keeping.** L-025 said: when code filters on
+strings in a data file, assert in a test that every string the code names occurs in the
+file. That is necessary and it is not sufficient. If anything *materialises* that config
+into persistent state — a database row, a cache, a generated file, an index — then there is
+a **third** copy, it was written under an older version of the config, and no test that
+compares the two source files can see it. The failure mode is silent by construction: the
+stale copy is internally consistent, it just answers an older question.
+
+**Apply.**
+
+1. When you change a vocabulary that persisted state was written from, ship the **backfill
+   in the same change** as the vocabulary. Look for it upstream first — elfeed already had
+   `elfeed-apply-autotags-now` and it had simply never been wired in here; the fix was two
+   calls, not a tagging engine.
+2. Prefer running the backfill automatically over documenting that it must be run. Measure
+   the cost before deciding: this one is 0.02 s to retag 8833 entries and 0.11 s to
+   serialise a 3.5 MB index, so `elfeed-search-mode-hook` needs no once-per-session guard.
+   A manual entry point (`SPC a r t`) stays useful for the case of editing `feeds.org` in a
+   running Emacs.
+3. Test the **wiring**, not the state. `rata-test-elfeed-retag-wired` asserts the command
+   exists, is on the hook, is reachable from its key, and that both upstream functions it
+   calls still exist. The suite cannot assert against the operator's database — it can
+   assert that something applies the contract to it.
+4. When a filter can return "no matches" and "nothing matched because the data predates
+   your query" identically, that ambiguity is the bug's hiding place. Reach for the actual
+   store early: one histogram of `elfeed-entry-tags` over the live index named the cause
+   outright, after reasoning about filter strings had produced nothing.
+
+**Diagnostic worth keeping** — read the operator's real database without loading the config
+or touching the network:
+
+```sh
+emacs -Q --batch -L elpaca/builds/elfeed --eval '(progn
+  (require (quote elfeed-db))
+  (setq elfeed-db-directory "/home/jens/.config/emacs/elfeed-db")
+  (elfeed-db-load)
+  (let ((h (make-hash-table :test (quote eq))))
+    (with-elfeed-db-visit (e f)
+      (dolist (tg (elfeed-entry-tags e)) (puthash tg (1+ (gethash tg h 0)) h)))
+    (maphash (lambda (k v) (princ (format "%6d  %s\n" v k))) h)))'
+```
+
+## L-027 — In an Emacs regexp `^` is an anchor in three places only; everywhere else it is a literal caret
+
+`lisp/init-dialogic.el` needs one regexp that spans a whole org block so the audit can count
+dialogue blocks and the word count can drop them. The obvious spelling is wrong:
+
+```elisp
+;; Matches nothing. Ever.
+(concat "^[ \t]*#\\+begin_dialogue\n\\(\\(?:.\\|\n\\)*?\\)^[ \t]*#\\+end_dialogue")
+```
+
+`^` is special only at the very start of the pattern, or directly after `\(`, `\(?:` or
+`\|`. Written bare in the middle of a pattern it matches a literal `^` character, which no
+org buffer contains. The correct spelling wraps it: `\\(?:^[ \t]*\\)`.
+
+Why it is worth a lesson rather than a shrug:
+
+1. **The failure is silent and reads as data.** `re-search-forward` returned nil, so the
+   audit reported `blocks=0` for a buffer holding two blocks and the prose word count
+   silently included every line of dialogue. Nothing errored. A report of zero is
+   indistinguishable from a correct report of zero — the same shape as L-026's
+   "no matches" vs "nothing could match".
+2. **Bisecting the regexp found it in one command; reasoning about it found nothing.**
+   Five variants down a list, `re-search-forward` in a temp buffer named the exact token
+   that broke it. That is the cheap move whenever a regexp "should" match:
+
+   ```sh
+   emacs -Q --batch --eval '(with-temp-buffer (insert "...") (goto-char (point-min))
+     (message "%S" (re-search-forward "..." nil t)))'
+   ```
+3. **The check that catches it is trivial and belongs in the suite.**
+   `rata-test-dialogic-block-regexp-anchors` asserts the regexp matches a block at all,
+   plus the indented and empty cases. Any multi-line pattern built by `concat` deserves
+   the same one-line assertion, because the only symptom otherwise is a plausible number.
+
+Related: L-025 (a silent filter is a code path), L-026 (a count that cannot distinguish
+"none" from "unreachable").
+
+## L-028 — `eval-when-compile` is `progn` when interpreted, so it is not a place to put a `require`
+
+`AGENTS.md` said, under Import/Require Patterns, "Use `eval-when-compile` for compile-time
+dependencies". Following that literally in a new module shipped FAIL-0012:
+
+```elisp
+(eval-when-compile          ; reads as "only while compiling"
+  (require 'org))           ; actually runs on every startup
+```
+
+In *interpreted* code `eval-when-compile` is equivalent to `progn` (Emacs Lisp manual, "Eval
+During Compile"). No `.elc` is committed for `lisp/` and `rata-load-module` loads source, so
+that form is an unconditional `(require 'org)` during init — early enough to beat elpaca's
+activation and drag in Emacs's built-in Org, after which every org package warns about a
+version mismatch.
+
+What to do instead, which `init-present.el` was already doing:
+
+- `(declare-function foo "the-file")` for functions — silences the compiler, loads nothing.
+- `(eval-when-compile (defvar some-var))` for variables — a bare `defvar` is inert.
+- Only ever `require` a feature there if it is built in *and already loaded* at that point
+  (`cl-lib`, `subr-x`). A package is never that.
+
+Two general points worth more than the specific trap:
+
+1. **A form whose name describes when it runs may be lying about one of its two modes.**
+   The compiled and interpreted paths of this config differ, and only one of them is
+   exercised by `just compile`. Whenever behaviour could depend on which one is live,
+   test the interpreted path — that is the one the operator runs.
+2. **The one-line probe is the whole test.** `(featurep 'org)` after loading a single module
+   in `emacs -Q` names the problem in a second, and is the reason the fix could be verified
+   in both directions rather than assumed:
+
+   ```sh
+   emacs -Q --batch --eval '(progn (add-to-list (quote load-path) (expand-file-name "lisp"))
+     (load (expand-file-name "lisp/init-dialogic.el"))
+     (message "org=%S" (featurep (quote org))))'
+   ```
+
+Related: L-003 (a green step whose scope is not stated will be over-read) — this one survived
+`are-verify full` because `just batch` exits 0 with a warning buffer full of damage, which
+`just batch-strict` now catches.
+
+## L-029 — A consumer with no producer is as silently dead as a key with no binding
+
+`lisp/init-org.el` has carried an org-super-agenda group `(:name "Blog Posts" :tag "blog"
+:order 9)` since the agenda was written. No capture template ever applied a `:blog:`
+filetag, and nothing else in the config did either. The group therefore matched nothing,
+and org-super-agenda renders an empty group by omitting it — so the agenda looked correct.
+The tag existed only on the *consuming* side.
+
+The same asymmetry had a second instance in the same file: the `blog-post` template wrote
+`:export_file_name:` with an **empty value**, and ox-hugo treats a subtree as a post only
+when that property has one. `SPC o b e` on a freshly captured post silently fell through
+to whole-file export instead of failing.
+
+The class, which is FAIL-0009 (`SPC p f` bound in a deferred `:config`) wearing different
+clothes:
+
+> When one side of a contract is written in configuration and the other side is supposed
+> to be written by a *human action later*, nothing checks that the action ever happens,
+> and the failure renders as absence — an empty agenda group, an unexported post, a key
+> that does nothing — which is indistinguishable from "there is nothing to show".
+
+What to do about it:
+
+- **Grep for the producer whenever you write a consumer.** A `:tag`, a filetag, a
+  `:where (= tags:tag ...)` query, a `EXPORT_*` property — each is a name that something
+  else must *apply*, and the query is the cheap half to write and the useless half alone.
+- **Bind the two ends in a test that reads the source**, not the running state, so it
+  holds in batch: `rata-test-blog-tag-matches-agenda-group` parses
+  `org-agenda-custom-commands` out of `init-org.el` and asserts the group's `:tag` equals
+  `rata-blog-tag`; `rata-test-blog-capture-template-tags-and-names` asserts the template
+  actually writes that filetag and a non-empty export name.
+- **Prefer a command that makes the absence visible.** `rata-blog-status` (`SPC o b s`)
+  exists because the discovery here was arithmetic no human was doing: 8 notes carried
+  Hugo export properties, 3 markdown files existed, and nothing in the editor could say
+  so. A count that a person has to compute by hand is a count nobody computes.
+
+**The fix reproduced the bug twice before it was done**, which is the strongest evidence
+that this is a class and not an incident:
+
+1. `rata-blog-files` copied `rata-org-roam-agenda-files`'s `(when (fboundp
+   'org-roam-db-query) ...)` guard. That guard is correct in its original home — that
+   function only ever runs from advice on `org-agenda`, so org-roam is always live — and
+   wrong in a *user-facing entry point*, where org-roam may not be loaded yet. `SPC o b s`
+   then printed "No notes tagged :blog:" while the database held ten. Guarded by
+   `rata-test-blog-files-requires-org-roam`.
+2. `rata-blog-status` reported a post with an empty `:EXPORT_FILE_NAME:` as `never`,
+   beside a plausible target path. ox-hugo skips such a subtree entirely, so `never` —
+   which reads as "run the export again" — named a remedy that cannot work. It now reads
+   `unnamed`. Guarded by `rata-test-blog-unnamed-post-is-not-reported-as-pending`.
+
+The generalisation: **a guard or a status value copied from elsewhere carries its original
+preconditions, not its new ones.** Before reusing either, ask what the caller knows at the
+point of the copy that the new caller does not — and prefer a state that names the actual
+remedy over one that merely sorts the row.
+
+Related: L-011 / FAIL-0009 (the leader-key instance), L-025 (a data file that code filters
+on is code, and its every failure mode is silent).
+
+## L-030 — Legal syntax after `provide` is a blind spot in every gate this repo has
+
+The stray `>>>>>>> <sha>` that `b510337` left in `lisp/init-org.el` (FAIL-0013) survived
+lint, compile, the ERT suite and a clean `are-verify fast`. Two independent properties made
+that possible, and both generalise past conflict markers.
+
+**Garbage that parses is invisible to a reader-based test.** `tests/run-tests.el` walks each
+module with `read`, and treats a parse error as a warning it prints and moves on from. But
+`>>>>>>>` is an ordinary symbol and `4f0efe70…` is another; nothing was malformed, so there
+was nothing to warn about. Any check built on "does it read?" answers a narrower question
+than it appears to: reading succeeds for a large space of text that is not the code anyone
+meant to write.
+
+**`provide` at the top of the tail makes `featurep` a lie.** The marker sat after
+`(provide 'init-org)`, so the feature registered and *then* the load aborted on
+`void-variable`. `rata-load-module` demoted that to a line in `*init-errors*`. A module can
+therefore be present, `featurep`-true and half-executed at the same time — and if the
+aborting form had been higher in the file, everything below it would have vanished exactly
+the way FAIL-0009's dead leader keys did, with the same absence of any signal.
+
+The operational rule: **for a defect that is a property of the bytes on disk rather than of
+behaviour, write a repo-wide `are-audit` check, not a test.** A test has to load the file,
+and loading is what hides this class. `no-conflict-markers` joins `stray-files` and
+`docs-paths` for that reason. Verify it in both directions when you add it — plant the
+defect, watch it fail, remove it, watch it pass (L-009 / FAIL-0008).
+
+Related: L-011 / FAIL-0009 (silently dead configuration below the failure point), FAIL-0003
+(compile exits 0 regardless), FAIL-0007 (the other repo-hygiene audit check).
+
+## L-031 — In agent-shell, the agent's own CLI is never the thing you launch
+
+Adding Pi to `init-llm.el` looks like a one-line config change and is not, because
+`agent-shell` speaks ACP and no coding-agent CLI in this config speaks ACP itself. Each
+agent is reached through a **separate adapter binary** that the agent's own vendor does not
+ship: `claude-code-acp` for Claude Code (**renamed — see L-033**; the current adapter is
+`claude-agent-acp`, from `@agentclientprotocol/claude-agent-acp`), and for Pi the third-party `pi-acp`
+(`bun install -g pi-acp`), which spawns `pi --mode rpc` and bridges it. `pi --help` lists no
+`acp` mode and the pi bundle contains no ACP strings at all; having `pi` on `PATH` therefore
+tells you nothing about whether `SPC a i c p` will start. That is the check to make when a
+new agent is added — is the *adapter* installed, not the agent — and the cheap proof is one
+line of stdio, not a running Emacs:
+
+```sh
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{}}}}' | pi-acp
+```
+
+A `result` with `agentInfo` back means the adapter is wired to the CLI; anything else is a
+missing or mismatched adapter, and no amount of Elisp will fix it. Two related traps found
+while reading the upstream module: `agent-shell-<agent>-environment` **replaces** the child's
+environment rather than extending it unless `agent-shell-make-environment-variables` is given
+`:inherit-env t` (so a naive setting strips `PATH` and the adapter can no longer find the
+agent), and that function is not autoloaded — putting it in a `use-package :custom` form runs
+it before the package loads. Leave the environment nil unless there is a reason not to.
+
+Related: the `install-deps` bullet in `.are/knowledge/INTEGRATIONS.md` §2 does not cover these
+adapters (npm/bun, not pacman), so they are per-machine state no target installs for you.
+
+## L-032 — Grep the package for `(interactive` before writing a command for it
+
+The request was "a keybinding to send the current file to the agent-shell context", which
+reads like a feature and was entirely a *binding* problem. `agent-shell` already implements
+the whole family — `agent-shell-send-file` (visited file, or dired marks, or a project-file
+prompt), `-send-file-to`, `-send-region`, `-send-region-to`, `-send-dwim` — plus the wire
+format: an inserted `@relative/path` mention that becomes an ACP `resource` /
+`resource_link` / `image` block at submit time. Re-implementing that under a `rata-` prefix
+would have duplicated a tested upstream path and drifted from it. The cheap first move on any
+"add a command for package X" task is `grep -nB1 '(interactive' <package>.el`, not a blank
+buffer.
+
+Two traps specific to this package, both of which produce a key that looks bound and does
+nothing:
+
+- **None of the senders carry an `;;;###autoload` cookie.** The symbol does not exist until
+  something else pulls `agent-shell` in, so every bound command must also be listed in the
+  `use-package :commands` form. This is the sibling of L-011/FAIL-0009: there the *key* was
+  unreachable, here the *command* is, and `rata-test-keybindings-all-commandp` catches only
+  the second when the autoload stub is missing. The curated
+  `rata-test--must-be-live-keys` entries added for `SPC a i c f/r/d` pin both ends.
+- **The senders disagree about creating a shell.** `agent-shell-send-file` resolves its
+  target with `:no-create t` and reports "No agent shell buffers available for current
+  project"; `agent-shell-send-dwim` omits the flag and starts one. Bound raw, the file key
+  fails on first use of every session while the dwim key beside it works, which reads as a
+  broken binding rather than a design choice. Hence the one wrapper in the module,
+  `rata-agent-shell-send-file`. Resolve the shell with the autoloaded, documented public
+  `agent-shell-shell-buffer`, not the private `agent-shell--shell-buffer`, and do not sleep
+  after starting: the insert path replays itself on the `prompt-ready` event.
+
+A third thing the one-line stdio probe from L-031 answers for free: the agent decides which
+block it accepts. Pi (pi-acp 0.0.33) returns `embeddedContext: false`, so a file mention
+reaches it as a `resource_link` it has to open itself, never as inlined text — a detail that
+would otherwise be debugged as truncation.
+
+Note the checkout layout while reading: elpaca sources are under `elpaca/sources/`, not
+`elpaca/repos/`, and a grep aimed at the latter reports the package as absent.
+
+Related: L-031 (the adapter, not the CLI, is what you launch), L-011 / FAIL-0009 (dead
+keybindings), FAIL-0012 / L-028 (`declare-function`, never a compile-time `require`).
+
+## L-033 — A dependency installed only by `install-deps` is not installed, and a pinned binary name rots
+
+Three separate things had to be true for `SPC a i c c` to fail on the Ubuntu laptop while
+working on Arch, and each is worth carrying forward on its own (FAIL-0014).
+
+*(Fixed 2026-09-03: `install-deps` now dispatches on `/etc/os-release`, and `just check-deps`
+answers the "what does this host actually have" question in one command. The lesson below is
+kept as written, because the reasoning is what generalises. See D-013, D-014, L-034.)*
+
+**An Arch-only install path means "absent" everywhere else, silently.** `justfile`
+`install-deps` is `pacman` plus `yay`, and `.are/knowledge/INTEGRATIONS.md` says plainly it
+is never run on this host. So its `aur_pkgs=(claude-code-acp ...)` line is not a statement
+that the adapter is present here — it is a statement about a *different machine*. Reading a
+dependency list as an inventory is the mistake. The only claim about this host that means
+anything is `command -v`.
+
+**`npm ls -g` naming a package is not evidence the executable exists.** `claude-code-acp@0.1.1`
+was installed globally and is an unrelated third party's package whose `bin` is `cc-acp`:
+
+```sh
+$ npm view claude-code-acp version bin
+version = '0.1.1'
+bin = { 'cc-acp': 'dist/index.js' }
+```
+
+So `npm ls -g` showed the exact string from the error message while `which` found nothing.
+For an npm/bun dependency, check the *bin name*, not the package name — they are unrelated
+namespaces, and a plausible package name is not a reserved one.
+
+**Pinning a third-party binary name to "make a rename visible" only works if something
+compares the pin to upstream.** `init-llm.el` spelled out
+`(agent-shell-anthropic-claude-acp-command '("claude-code-acp"))` with a comment saying the
+adapter name is the one thing that breaks when upstream renames it. Upstream then renamed it
+to `claude-agent-acp` — and the pin **suppressed the new default rather than surfacing the
+change**. Had the option simply been left at its default, the config would have healed itself.
+A pin that duplicates an upstream default is a fork with no owner: it is only defensible with
+a check beside it, and `rata-test-acp-adapter-commands-match-upstream` is that check —
+`(eval (car (get option 'standard-value)) t)` yields upstream's default even after
+`use-package :custom` has overridden the value, because `custom-declare-variable` records
+`standard-value` regardless of whether the variable was already bound. Verified in isolation:
+
+```sh
+$ emacs -Q --batch --eval '(progn (require (quote cus-edit))
+    (customize-set-variable (quote probe) (quote ("stale")))
+    (eval (quote (defcustom probe (quote ("live")) "d" :type (quote (repeat string)))) t)
+    (princ (format "%S / %S" probe (eval (car (get (quote probe) (quote standard-value))) t))))'
+("stale") / ("live")
+```
+
+The generalisation: **when this config pins a value that a package also defaults, pin it *and*
+assert it still agrees.** Otherwise prefer the default.
+
+The sharpest part of this record is not any of the three, though. The knowledge base already
+had it right: `.are/knowledge/INTEGRATIONS.md` said "not present on this Ubuntu host" and
+"`SPC a i c p` works here and `SPC a i c c` does not". A known-missing dependency had been
+written down as a settled property of the host instead of a defect with a fix, and nothing
+turned it back into a signal. Hence `are-audit`'s `acp-adapters-on-path` — a warn-only
+check that re-derives the fact every session from `command -v` rather than trusting prose,
+in the same spirit as `hooks-installed` (L-010): print real state, do not assert it.
+
+One shape to reuse when adding an agent: an install can fix one agent and break another.
+The new adapter pins `@agentclientprotocol/sdk` at exactly `1.4.0` and `zod@^4`; `pi-acp`
+needs `^0.26.0` and `zod@^3.25`. Check the resolved tree after installing
+(`grep '"version"' ~/node_modules/.../package.json`, and look for nested copies) rather than
+assuming the package manager nested them — bun did here, so both agents still handshake, but
+that was the live risk, not a hypothetical one.
+
+Related: L-031 (the adapter, not the CLI, is what launches; the one-line stdio probe),
+L-032 (the senders and their autoload cookies), L-010 / FAIL-0005 (print real state rather
+than asserting it), L-011 / FAIL-0009 and L-026 / FAIL-0011 (the suite green on a contract
+one level shallower than the defect).
+
+## L-034 — A gate that greps a file's layout is coupled to that layout, and fails open when it changes
+
+Splitting the justfile into `just/*.just` (D-013) was a five-minute mechanical move. The
+part that could actually have broken something was in `scripts/are-audit.sh`, which had two
+checks reading the justfile as *text*:
+
+```sh
+for target in $(grep -oE '^test-[a-z-]+:' justfile | tr -d ':'); do   # gate-covers-tests
+grep -qE "^${target}( [a-z_]+=?.*)?:" justfile                        # docs-commands
+```
+
+After the split, `justfile` contains seven `import` lines and no recipes. The first check
+would iterate an empty list and **pass in silence** — the FAIL-0004 gate ("a test target no
+gate runs is decoration") quietly covering nothing. The second would fail loudly on all 27
+`just <target>` strings the docs name. One fails open, one fails closed; the first is much
+worse, and neither would have been noticed by running the audit and seeing green.
+
+Both now read `just --summary`, which resolves imports, excludes `[private]` recipes, and is
+the same list `just --list` shows the operator. The check is asking just what its targets
+are instead of guessing from a regexp — and that is available for any tool with an
+introspection command (`git config --list`, `cargo metadata`, `emacs --batch --eval`). Prefer
+it over a grep of the file, always, and note that this made the check *shorter*.
+
+Two details worth carrying:
+
+- **Verify a rewritten check by breaking it on purpose.** Commenting out one `import` line
+  and re-running the audit produced exactly the two expected FAILs (`just repomix`,
+  `just install-repomix`). A check rewritten and observed only in the passing state has not
+  been tested — it has been watched not firing, which is what it also does when it is broken.
+- **`just --summary` needs the recipe list to parse.** A justfile that does not parse now
+  fails the audit with the parse error, instead of a check silently finding no targets.
+  Fail loudly on the tool being unusable; that is not the same as the check passing.
+
+The generalisation beyond just: any gate whose input is a file's *shape* rather than a
+tool's *answer* has a silent-pass mode that arrives the day someone reorganises the file —
+and reorganising the file is exactly when nobody is thinking about the gate.
+
+Related: L-008 (the first version of `gate-covers-tests` grepped a recipe body and reported
+two false failures — same root cause, opposite symptom), L-010 (print real state rather than
+asserting it), D-013 (why `import`, not `mod`), FAIL-0004 (the gate this protects).
+
+## L-035 — A `keymap` text property that binds only `RET` is unreachable in a GUI once anything binds `<return>`
+
+**From:** agent-shell's `> ...` fold headers (Agent capabilities, Notices, Available models)
+being impossible to expand under evil, in `lisp/init-llm.el`.
+
+The obvious reading was a keymap-precedence conflict with evil, and it was wrong. A `keymap`
+text property outranks every emulation map — it sits above `emulation-mode-map-alists` in
+the lookup order that `(elisp) Searching Keymaps` documents — so evil-collection cannot
+shadow it, and `RET` on the chrome resolved to the toggle correctly the whole time:
+
+```
+point on the chrome, evil normal state:
+  RET       -> agent-shell-ui-toggle-fragment   ✅
+  <return>  -> shell-maker-submit               ❌
+```
+
+The failure is **key translation**, one layer earlier than precedence. A GUI frame delivers
+`<return>`; Emacs falls back to translating it to `RET` through `local-function-key-map`
+*only when nothing in the active maps binds `<return>`*. evil-collection's `repl-submit` /
+`repl-newline` binding themes bind the key list `("RET" "<return>" "C-m")` on
+`shell-maker-mode-map` and `comint-mode-map`, both ancestors of `agent-shell-mode-map`. So
+`<return>` had a binding, the fallback never ran, and the text property's `RET` entry was
+dead — while remaining perfectly visible to `describe-key` and to `key-binding` if you
+happened to probe the spelling that still worked.
+
+**Apply:**
+
+- When a keyboard binding "does not fire" but resolves correctly under `key-binding`, probe
+  **both spellings** — `RET` *and* `<return>`, `TAB` *and* `<tab>`, `M-RET` and
+  `M-<return>`. A working `RET` with a hijacked `<return>` is the signature, and it means
+  the bug is a lost translation, not a lost precedence fight.
+- Reproduce in the frame type that fails. This bug does not exist in `just cli`: a TTY sends
+  `RET` directly, so a terminal check would have cleared a GUI-only defect.
+- Fixing it belongs on the **narrow** map, not the broad one. Adding `<return>` to
+  `agent-shell-ui-fragment-map` — which covers only the propertized chrome — folds on a
+  header while leaving Enter at the prompt as submit. The same key in
+  `agent-shell-mode-map` would have folded everywhere and cost prompt submission, which is
+  why `rata-test-agent-shell-return-still-submits-off-chrome` asserts the *other* position
+  as well. One test that the key works is half a gate when the binding is meant to be
+  position-sensitive.
+- Third-party maps rendered into buffer text hold the keymap **object**, so extend them with
+  `define-key`, never `setq` — upstream says so in the `agent-shell-ui-fragment-map`
+  docstring, and rebinding by assignment would leave every already-printed header on the old
+  map.
+
+The generalisation: `RET`/`TAB` are ASCII control characters that GUI Emacs reaches only by
+*fallback*. Any binding that relies on that fallback is conditional on no other active map
+having claimed the function-key spelling — which a package three inheritance levels away
+can do at any time, without touching your code, and without any error.
+
+Related: L-011 / FAIL-0009 (a binding that exists but is unreachable — same class of
+invisible failure, different mechanism), L-017 (evil shadowing keymaps in `special-mode`
+children, which *is* a genuine precedence problem and the trap this one imitates), L-034
+(verify a check by breaking it on purpose — done here, and it is what proved the new test
+was a gate rather than decoration).
+
+## L-036 — Macro expansion is compile-time, so a build artifact is only valid for the interpreter that built it
+
+**From:** upgrading the host from Emacs 30.2 to 31.1 (FAIL-0015). Marginalia started
+signalling `void-function compat--seconds-to-string` on every `find-file`, for a symbol
+belonging to a library that was demonstrably loaded — `featurep 'compat-31` was `t`.
+
+Nothing was wrong with any package, and nothing was wrong with any source file. The
+`.elc` files were wrong, and they had been wrong since the moment the interpreter under
+them changed.
+
+`compat-call` is the sharpest instance of the general rule (`compat.el:88`):
+
+```elisp
+`(,(if (fboundp compat) compat fun) ,@args)
+```
+
+That `if` runs during *byte compilation*. Compile marginalia under Emacs 30 and the call
+site becomes `compat--seconds-to-string` forever; run it under Emacs 31, where compat
+deliberately stops defining that shim, and it is a void function. Same source, same
+package version, different answer — decided by whichever Emacs happened to expand the
+macro.
+
+Three things generalise:
+
+- **An interpreter upgrade is a cache-invalidation event, and nothing announces it.** Every
+  gate stayed green: all 36 modules loaded, `rata--failed-modules` was `nil`,
+  `are-verify fast` passed, `batch-strict` passed. They test the source tree; the defect
+  was in generated output that no check had ever looked at. `just compile` cannot see it
+  by construction — it loads no packages (FAIL-0003).
+- **Regenerating an artifact does not clean it.** Native compilation rebuilt
+  `marginalia.eln` *under Emacs 31* and it was still wrong, because the async compile
+  subprocess loads its dependencies as `.elc` and read the stale Emacs-30 `compat-31.elc`.
+  A fresh artifact built against stale inputs is a stale artifact. Order the deletion
+  before the rebuild, always.
+- **Content-addressed caches survive deletions you meant to be total.** Elns are keyed by
+  source hash, so removing every `.elc` and rebuilding would have re-used
+  `marginalia-2cf404e5-f6f184f8.eln` verbatim — the source never changed, so the key never
+  changed. The cache has to be wiped by *version directory*, not reasoned about per file.
+
+The diagnostic habit worth keeping: when a symbol is void but its library is loaded,
+stop reading the library and read the *artifacts*. Every `.elc` says who built it in plain
+text on line 3 (`;;; in Emacs version 30.2`), which needs no Emacs to check and is what
+`are-audit`'s `build-artifact-emacs-version` now reads. The same question applies to any
+ahead-of-time compiled ecosystem where macros, `defsubst` inlining or conditional
+compilation can bake a decision into output — the artifact is a function of the toolchain,
+not only of the source.
+
+Related: FAIL-0015 (the record, and why `just clean` was the wrong remedy — no lockfile
+exists, so it would have converted a compile problem into an unbounded dependency update),
+FAIL-0003 (`just compile` proves syntax only), FAIL-0012 (the other green-exit-code
+startup failure, and why `batch-strict` reads output as well as status), L-034 (verify a
+new check in every branch, which is how the three states of this one were confirmed).
+
+## L-037 — A snippet's key is a namespace, and a collision inside it fails silently
+
+Adding `snippets/org-mode/example` (`<e`, mirroring the `<s?` src-block family) is a
+one-file change with no failure mode worth a record — except for the one it shares with
+every other snippet: `yas-expand` maps a key to exactly one template, so two files
+declaring the same `# key:` leave the loser reachable only through `SPC i s`. Nothing
+signals, nothing warns, and byte-compilation cannot see a directory of non-Elisp files at
+all. It is FAIL-0002's shape (yasnippet degrading by warning or by silence rather than by
+erroring) one directory over.
+
+The header itself is the same kind of trap: omit the `# --` separator and yasnippet reads
+the whole header as body, so the snippet inserts its own metadata and still "works".
+
+`are-audit`'s `snippet-headers` check now reads the whole `snippets/` tree — duplicate
+keys per mode directory, missing `# --`, missing `# name:`. It needs no Emacs, so it runs
+in the `fast` lane and therefore on every commit through `.githooks/pre-commit`. Verified
+in both branches per L-034: clean tree passes, a probe file with a duplicate `<e` and no
+separator produces all three failures.
+
+The general point: whenever a config directory's filenames are *not* the identifier —
+snippets keyed by `# key:`, capture templates keyed by a letter, keybindings keyed by a
+prefix — uniqueness is an invariant the filesystem does not enforce for you, and the
+collision presents as absence rather than as an error.
+
+Two more failure modes surfaced the moment snippets were treated as code rather than as
+text files, and both are now checked:
+
+- **A template can evaluate elisp, so it can reference a symbol that no longer exists.**
+  `snippets/org-mode/dialogue` reads `rata-dialogic-characters` and
+  `rata-dialogic-self-name`; a first draft called `rata-dialogic-speakers` when the
+  function is `rata-dialogic--speakers`, and nothing in the repo could see it — the
+  snippet would have errored *halfway through expanding*, leaving a half-written
+  `#+begin_dialogue` in the buffer. `are-audit`'s `snippet-symbol-refs` now greps the
+  evaluated segments (backtick forms, `$$(...)` fields) for `rata-` names absent from
+  `lisp/`. Scoping matters: a first cut scanned whole files and flagged both a
+  `${1:rata-command}` *placeholder* and a snippet that legitimately inserts a
+  `rata-leader` form as text. What a snippet *evaluates* and what it *types out* are
+  different things.
+- **`yas-indent-line` defaults to `'auto`, which re-indents the template with the major
+  mode's indenter — and in Python that rewrites the code.** Expanding
+  `python-mode/async-context-manager` today dedents `return self` out of `__aenter__` and
+  `__aexit__` out of the class entirely; the snippet has been broken in place, silently,
+  for as long as it has existed. A whitespace-sensitive template must pin its own
+  indentation with `# expand-env: ((yas-indent-line 'fixed))`, which is what the new
+  `main-guard` does.
+
+`rata-test-snippets-expand` in `tests/run-tests.el` now expands every snippet and fails on
+any that signals — the class a grep cannot reach (unbalanced parens in embedded elisp, a
+malformed field, an erroring `$(...)` transformation). It runs in `fundamental-mode` with
+indentation off on purpose: per-mode indentation is a separate concern, and expanding the
+`*-ts-mode` directories in their real modes would drag treesit grammar installation into a
+batch run.
+
+The generalisation worth keeping: a directory of templates is *code with no compiler*.
+Nothing type-checks it, nothing loads it at startup, and its failures present as a
+half-finished insertion rather than as an error — so every invariant it has must be
+asserted from outside, by a check that reads the templates as text and a test that runs
+them.
+
+Related: FAIL-0002 (`yas-snippet-dirs` warning on every startup, unseen for the same
+reason), L-034 (verify a new check in every branch — done here in both directions for both
+new checks), FAIL-0012 (the other "green exit code, broken anyway" shape).
+
+## L-038 — A client written against one deployment's pagination silently truncates on the other
+
+`jira-issues` showed a subset of the operator's assigned Jira tasks and gave no hint that it
+was doing so. Nothing in this repository was wrong, and nothing in `jira.el` was wrong on the
+deployment it was written for.
+
+`jira.el` paginates with `nextPageToken`: it reads that key from the response
+(`jira-issues.el:179`) and sends it back as a request parameter (`jira-issues.el:107`). That is
+the Jira **Cloud** `search/jql` contract. `jira-api-search` (`jira-api.el:238`) tries
+`search/jql` first and, on a 404, falls back to the legacy `search` endpoint — which is what a
+Server/DC instance returns, because `search/jql` is Cloud-only. This checkout is Server/DC:
+`local.el` sets `rata-jira-api-version` to 2.
+
+The legacy endpoint paginates with `startAt` and reports `total`. `jira.el` contains neither
+string. So on Server/DC, `jira-issues--pagination-next` is permanently nil, `M-n` answers "No
+more pages.", the row count is never compared against `total`, and the list is the first
+`jira-issues-max-results` (30) rows of a query carrying no `ORDER BY` — an arbitrary 30. The
+client-side sort then reorders exactly those rows into something that looks deliberate.
+
+Three properties made this invisible for as long as it was:
+
+1. **The failure is a silent subset, not an error.** Every request succeeded. A truncated
+   list and a complete one render identically, because the one number that distinguishes them
+   (`total`) is discarded.
+2. **The fallback that made it work at all is the same fallback that broke it.** Degrading
+   from `search/jql` to `search` fixed connectivity and silently changed the pagination
+   contract. A compatibility shim that covers the request but not the response is worse than
+   no shim, because the failure moves from "cannot connect" to "connected, wrong answer".
+3. **The sort made truncation look like a decision.** Reordering an arbitrary subset produces
+   something with the shape of a curated list.
+
+Generalisation: **when a client supports two deployments of one service, the deployment
+difference is not confined to the endpoint path.** Pagination, ordering guarantees, and
+totals all differ, and only the endpoint path is visible at the call site. Whenever a
+`:custom` here pins a client to the non-default deployment — `rata-jira-api-version` 2 is
+this repository's only such pin today — assume the client was written and tested against the
+default one, and check the response-shaping code, not just the URL.
+
+Second-order: the mitigation is a *page size*, which is a workaround with an expiry date.
+`rata-test-jira-issues-single-page-assumption-still-holds` greps the installed `jira-issues.el`
+for `startAt` and fails when upstream gains real paging, so the workaround announces its own
+obsolescence instead of outliving it. That test resolves the source with `find-library-name`,
+not `locate-library`: `locate-library` can return a `.elc`, whose byte-compiled body would not
+contain the string either and would pass vacuously. It also does not `skip-unless` the file is
+findable — a permanently skipped test reads as coverage and is not, the same trap called out in
+`rata-test-jira-base-url-has-no-trailing-slash`. Both variants of that mistake were made and
+caught in the same session, by reading the ERT output for `skipped` rather than trusting the
+suite's PASS.
+
+Related: L-018 (the other jira.el trap, also a silent auth-shaped failure from a value this
+repo controls), FAIL-0012 and L-034 (green exit code, broken anyway), FAIL-0002 (an invariant
+nothing loaded at startup could see).
+
+## L-039 — A `:config` block is only as live as the feature it names, and a multi-file package's umbrella feature is often unreachable
+
+`use-package`'s `:config` compiles to `(with-eval-after-load '<name> ...)`. The name is
+whatever was written after `use-package`, and for a package of more than one file that is
+frequently *not* the feature anything actually loads. `init-jira.el` put the
+`evil-set-initial-state` calls for the three Jira buffers there, and the body never ran once:
+the operator pressed `l` in `*Jira Issues*` and the cursor moved right, because the buffer was
+in evil normal state where `l` is `evil-forward-char`. See
+[`FAIL-0016`](failures/FAIL-0016.md).
+
+The chain is worth knowing in full, because every link looks correct in isolation:
+
+1. `;;;###autoload` cookies live on the *commands*, in `jira-issues.el` and `jira-tempo.el`.
+   Elpaca loads `jira-autoloads.el` at activation, so `jira-issues` is already fbound at
+   startup, pointing at `jira-issues.el`.
+2. `use-package`'s `:commands` stub is guarded with `(unless (fboundp ...))`, so the stub that
+   *would* have loaded `jira` is never installed. This is correct behaviour — it exists to
+   avoid clobbering a real definition — and it silently changes which file the key loads.
+3. `jira.el` is an umbrella: it `require`s its siblings and none of them requires it back.
+   Nothing else in the config requires it either. `(featurep 'jira)` is therefore nil forever,
+   and every `with-eval-after-load 'jira` form in the world is dead code.
+
+Generalisation, and the check to run when writing a module: **ask which file the autoload
+actually names, not which package the docs are titled after.** `(symbol-function 'the-command)`
+after a full init answers it in one line — an `(autoload "jira-issues" ...)` cell where
+`use-package jira` was written is the tell. When they differ, either key `:config` on the file
+that really loads (`(with-eval-after-load 'jira-issues ...)`), or — better when the form does
+not need the package at all — hoist it to top level.
+
+That last point is the deciding one here and is more general than the load-order trap:
+`evil-set-initial-state` merely pushes a mode symbol onto `evil-emacs-state-modes`, which is
+read when the major mode activates. Nothing about it needs the package loaded, so gating it on
+the package could only ever delay it or lose it. The same is true of
+`add-to-list 'auto-mode-alist`, `shackle-rules` and leader keys (L-011): *configuration that
+is consulted by someone else later belongs at top level; only configuration that touches the
+package's own runtime state belongs in `:config`.*
+
+Note also which half of the form kept working, because it is why the module looked healthy:
+`:custom` is not load-gated. It compiles to `custom-theme-set-variables` under the
+`use-package` theme, which records a value for a variable whose `defcustom` has not loaded yet
+and applies it when it does — `jira-issues-max-results` was correctly 100. A module where the
+options are right and the behaviour is wrong is a strong hint that the split runs along the
+`:custom` / `:config` line.
+
+Second-order, on verification: the FAIL-0009 sweep added an *exhaustive* test over
+`rata-leader` forms, and it passed here — `SPC J j` was live, since the leader keys in this
+module were already hoisted. The dead form was not a key, so an exhaustive test over keys could
+not see it. **A test made exhaustive over one syntactic shape is not exhaustive over the
+failure mode**; the failure mode was "a `:config` body that never runs", and the keys were only
+its most visible symptom. The new test asserts the observable end state instead — a buffer in
+`jira-issues-mode` reports `evil-state` `emacs` and `(key-binding "l")` is `jira-issues-menu`.
+
+Related: L-011 and [`FAIL-0009`](failures/FAIL-0009.md) (the same root cause for leader keys),
+L-017 (why these buffers need emacs state at all), L-038 (the other jira.el defect the operator
+found by using the feature).
+
+## L-040 — A transient prefix's default value is configuration, and it applies to a menu nobody opens
+
+A package built on `transient` looks like it has no configuration surface for its query: the
+arguments are letters in a popup, and the popup is a UI. It is not. `transient-args` on a
+prefix that was never invoked does not return nil — `transient-prefix-value` initialises the
+prefix from its **set, saved or default** value and reads the suffix values back out of that
+(`transient.el:4287-4325`). So a command that renders a list without showing its own menu is
+still running the menu's default arguments, and *those* are the configuration.
+
+This is how the Jira issue list gained a "hide finished work" default (D-016) with no fork:
+`jira-issues` calls `tablist-revert`, `jira-issues--refresh` reads
+`(transient-args 'jira-issues-menu)`, and the default value function supplies `--myself`.
+Adding `--jql=status not in (…)` to that same list makes it arrive as though the operator had
+typed it, and jira.el's own combining logic then ANDs it with everything else.
+
+Three things generalise:
+
+1. **Prefer `:filter-return` advice on the default-value function to replacing it.** The
+   default is upstream's statement about how the feature should behave out of the box.
+   Composing keeps that statement; overriding copies today's version of it into your config,
+   where it will not be updated.
+2. **The precedence is set > saved > default, so the escape hatch already exists.** `C-x s`
+   and `C-x C-s` in the menu store a value that wins over anything a config supplies, and
+   `C-x C-k` comes back to it. A default injected this way is a default, not a lock — which
+   is the right shape for an opinion about someone's own issue list.
+3. **Advice on a private function is a rename away from doing nothing, silently.**
+   `advice-add` on an unbound symbol succeeds. Test the *end state* — call
+   `transient-args` on the real prefix and assert `transient-arg-value` for the argument you
+   injected — not `advice-member-p` alone. Bind `transient-values` to nil in that test, or a
+   value the operator persisted on this machine decides the result instead of the code
+   (the same class of trap as any test that reads real user state).
+
+Related: L-038 and D-016 (the Jira list this was used on), L-039 (the other "this
+configuration never ran" defect in the same module — there the code was dead, here the
+question was whether it would be reached at all).
+
+## L-041 — A bare `(defvar foreign-var)` stub at top level fails the `rata-` prefix lint; stubs live under `eval-when-compile`
+
+**2026-09-09**, while adding the sprint commands to `init-jira.el` (D-017). Two compile-time
+stubs for hooks owned by jira.el — `(defvar jira-issues-changed-hook)` — were written at top
+level, the way the byte-compiler documentation suggests. `scripts/lint.sh` matched them with
+`^\(def(un|var|custom|macro) ` and failed the `full` run as "definition missing rata- prefix",
+after the ERT suite had already passed. The lint cannot tell a one-argument declaration from a
+definition, and it should not have to: the convention here is that foreign stubs are indented
+inside `(eval-when-compile …)` (`init-present.el:8`), which the anchored regex skips on
+purpose. `declare-function` is unaffected, since it is not a `def` form.
+
+Two things follow. Write `(eval-when-compile (defvar x))` for a foreign variable, never a bare
+top-level `defvar` — and never a `require` in there (L-028). And run `just are-verify fast`
+before the long suites when a module gained new top-level forms: lint is half a second and
+would have caught this before the three-minute `full`.
+
+## L-042 — A request parameter built by `%s` over a structured value fails silently; the symptom is an empty column, not an error
+
+**2026-09-10**, while adding a Sprint column to the Jira list (D-018). jira.el describes
+every column by a path such as `(fields (custom "Sprint"))` and builds the search's `fields`
+parameter as `(format "%s" (cadr path))` for each — correct for `(fields summary)`, but for a
+custom field that yields the literal string `(custom Sprint)`. Jira ignores field names it
+does not know rather than rejecting the request, so upstream's `:sprints`, `:line` and
+`:cost-center` columns have been blank for everyone who ever enabled them, with nothing in
+`*Messages*` and a 200 on the wire. The detail view shows the same field fine because it
+fetches the whole issue.
+
+The general shape: **a serialiser applied uniformly to heterogeneous values produces a
+well-formed request that means something else,** and a lenient server turns that into an
+absence rather than a failure. Two habits follow. When a column or field comes back empty,
+read the outgoing request (`jira-debug` prints the params) before suspecting the data. And
+when adding a value of a new shape to such a list, test the *serialised* form —
+`rata-test-jira-custom-field-parent-resolves-to-its-id` asserts the string that reaches the
+`fields` parameter, not the Lisp that produced it. Related: L-038 (another jira.el defect
+where the symptom was truncation rather than an error).
+
+**Addendum, the same day (FAIL-0017).** The fix above was itself delivered broken, for a
+second silent-shape reason one layer down: Jira Server's `field` endpoint has `id` but no
+`key`, jira.el keeps `(NAME . key)`, and the fixture had been written from Cloud
+documentation. So the operative rule is narrower than "test the serialised form": **when a
+feature depends on the shape of an integration's response, take one read-only sample from
+the real instance before delivering, and write the fixture from that.** It cost one batch
+Emacs and one GET here, the credentials were already usable (the suite decrypts
+`~/.authinfo.gpg` on every run), and it would have turned a "does not work" report into a
+line in the first delivery. Nothing in `tests/` should contact the network — but the
+session that writes the fixture should.
+
+## L-043 — A timestamp written with `%a` follows `LANG`; org stamps need `system-time-locale` bound to "C"
+
+**2026-09-11**, `lisp/init-jira.el`, `rata-jira-org-entry`. The first cut of the imported
+entry's `:CREATED:` stamp was `(format-time-string "[%Y-%m-%d %a %H:%M]")`. On this
+machine that gives `[2026-09-11 fre 11:30]` — a Swedish day name in a file whose every
+other stamp says `Sat`, `Fri`. Org parses either (`org-ts-regexp` accepts any word), so
+nothing breaks; the file just stops being consistent, and a later `grep Fri` misses the
+imported entries. The test caught it only because the fixture asserted the exact stamp,
+and the first version of that assertion was itself wrong twice: `(encode-time '(… t))`
+with `t` as the zone means UTC, so 09:30 came out 11:30 local, and `[A-Za-z]+` would have
+let the Swedish name through. Rules: bind `system-time-locale` to `"C"` around any
+`format-time-string` that lands in an org file (org does the same for its own stamps);
+build test times with zone `nil` (local) unless the code under test is UTC by design; and
+assert the day *name*, not a letter class, so the locale cannot leak silently. Related:
+L-027 (regexp traps), D-019.
