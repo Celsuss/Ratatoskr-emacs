@@ -32,7 +32,9 @@ install-deps-arch:
     # The ACP adapters are NOT here: they are npm/bun packages, and the AUR entry
     # that used to stand in for the Claude one named an abandoned third party's
     # package whose bin was not even the expected name (FAIL-0014). `_deps-acp'
-    # installs both, the same way on every distro.
+    # installs both, the same way on every distro. The AUR `claude-agent-acp'
+    # (current name, real upstream) is fine to install by hand; `_deps-acp'
+    # skips a binary that is already on PATH.
     # mu is not in the official repos (archlinux.org has no `mu' package; the
     # last binary was dropped from [extra]). The AUR `mu' is current (1.14.3,
     # the version D-021 pins on the Ubuntu host) and installs the matching mu4e

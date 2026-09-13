@@ -15,8 +15,8 @@ credentials and a homelab.
 | Service | Endpoint | Used by | Auth | Notes |
 |---|---|---|---|---|
 | Anthropic API, via the `claude` CLI | CLI-managed | `init-claude-loop.el` | the CLI's own login | metered spend; see [CLAUDE_LOOP.md](CLAUDE_LOOP.md) |
-| Claude Code over ACP | `claude-agent-acp` binary | `init-llm.el` (`agent-shell`) | web login (`authMethods: []` in the handshake, so no key in this repo) | `@agentclientprotocol/claude-agent-acp` 0.73.0, `bun install -g`; installed on this host 2026-09-03 as `~/.bun/bin/claude-agent-acp`. Renamed from `claude-code-acp` (`@zed-industries`, dead since 2026-03) — FAIL-0014. `install-deps` no longer names the old one: the AUR entry is gone and both adapters come from the shared `_deps-acp` recipe (`just/deps.just`) on every distro |
-| Pi coding agent over ACP | `pi-acp` binary, which spawns `pi --mode rpc` | `init-llm.el` (`agent-shell`) | pi's own provider config (`pi auth check --provider <p>`); no key in this repo | `pi-acp` is a *separate* npm package from `pi` (`bun install -g pi-acp`, needs pi >= 0.80.4). Installed on this host: `~/.bun/bin/{pi,pi-acp}`. Both agents work here as of 2026-09-03; before that only Pi did (FAIL-0014). `pi-acp` keeps nested `@agentclientprotocol/sdk@0.26.0` and `zod@3.25.76` because the Claude adapter hoisted 1.4.0 and zod 4 to the top of `~/node_modules` — check that nesting survives any reinstall of either |
+| Claude Code over ACP | `claude-agent-acp` binary | `init-llm.el` (`agent-shell`) | web login (`authMethods: []` in the handshake, so no key in this repo) | `@agentclientprotocol/claude-agent-acp`. **Per host:** Ubuntu laptop — 0.73.0 via `bun install -g`, `~/.bun/bin/claude-agent-acp` (2026-09-03); Arch desktop — AUR `claude-agent-acp` 0.76.0-1, `/usr/bin/claude-agent-acp` (2026-09-13, after the abandoned AUR `claude-code-acp` 0.16.2 was removed — the fix had only reached the Ubuntu host, FAIL-0014 recurrence). Renamed from `claude-code-acp` (`@zed-industries`, dead since 2026-03) — FAIL-0014. `install-deps` no longer names the old one: the AUR entry is gone and both adapters come from the shared `_deps-acp` recipe (`just/deps.just`) on every distro |
+| Pi coding agent over ACP | `pi-acp` binary, which spawns `pi --mode rpc` | `init-llm.el` (`agent-shell`) | pi's own provider config (`pi auth check --provider <p>`); no key in this repo | `pi-acp` is a *separate* npm package from `pi` (`bun install -g pi-acp`, needs pi >= 0.80.4). **Per host:** Ubuntu laptop — `~/.bun/bin/{pi,pi-acp}`, both agents work there as of 2026-09-03; Arch desktop — neither `pi` nor `pi-acp` installed (`SPC a i c p` is expected dead there). `pi-acp` keeps nested `@agentclientprotocol/sdk@0.26.0` and `zod@3.25.76` because the Claude adapter hoisted 1.4.0 and zod 4 to the top of `~/node_modules` — check that nesting survives any reinstall of either |
 | Ollama (local models) | `localhost:11434` | `init-llm.el` (`gptel`, `ellama`, `aidermacs`) | none | local only; models `deepseek-coder`, `mistral`, `nomic-embed-text` |
 | Khoj (self-hosted) | `http://khoj.homelab.local` | `init-khoj.el` | none configured | **indexes `~/workspace/second-brain/org-roam/`** — sends the operator's notes to the homelab host |
 | Snowflake | `<rata-sql-snowflake-account>.snowflakecomputing.com` over JDBC, set in `local.el` | `init-sql.el` | SSO, `authenticator=externalbrowser` | corporate. nil in the tracked sources since D-012, so `SPC a d s` refuses to build a URI until `local.el` exists; see [SECRETS_AND_SENSITIVE_DATA.md](SECRETS_AND_SENSITIVE_DATA.md) |
@@ -120,9 +120,10 @@ FAIL-0014 in one command:
 - **Agents:** `claude` (claude-loop), `claude-agent-acp` and `pi-acp` (agent-shell). Both
   ACP adapters belong to npm/bun, not pacman, and both are installed globally with bun on
   this host so they land next to `pi` on `PATH` rather than under an nvm-versioned npm
-  prefix. Both are now installed by `install-deps` on every distro through the shared
-  private `_deps-acp` recipe in `just/deps.just` — never as a distro package, and **only
-  when the binary is missing**, because the two adapters disagree about
+  prefix. Both are installed by `install-deps` on every distro through the shared
+  private `_deps-acp` recipe in `just/deps.just`, and **only when the binary is missing**
+  — so on Arch the AUR `claude-agent-acp` (the real upstream package, pacman-tracked,
+  own `node_modules`) is a fine alternative the recipe leaves alone — because the two adapters disagree about
   `@agentclientprotocol/sdk` and zod versions and a working pair depends on how npm/bun
   nested them (§1). The abandoned `claude-code-acp` AUR entry is gone (FAIL-0014 closed).
 

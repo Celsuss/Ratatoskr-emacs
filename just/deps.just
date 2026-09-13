@@ -47,9 +47,11 @@ install-deps:
     exit 1
 
 # The two ACP adapters agent-shell launches. Deliberately shared by both OS
-# recipes and deliberately NOT a distro package: they belong to npm/bun, and the
-# AUR entry that used to stand in for one of them named an abandoned third-party
-# package (FAIL-0014). bun first, so they land next to `pi' on PATH rather than
+# recipes and not pulled from a distro package here: they belong to npm/bun, and
+# the AUR entry that used to stand in for one of them named an abandoned
+# third-party package (FAIL-0014). The AUR *does* carry the current name
+# (`claude-agent-acp'), and on Arch that is a good way to install it; this
+# recipe only acts on a missing binary, so it leaves such an install alone. bun first, so they land next to `pi' on PATH rather than
 # under an nvm-versioned npm prefix — which is how they are installed on the
 # Ubuntu host today.
 [private]
