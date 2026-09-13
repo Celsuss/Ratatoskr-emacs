@@ -46,6 +46,16 @@
 ;; the session; set, it never asks.  Not a secret, but it names a team.
 ;; (setq rata-jira-board-id 123)
 
+;; --- Email (lisp/init-mail.el) ---
+;; The Proton address mu4e reads and smtpmail sends as.  Personal identity, so it
+;; stays off the public remote; every `SPC a e' command refuses until it is set.
+;; The Bridge password is NOT here -- two lines in ~/.authinfo.gpg, one per port:
+;;     machine 127.0.0.1 port 1143 login you@proton.me password <bridge-password>
+;;     machine 127.0.0.1 port 1025 login you@proton.me password <bridge-password>
+;; and ~/.mbsyncrc is `cp mbsyncrc.example ~/.mbsyncrc' with the same address.
+;; `SPC a e d' (rata-mail-doctor) lists whatever is still missing.
+;; (setq rata-mail-address "you@proton.me")
+
 ;; --- Snowflake (lisp/init-sql.el) ---
 ;; No password: `authenticator=externalbrowser' does SSO in the browser.  These
 ;; mirror ~/.dbt/profiles.yml.  All six are needed before `SPC a d s' can

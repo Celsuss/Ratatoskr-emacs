@@ -565,3 +565,48 @@ tests use a temp buffer in the shape of `work_tasks.org` instead.
 
 Related: D-019 (the import that appends after the DONE block), L-043 (org's own `CLOSED`
 stamp carries the locale day name, as the existing files already do).
+
+## D-021 — Email is mu4e over Proton Mail Bridge, with mbsync in and smtpmail out; mu4e comes from beside the `mu` binary
+
+**2026-09-11.** Operator asked for "something similar to NeoMutt" inside Emacs for a Proton
+Mail account, approved this design from a written comparison, and confirmed a paid plan.
+
+Chosen:
+
+1. *Proton Mail Bridge, not hydroxide.* Proton is end-to-end encrypted, so a local
+   decrypting proxy is the only way to IMAP. Bridge is official, current (3.26.0) and
+   needs a paid plan, which the operator has. hydroxide is free-plan-capable but casually
+   maintained with IMAP marked work-in-progress, and rides Proton's private API.
+2. *mu4e, not notmuch or Gnus.* Folder-based like NeoMutt, so Proton's Folders map onto
+   Maildir directories one to one; `mu4e-org` gives `org-store-link` on a message for the
+   org-roam workflow. notmuch's tag model fights Proton's folders and does not sync tags
+   back without a second tool. Gnus over `nnimap` needs no sync tooling but is slow with
+   many folders and the worst to configure of the three.
+3. *mbsync (isync) to fetch, `smtpmail` to send.* One external tool instead of two:
+   msmtp was rejected because the built-in `smtpmail` already reads the Bridge password
+   from `~/.authinfo.gpg`, and mbsync reads the *same line* through a `PassCmd`, so the
+   secret lives in one place. Bridge's self-signed cert goes into `gnutls-trustfiles` so
+   the NSM prompt never fires.
+4. *mu4e is loaded from beside the `mu` binary, never from elpaca.* The elisp and the
+   binary speak a private protocol and must match. `rata-mail-mu4e-dir-candidates` is a
+   pure function over the binary's path covering Homebrew's `site-lisp/mu/mu4e` and the
+   distros' `site-lisp/mu4e`; when nothing is found the leader keys still exist and say
+   so, instead of being dead or bound to an undefined symbol.
+5. *Homebrew on Ubuntu, pacman on Arch.* apt's `maildir-utils` is 1.6 on jammy, which
+   predates the `mu4e-search` API, and its isync 1.4 lacks the `TLSType` keyword. The
+   Debian recipe installs via brew when brew is present and otherwise lists both in the
+   manual section; Bridge is always manual (a Flatpak is a trust decision, like a snap).
+6. *Per-machine pieces stay out of the repo, but each has a checklist entry.* Address in
+   `local.el`, password in `~/.authinfo.gpg`, `~/.mbsyncrc` from the committed
+   `mbsyncrc.example`, the mu index from `mu init`. `rata-mail-doctor` (`SPC a e d`)
+   reports each as present or missing with the command that supplies it.
+
+Rejected: `mu4e-maildir` and friends in the module (obsolete since mu 1.8; the maildir
+is `mu init`'s); an org capture template for mail (the existing templates take `%a`, and
+touching `init-org.el`'s roam templates was outside the ask); org-msg HTML composing
+(additive later); Bridge's port checked from the update timer (a `user-error` there is
+noise every five minutes; it is checked in `rata-mail-update` only).
+
+Related: D-012 (what belongs in `local.el`), L-011 / FAIL-0009 (why the keys are at top
+level and bind wrappers), FAIL-0014 (a dependency installed under a name nothing calls).
+

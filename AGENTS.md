@@ -53,7 +53,7 @@ suites. Entry point: **`.are/INDEX.md`**. Operating manual: **`.are/SYSTEM.md`**
 ### Before anything destructive
 
 `.are/rules/SAFETY_RULES.md` lists what is never done autonomously here: `just clean` /
-`reset` / `update`, git commits and history, `~/.authinfo.gpg`, anything under
+`reset` / `update` / `rebuild-packages`, git commits and history, `~/.authinfo.gpg`, anything under
 `~/workspace/second-brain/`, `terraform apply`, mutating `kubectl`, and widening the
 claude-loop's permissions. `lisp/init-claude-loop.el` is the only CRITICAL area — it runs a
 headless agent with `--permission-mode acceptEdits` and an operator-supplied shell command.
@@ -113,6 +113,11 @@ just lint
 
 # Byte-compile all files
 just compile
+
+# Rebuild every package's .elc/.eln with the Emacs installed now — the fix after an
+# Emacs upgrade (FAIL-0015). Deletes only derived artifacts; sources, custom.el and
+# var/ are untouched. Operator-run, like clean; stop a daemon on that checkout first.
+just rebuild-packages
 
 # Clean all generated artifacts (elpaca, eln-cache, etc.)
 just clean
@@ -210,7 +215,7 @@ init-dev → init-lang → init-rust → init-go → init-python → init-cpp �
 init-cmake → init-terraform → init-just → init-docker → init-markdown →
 init-yaml → init-ansible → init-jupyter → init-helm → init-pkgbuild →
 init-casual → init-sql → init-k8s → init-gamedev → init-snippets →
-init-llm → init-claude-loop → init-khoj → init-irc → init-elfeed → init-jira →
+init-llm → init-claude-loop → init-khoj → init-irc → init-elfeed → init-mail → init-jira →
 init-persp → init-org → init-blog → init-dialogic →
 init-present → init-dashboard
 ```
@@ -272,6 +277,30 @@ init-present → init-dashboard
     retries being told to fix a break it inherited. The baseline's output is deliberately
     discarded rather than kept as retry feedback.
   - Tests: pure functions in `tests/run-tests.el`; the state machine in `tests/claude-loop-e2e.el` via `just test-claude-loop`, against a stub CLI with no API calls.
+- `init-mail.el` — email under `SPC a e`: mu4e reading a Maildir that `mbsync` fills from
+  Proton Mail Bridge, `smtpmail` sending through Bridge's SMTP port (D-021). Three things
+  are structural. **mu4e is not an elpaca package**: its elisp is version-locked to the `mu`
+  binary, so `rata-mail-mu4e-dir` finds it beside the binary (Homebrew's Cellar here,
+  `/usr/share/emacs/site-lisp/mu4e` on Arch) and the `use-package` block is skipped when it
+  is absent — the leader keys bind `rata-mail*` wrappers, never mu4e symbols, so they are
+  live and honest on a host without mu. **Everything per-machine is a checklist entry, not
+  a default**: `rata-mail-address` is nil in git and set in `local.el`; the Bridge
+  password is two `~/.authinfo.gpg` lines (ports 1143 and 1025) that `smtpmail` reads via
+  auth-source and mbsync reads through its `PassCmd`, one secret in one place;
+  `~/.mbsyncrc` is `cp mbsyncrc.example ~/.mbsyncrc`, and
+  `rata-test-mail-mbsyncrc-example-matches-module` keeps the template's channel, host,
+  port and the two Proton exclusions in step with the module. `SPC a e d`
+  (`rata-mail-doctor`) reports each piece as present or missing, and every command it prints is
+  derived from the host (`rata-mail-bridge-command`): on Arch `protonmail-bridge` on PATH is a Qt
+  launcher that hangs on `--cli`, so the Go binary under `/usr/lib/protonmail/bridge/` is named
+  instead; Bridge 3.x writes no `cert.pem` until `cert export` (FAIL-0018). **Proton's traps are
+  settings, not lore**: Bridge files sent mail itself (`mu4e-sent-messages-behavior`
+  `delete`), "All Mail" and "Labels/*" are the same messages again (excluded in the
+  template), mbsync renames on move (`mu4e-change-filenames-when-moving`), and the cert
+  is self-signed (`gnutls-trustfiles`, so NSM never prompts on send). Bridge needs a paid
+  plan and gnome-keyring; `rata-mail-update` probes its port and names the start command
+  rather than letting mbsync fail in the update buffer. Nothing in `tests/` contacts
+  Bridge or mu.
 - `init-jira.el` — `jira.el` issue browser under `SPC J`. A second *view* onto work tasks, not a
   sync: nothing writes into the org-roam tree (see D-011 in `.are/memory/DECISIONS.md`). Two
   things are deliberate. `jira-username`/`jira-token` are left unset, which is what makes

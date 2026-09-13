@@ -249,8 +249,11 @@ fi
 # to know what is running now; `emacs --version' loads no config and is skipped
 # entirely if there is no binary or no build tree (CI, fresh clone).
 #
-# Warning, not error: a mid-rebuild tree is a normal transient state, and this checkout
-# is the only thing that can fix it.
+# Warning by default, error when ARE_AUDIT_STRICT_ARTIFACTS=1: `are-verify' sets it at
+# `relevant' and `full', because those levels claim module health and every ERT
+# result on a stale or half-rebuilt tree is meaningless (FAIL-0015 stayed red for
+# five days behind a WARN). `fast' -- the pre-commit hook -- keeps the warning: it
+# loads no packages on purpose, so artifact state must never block a commit.
 echo "=== Check: build-artifact-emacs-version ==="
 audit_emacs_bin="${EMACS_BIN:-}"
 if [ -z "$audit_emacs_bin" ]; then
@@ -274,7 +277,8 @@ else
     elif [ -z "$running" ]; then
         echo "skipped: could not read a version from '$audit_emacs_bin'"
     elif [ "$built" != "$running" ]; then
-        warn "elpaca/builds was byte-compiled by Emacs [$built] but Emacs $running is running; macro expansions baked into those artifacts are wrong (FAIL-0015). Fix: rm -rf eln-cache/*; find elpaca/builds -name '*.elc' -delete; then M-x elpaca-manager, mark all with B, execute with x. Wiping eln-cache is not optional -- elns are keyed by source hash, so a bad one is reused verbatim."
+        if [ "${ARE_AUDIT_STRICT_ARTIFACTS:-0}" = 1 ]; then report=fail; else report=warn; fi
+        "$report" "elpaca/builds was byte-compiled by Emacs [$built] but Emacs $running is running; macro expansions baked into those artifacts are wrong (FAIL-0015). Fix: 'just rebuild-packages' in this checkout (stop a daemon running from it first). It deletes eln-cache and every .elc before recompiling; that order is not optional -- elns are keyed by source hash, so a bad one is reused verbatim."
     fi
 fi
 
@@ -285,7 +289,7 @@ echo "=== Check: stray-files ==="
 while IFS= read -r p; do
     [ -n "$p" ] || continue
     case "$p" in
-        *.el | *.md | *.org | *.sh | *.yaml | *.yml | *.json | *.png | snippets/*) continue ;;
+        *.el | *.md | *.org | *.sh | *.yaml | *.yml | *.json | *.png | *.example | snippets/*) continue ;;
     esac
     warn "unexpected untracked file: '$p' (FAIL-0007)"
 done < <(git ls-files --others --exclude-standard 2>/dev/null || true)

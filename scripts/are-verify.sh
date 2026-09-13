@@ -70,8 +70,13 @@ run "lint" "3 textual conventions (lexical-binding, provide, rata- prefix)" -- \
 run "claude-loop-e2e" "the CRITICAL module's state machine, vs a stub CLI" -- \
     just test-claude-loop
 
-run "are-audit" "repo-wide ARE invariants, docs drift, gate state, hygiene" -- \
-    ./scripts/are-audit.sh
+# Above fast, a build tree compiled by another Emacs FAILS the audit instead of
+# warning: relevant and full claim module health, and ERT on stale artifacts proves
+# nothing (FAIL-0015). fast stays a warning so the pre-commit hook never depends on
+# package state.
+if [ "$LEVEL" = fast ]; then strict_artifacts=0; else strict_artifacts=1; fi
+run "are-audit" "repo-wide ARE invariants, docs drift, gate state, hygiene; artifact vintage fails above fast" -- \
+    env ARE_AUDIT_STRICT_ARTIFACTS="$strict_artifacts" ./scripts/are-audit.sh
 
 # --- relevant: needs packages installed ------------------------------------------
 if [ "$LEVEL" != "fast" ]; then

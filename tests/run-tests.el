@@ -18,9 +18,31 @@
          user-emacs-directory))
 
 (message "=== Ratatoskr ERT: loading config ===")
+;; `--batch' skips the init files, so Emacs has already stamped `after-init-time'
+;; by the time init.el loads here -- and elpaca takes a different, post-init path
+;; when it is set (queues finalised early, the last throttled orders left queued
+;; while `use-package' bodies run).  Clearing it puts this harness on the path a
+;; real startup takes, the same as `just batch' (FAIL-0020).
+(setq after-init-time nil)
 (load (expand-file-name "early-init.el" user-emacs-directory) nil t)
 (load (expand-file-name "init.el" user-emacs-directory) nil t)
 (message "=== Ratatoskr ERT: config loaded, running tests ===")
+
+;; Nothing in tests/ may reach a network service (AGENTS.md), and nothing may read
+;; `~/.authinfo.gpg' (SAFETY_RULES): the first thing a real jira.el request does is
+;; ask auth-source for the token, which decrypts that file -- a GPG passphrase
+;; prompt on stdin in batch, a silent corporate API call when gpg-agent has the key
+;; cached (FAIL-0021).  jira.el has two chokepoints for every request -- Tempo has
+;; its own -- so both are overridden here to fail the calling test loudly.  A
+;; test that legitimately needs a request stubs the function itself with
+;; `cl-letf', which shadows this.
+(with-eval-after-load 'jira-api
+  (dolist (fn '(jira-api-call jira-api-tempo-call))
+    (advice-add fn :override
+                (lambda (verb endpoint &rest _)
+                  (error "rata-test: `%s' (%s %s) would reach the network; stub it in the test"
+                         fn verb endpoint))
+                '((name . rata-test-no-network)))))
 
 ;;; ============================================================
 ;;; Keybinding extraction helpers
@@ -199,7 +221,13 @@ so deferred packages (loaded via :commands) pass correctly."
     ;; resolve only while their symbols stay in init-llm.el's :commands list.
     ("SPC a i c f" . rata-agent-shell-send-file)
     ("SPC a i c r" . agent-shell-send-region)
-    ("SPC a i c d" . agent-shell-send-dwim))
+    ("SPC a i c d" . agent-shell-send-dwim)
+    ;; init-mail.el binds its own wrappers, never mu4e symbols directly, so
+    ;; these resolve on a host with no mu installed too (the wrapper then
+    ;; explains what is missing instead of the key being dead).
+    ("SPC a e e" . rata-mail)
+    ("SPC a e u" . rata-mail-update)
+    ("SPC a e d" . rata-mail-doctor))
   "Leader keys that must resolve immediately after init, with their commands.
 Not exhaustive — a contract for the keys most likely to be broken by the
 failure mode in .are/memory/failures/FAIL-0009.md.  Extend it when a
@@ -1674,7 +1702,12 @@ and the mirrored `,\=' suffix resolves to something callable in a live buffer."
                    (buf (generate-new-buffer (format "*rata-test-%s*" mode))))
         (unwind-protect
             (with-current-buffer buf
-              (funcall mode)
+              ;; `jira-tempo-mode' reverts its table as part of turning on, and
+              ;; the revert is a live worklog request; the keymap is all this test
+              ;; needs, so the refresh is stubbed rather than the harness guard
+              ;; tripped (FAIL-0021).
+              (cl-letf (((symbol-function 'jira-tempo--refresh) #'ignore))
+                (funcall mode))
               (pcase-dolist (`(,upstream ,suffix ,label) mirror)
                 (let ((up (lookup-key map (kbd upstream)))
                       (mine (key-binding (kbd (concat ", " suffix)))))
@@ -2306,6 +2339,19 @@ the pin.  Do not just edit the expected value."
 ;;; Test — agent-shell fold chrome vs the GUI Enter key (lisp/init-llm.el)
 ;;; ============================================================
 
+(defun rata-test--agent-shell-needs-fragment-map ()
+  "Skip the calling test when the installed agent-shell predates the fragment map.
+
+`agent-shell-ui-fragment-map' and `agent-shell-ui-make-foldable-text' arrived
+upstream on 2026-08-14.  The fix in `init-llm.el' extends that map, so on an
+older clone there is nothing to test -- the GUI Enter bug is simply still
+present and the remedy is `elpaca-update agent-shell', not a code change.  A
+skip says that; a failure said `void-variable' and read like a broken config
+(FAIL-0019).  With no lockfile, each machine's clone is its own vintage."
+  (unless (and (boundp 'agent-shell-ui-fragment-map)
+               (fboundp 'agent-shell-ui-make-foldable-text))
+    (ert-skip "installed agent-shell predates `agent-shell-ui-fragment-map' (upstream 2026-08-14); update the package to run this test")))
+
 (defun rata-test--agent-shell-binding (keys state position)
   "Return what KEYS resolves to in an agent-shell buffer.
 
@@ -2364,6 +2410,7 @@ widened into `agent-shell-mode-map' instead.  Neither is sufficient
 alone -- the binding has to hold at one position and not the other."
   (require 'agent-shell)
   (require 'agent-shell-ui)
+  (rata-test--agent-shell-needs-fragment-map)
   (let (failures)
     ;; On the chrome, both spellings of Enter fold, in either state -- point,
     ;; not state, is what decides.
@@ -2388,23 +2435,31 @@ everywhere and cost the operator prompt submission.  Both spellings of
 Enter are checked, because the whole bug was one spelling behaving
 differently from the other.
 
-Normal state submits and insert state inserts a newline because
-`evil-collection-repl-submit-state' defaults to normal.  A failure here
-after changing that option is expected -- update the expectations.  A
-failure here with that option untouched means the fold binding leaked out
-of the chrome."
+What Enter resolves to off the chrome is evil-collection's business and
+varies with its vintage: with its `shell-maker' module and `repl-submit'
+theme (upstream since mid-2026) normal state submits and insert state
+inserts a newline; without them (the March 2026 clone on the Arch host)
+normal state is `evil-ret' and insert state is `agent-shell-submit' via
+comint's remap.  The first version of this test hard-coded the former and
+failed on the latter (FAIL-0019).  So the assertion is the invariant the
+fix must keep, not one theme's commands: off the chrome, neither spelling
+of Enter is the fold toggle, and `RET' still resolves to a command.  (A nil
+`<return>' is fine -- that is precisely the case where Emacs falls back to
+translating it to `RET'.)"
   (require 'agent-shell)
   (require 'agent-shell-ui)
+  (rata-test--agent-shell-needs-fragment-map)
   (let (failures)
-    (dolist (expectation '((normal . shell-maker-submit)
-                           (insert . newline)))
+    (dolist (state '(normal insert))
       (dolist (keys '("RET" "<return>"))
-        (let* ((state (car expectation))
-               (want (cdr expectation))
-               (got (rata-test--agent-shell-binding keys state 'prompt)))
-          (unless (eq got want)
-            (push (format "%s state, point off fold chrome: %s -> %s (want %s)"
-                          state keys got want)
+        (let ((got (rata-test--agent-shell-binding keys state 'prompt)))
+          (when (eq got 'agent-shell-ui-toggle-fragment)
+            (push (format "%s state, point off fold chrome: %s -> %s (the fold binding leaked)"
+                          state keys got)
+                  failures))
+          (when (and (equal keys "RET") (not (commandp got)))
+            (push (format "%s state, point off fold chrome: RET -> %S (not a command)"
+                          state got)
                   failures)))))
     (when failures
       (ert-fail (concat "agent-shell prompt submission has regressed:\n"
@@ -2566,6 +2621,119 @@ through `org-todo', so a hook that was never added would fail here."
   "`org-log-done' is set once org loads; the finished block's order depends on it."
   (require 'org)
   (should (eq org-log-done 'time)))
+
+;;; ============================================================
+;;; init-mail.el -- pure helpers and the per-machine contract
+;;; ============================================================
+;;
+;; Nothing here touches Bridge, mu or the network: mu4e's elisp is
+;; version-locked to a binary that may not be on the test host, so the tests
+;; cover the parts that decide *whether* mu4e loads and *what* the operator
+;; is told when it cannot.
+
+(ert-deftest rata-test-mail-mu4e-dir-candidates ()
+  "The install prefix is derived from `bin/mu', for both packager layouts."
+  (should (equal (rata-mail-mu4e-dir-candidates "/usr/bin/mu")
+                 '("/usr/share/emacs/site-lisp/mu/mu4e"
+                   "/usr/share/emacs/site-lisp/mu4e"
+                   "/usr/share/emacs/site-lisp/mu")))
+  ;; Homebrew's Cellar path, as `file-truename' of the bin/mu symlink yields it.
+  (should (member "/home/linuxbrew/.linuxbrew/Cellar/mu/1.14.3/share/emacs/site-lisp/mu/mu4e"
+                  (rata-mail-mu4e-dir-candidates
+                   "/home/linuxbrew/.linuxbrew/Cellar/mu/1.14.3/bin/mu")))
+  ;; And the prefix-level symlink farm the PATH entry lives in.
+  (should (member "/home/linuxbrew/.linuxbrew/share/emacs/site-lisp/mu/mu4e"
+                  (rata-mail-mu4e-dir-candidates "/home/linuxbrew/.linuxbrew/bin/mu"))))
+
+(ert-deftest rata-test-mail-mu4e-dir-found-when-mu-installed ()
+  "If `mu' is on PATH, its mu4e must be found -- otherwise the module
+silently degrades to `rata-mail-unavailable' on a host that has the tool.
+Skipped where mu is absent: the check is about the candidate list matching
+the packager, which only a real install can show."
+  (skip-unless (executable-find "mu"))
+  (should rata-mail--mu4e-dir)
+  (should (file-exists-p (expand-file-name "mu4e.el" rata-mail--mu4e-dir))))
+
+(ert-deftest rata-test-mail-unconfigured-names-the-checklist ()
+  "With no address set, every entry point stops with a `user-error' that
+names local.el.example -- the same contract as `rata-sql-snowflake-uri'."
+  (let ((rata-mail-address nil))
+    (dolist (cmd '(rata-mail rata-mail-compose rata-mail-search rata-mail-update))
+      (let ((err (should-error (funcall cmd) :type 'user-error)))
+        (should (string-match-p "local\\.el\\.example" (cadr err)))))))
+
+(ert-deftest rata-test-mail-port-probe ()
+  "`rata-mail-port-open-p' is the `is Bridge up' question: true against a
+listening socket, nil against a closed port."
+  (let ((server (make-network-process :name "rata-test-mail-listener"
+                                      :server t :host "127.0.0.1" :service t
+                                      :noquery t)))
+    (unwind-protect
+        (let ((port (process-contact server :service)))
+          (should (rata-mail-port-open-p "127.0.0.1" port))
+          (delete-process server)
+          (should-not (rata-mail-port-open-p "127.0.0.1" port)))
+      (when (process-live-p server) (delete-process server)))))
+
+(ert-deftest rata-test-mail-bridge-command-prefers-the-native-binary ()
+  "The doctor's Bridge hints must be commands the host can run.  On Arch
+`protonmail-bridge --cli' is the Qt launcher, which times out waiting for
+a gRPC config the CLI frontend never writes -- so the Go binary wins
+whenever it exists, the Flatpak is next, and a bare host is told how to
+install rather than handed a command that is not there."
+  (let ((rata-mail-bridge-native-binary "/usr/lib/protonmail/bridge/bridge")
+        (rata-mail-bridge-flatpak-id "ch.protonmail.protonmail-bridge"))
+    (should (equal (rata-mail-bridge-command-for "--cli" t t)
+                   "/usr/lib/protonmail/bridge/bridge --cli"))
+    (should (equal (rata-mail-bridge-command-for "--noninteractive" nil t)
+                   "flatpak run ch.protonmail.protonmail-bridge --noninteractive"))
+    (let ((bare (rata-mail-bridge-command-for "--cli" nil nil)))
+      (should (string-prefix-p "protonmail-bridge --cli" bare))
+      (should (string-match-p "pacman -S protonmail-bridge" bare))
+      (should (string-match-p "flatpak install" bare)))
+    ;; Never the launcher on PATH when the real binary is known.
+    (should-not (string-prefix-p "protonmail-bridge "
+                                 (rata-mail-bridge-command-for "--cli" t nil)))))
+
+(ert-deftest rata-test-mail-cert-dir-matches-template ()
+  "`cert export' is pointed at the directory of a `rata-mail-bridge-cert-candidates'
+entry, and mbsyncrc.example's CertificateFile names one of those same
+candidates -- otherwise the doctor's hint and the template disagree about
+where the certificate lives."
+  (let ((text (with-temp-buffer
+                (insert-file-contents
+                 (expand-file-name "mbsyncrc.example" user-emacs-directory))
+                (buffer-string)))
+        (dirs (mapcar (lambda (c) (file-name-directory (expand-file-name c)))
+                      rata-mail-bridge-cert-candidates)))
+    (should (member (rata-mail-bridge-cert-dir) dirs))
+    (should (string-match-p "^CertificateFile " text))
+    (should (seq-some (lambda (c) (string-match-p (concat "^CertificateFile " (regexp-quote c) "$") text))
+                      rata-mail-bridge-cert-candidates))))
+
+(ert-deftest rata-test-mail-mbsyncrc-example-matches-module ()
+  "mbsyncrc.example and init-mail.el describe the same Bridge.
+The channel name is what `mu4e-get-mail-command' runs, host and port are
+what `rata-mail-update' probes, and the two Proton-specific exclusions are
+the difference between a mailbox and a duplicated one."
+  (let ((text (with-temp-buffer
+                (insert-file-contents
+                 (expand-file-name "mbsyncrc.example" user-emacs-directory))
+                (buffer-string))))
+    (should (string-match-p (format "^Channel %s$" (regexp-quote rata-mail-mbsync-channel)) text))
+    (should (string-match-p (format "^Host %s$" (regexp-quote rata-mail-bridge-host)) text))
+    (should (string-match-p (format "^Port %d$" rata-mail-bridge-imap-port) text))
+    (should (string-match-p (format "port %d" rata-mail-bridge-imap-port) text))
+    (should (string-match-p (format "port %d" rata-mail-bridge-smtp-port) text))
+    (should (string-match-p "^Patterns .*!\"All Mail\"" text))
+    (should (string-match-p "^Patterns .*!\"Labels/\\*\"" text))
+    (should (string-match-p "^TLSType STARTTLS$" text))
+    ;; The Flatpak certificate path in the template is one the module also trusts.
+    (should (seq-some (lambda (cand)
+                        (string-match-p (regexp-quote (string-remove-prefix "~/" cand)) text))
+                      rata-mail-bridge-cert-candidates))
+    ;; No real address leaked into the template.
+    (should (string-match-p "CHANGE-ME@proton.me" text))))
 
 ;;; ============================================================
 ;;; Run all tests

@@ -1315,3 +1315,102 @@ let the Swedish name through. Rules: bind `system-time-locale` to `"C"` around a
 build test times with zone `nil` (local) unless the code under test is UTC by design; and
 assert the day *name*, not a letter class, so the locale cannot leak silently. Related:
 L-027 (regexp traps), D-019.
+
+## L-044 — `local.el.example` is the list of values that are *nil in git*, not of every tunable
+
+**2026-09-11**, from building `init-mail.el`. `rata-mail-maildir` defaults to `~/Mail`,
+which is not identity and has no reason to be hidden, so the module kept the default and
+the template offered a commented `(setq rata-mail-maildir ...)` "in case yours differs".
+`are-audit`'s `local-example-in-sync` failed the build: a name in the template with a
+non-nil tracked value is, by that rule's definition, a value that leaked. The rule is
+right and the template line was wrong — a tunable with a safe default is a `defcustom`
+the operator can `setq` in `local.el` *without* being told to; the template is the
+checklist of things that **must** be filled in before a feature works at all, and its
+rule only means anything if every name on it is nil in the tracked sources. Put a value
+there only when the module refuses to run without it (`rata-mail-address`,
+`rata-jira-base-url`, the six Snowflake parameters). Related: D-012, D-021.
+
+## L-045 — A package's repo is a fact to look up, not to assume; `just/deps-arch.just` is written blind from the Ubuntu checkout
+
+**Date:** 2026-09-12. `protonmail-bridge` was added to `aur_pkgs` in `just/deps-arch.just`
+when `init-mail.el` landed (2026-09-11), on the assumption that anything Proton ships
+lives in the AUR. It is in `[extra]`. The operator caught it on review; `yay -S` would
+have installed it anyway, so nothing broke — but the file's header already says it is
+NOT TESTED from the Ubuntu checkout, which is exactly why a guess there stays a guess.
+The same review found the opposite error one line up: `mu` was in `pacman_pkgs`, and
+archlinux.org has no `mu` package at all — it is AUR-only now (1.14.3, maintained; the
+older `maildir-utils` AUR entry is the same upstream abandoned at 1.6.2). Before placing
+a package in either list, check: `pacman -Si <pkg>` on an Arch host, or
+`https://archlinux.org/packages/search/json/?name=<pkg>` from anywhere. A miss there
+means the AUR list — and the AUR web/RPC is behind Anubis, which blocks non-browser
+fetches, so probe it with `git ls-remote https://aur.archlinux.org/<pkg>.git` and read
+the PKGBUILD from a `--depth 1` clone. Related: L-033, FAIL-0014 (the AUR entry that
+stood in for an npm package).
+
+## L-046 — A hint the doctor prints must be derived from the host it is printed on
+
+**Date:** 2026-09-12. `rata-mail-doctor` existed so that a new host would be told what
+is missing and how to supply it. Its hints were literal strings from the host it was
+written on — `flatpak run ch.protonmail.protonmail-bridge --cli` — so on the first host
+that actually needed them, every one was wrong the same way, and the one that was
+tried (`protonmail-bridge --cli`) hangs (FAIL-0018). A check that probes the machine
+(`executable-find`, `file-exists-p`, a port) and then prints a fixed sentence has done
+half its job. Derive the sentence from the same probes: `rata-mail-bridge-command-for`
+is pure and tested, and the doctor calls it. The same applies to the value being
+matched — the auth-source row now prints `rata-mail-address` itself, because "MISSING"
+next to a line the operator can see in the file is only a puzzle until the hint shows
+what it was compared to (the 1025 login had a typo). Related: L-033, FAIL-0014.
+
+## L-047 — A fix verified against a package version this machine does not have is not verified
+
+**Date:** 2026-09-13. The agent-shell Enter-key fix (`3492fb0`) extends
+`agent-shell-ui-fragment-map`, and its two tests were "verified by breaking it" — on a
+machine whose agent-shell clone was newer than either clone here. On this host the symbol
+does not exist: the `eval-after-load` body signalled `void-variable` on the first agent
+shell of every session, and the tests had never passed once (FAIL-0019). Two sessions
+then read the failures as "the pre-existing agent-shell failures" and moved on. There is
+no lockfile (D-005), so *each machine's `elpaca/sources` is its own vintage* and a test
+that passes on one proves nothing about another. Apply: when a fix targets a third-party
+symbol, `git -C elpaca/sources/<pkg> log -1` on the machine you are on, and say which
+version the fix was tested against in the commit. When a body runs inside someone else's
+`require` (`with-eval-after-load`), it must not be able to signal — `boundp`/`fboundp`
+guard, and a `message` naming the record in the else branch, so the missing feature is
+visible instead of a stack trace. And a test whose precondition is a package version
+should `ert-skip` with the remedy in the reason: a skip that says "update agent-shell" is
+read; a `void-variable` failure was misread twice. Related: L-035, FAIL-0001.
+
+## L-048 — When a harness reports a load-order fault, first check that the harness is on the same path as the thing it simulates
+
+**Date:** 2026-09-13. `just batch` reported `transient loaded before Elpaca activation`
+and `Cannot load nerd-icons-corfu` for weeks; both were read first as the FAIL-0012 class
+(a module requiring too early) and then as a FAIL-0015 consequence (stale artifacts).
+Neither. `emacs --batch` skips init, so `after-init-time` was already set when `-l init.el`
+ran, and elpaca branches on it in six places — the harness had put the package manager on
+its *post-init* path, where a throttled queue finalises early and the last two orders are
+still queued when `use-package` bodies run (FAIL-0020). A real daemon from the same tree
+was clean. Apply: before diagnosing a warning the harness printed, produce the same
+warning in the real thing — here, one throwaway `--fg-daemon=<name>` plus
+`emacsclient -s <name> --eval` on `rata--failed-modules` and `*Warnings*` took two
+minutes and ended the investigation. If the real thing is clean, the harness is the
+defect, and the fix is to make it take the real path (`(setq after-init-time nil)`), not
+to remove the condition that exposed the difference (`elpaca-queue-limit`). Also: a
+symptom that comes and goes with unrelated commits is a boundary effect — here the queue
+length moving the throttle — not flakiness. Related: FAIL-0012, L-034.
+
+## L-049 — A rule that lives in prose needs a fence in the harness; "nothing in tests/ touches the network" was one `funcall` from false
+
+**Date:** 2026-09-13. `rata-test-jira-mirrored-keys-exist-upstream` called
+`(funcall 'jira-tempo-mode)` to read a keymap. The mode reverts its table on activation;
+the revert is a live Tempo request; the request resolves its token through auth-source,
+which decrypts `~/.authinfo.gpg` — a passphrase prompt and exit 255 in batch, a silent
+call to the corporate Jira when gpg-agent held the key (FAIL-0021). Every ERT run for five
+days had ended before its summary line, and the two failures printed before the abort
+supplied a plausible reading. Apply: a safety rule that is only prose is a rule that a
+major-mode hook can break without anyone writing a line that looks wrong. Put the fence
+where the calls converge — `tests/run-tests.el` now overrides `jira-api-call` *and*
+`jira-api-tempo-call` to signal — and verify the fence by driving the real path into it
+(the first version guarded one chokepoint; the probe found the second). A major mode is
+not a keymap: turning one on in a test runs whatever its body runs, so read the
+`define-derived-mode` before you `funcall` it. And read ERT's summary line, not its
+failure lines — a run that never printed `Ran N tests` did not run N tests. Related:
+L-034, FAIL-0016.

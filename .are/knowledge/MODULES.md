@@ -48,6 +48,8 @@ that can actually go wrong in an Emacs configuration are:
 | lisp/init-irc.el | integrations,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-elfeed.el | integrations,network | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-jira.el | integrations,network,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
+| lisp/init-mail.el | integrations,network,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
+| mbsyncrc.example | integrations,template | LOW | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-lang.el | languages,toolchain | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-completion.el | ui,keybindings | MEDIUM | relevant | knowledge/ARCHITECTURE.md |
 | lisp/init-ui.el | ui | MEDIUM | relevant | knowledge/ARCHITECTURE.md |
@@ -77,6 +79,7 @@ that can actually go wrong in an Emacs configuration are:
 | tests/work-agenda-render.el | verification,notes | HIGH | relevant | knowledge/TESTING_STRATEGY.md |
 | scripts/lint.sh | verification | HIGH | fast | knowledge/TESTING_STRATEGY.md |
 | scripts/are-*.sh | verification,are | HIGH | fast | SYSTEM.md |
+| scripts/elpaca-rebuild.el | tooling,artifacts | HIGH | full | memory/failures/FAIL-0015.md |
 | justfile | verification,tooling | HIGH | full | knowledge/TESTING_STRATEGY.md |
 | just/*.just | verification,tooling | HIGH | full | knowledge/TESTING_STRATEGY.md |
 | .githooks/* | verification | HIGH | fast | knowledge/TESTING_STRATEGY.md |
