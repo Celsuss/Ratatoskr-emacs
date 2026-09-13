@@ -1360,3 +1360,57 @@ is pure and tested, and the doctor calls it. The same applies to the value being
 matched — the auth-source row now prints `rata-mail-address` itself, because "MISSING"
 next to a line the operator can see in the file is only a puzzle until the hint shows
 what it was compared to (the 1025 login had a typo). Related: L-033, FAIL-0014.
+
+## L-047 — A fix verified against a package version this machine does not have is not verified
+
+**Date:** 2026-09-13. The agent-shell Enter-key fix (`3492fb0`) extends
+`agent-shell-ui-fragment-map`, and its two tests were "verified by breaking it" — on a
+machine whose agent-shell clone was newer than either clone here. On this host the symbol
+does not exist: the `eval-after-load` body signalled `void-variable` on the first agent
+shell of every session, and the tests had never passed once (FAIL-0019). Two sessions
+then read the failures as "the pre-existing agent-shell failures" and moved on. There is
+no lockfile (D-005), so *each machine's `elpaca/sources` is its own vintage* and a test
+that passes on one proves nothing about another. Apply: when a fix targets a third-party
+symbol, `git -C elpaca/sources/<pkg> log -1` on the machine you are on, and say which
+version the fix was tested against in the commit. When a body runs inside someone else's
+`require` (`with-eval-after-load`), it must not be able to signal — `boundp`/`fboundp`
+guard, and a `message` naming the record in the else branch, so the missing feature is
+visible instead of a stack trace. And a test whose precondition is a package version
+should `ert-skip` with the remedy in the reason: a skip that says "update agent-shell" is
+read; a `void-variable` failure was misread twice. Related: L-035, FAIL-0001.
+
+## L-048 — When a harness reports a load-order fault, first check that the harness is on the same path as the thing it simulates
+
+**Date:** 2026-09-13. `just batch` reported `transient loaded before Elpaca activation`
+and `Cannot load nerd-icons-corfu` for weeks; both were read first as the FAIL-0012 class
+(a module requiring too early) and then as a FAIL-0015 consequence (stale artifacts).
+Neither. `emacs --batch` skips init, so `after-init-time` was already set when `-l init.el`
+ran, and elpaca branches on it in six places — the harness had put the package manager on
+its *post-init* path, where a throttled queue finalises early and the last two orders are
+still queued when `use-package` bodies run (FAIL-0020). A real daemon from the same tree
+was clean. Apply: before diagnosing a warning the harness printed, produce the same
+warning in the real thing — here, one throwaway `--fg-daemon=<name>` plus
+`emacsclient -s <name> --eval` on `rata--failed-modules` and `*Warnings*` took two
+minutes and ended the investigation. If the real thing is clean, the harness is the
+defect, and the fix is to make it take the real path (`(setq after-init-time nil)`), not
+to remove the condition that exposed the difference (`elpaca-queue-limit`). Also: a
+symptom that comes and goes with unrelated commits is a boundary effect — here the queue
+length moving the throttle — not flakiness. Related: FAIL-0012, L-034.
+
+## L-049 — A rule that lives in prose needs a fence in the harness; "nothing in tests/ touches the network" was one `funcall` from false
+
+**Date:** 2026-09-13. `rata-test-jira-mirrored-keys-exist-upstream` called
+`(funcall 'jira-tempo-mode)` to read a keymap. The mode reverts its table on activation;
+the revert is a live Tempo request; the request resolves its token through auth-source,
+which decrypts `~/.authinfo.gpg` — a passphrase prompt and exit 255 in batch, a silent
+call to the corporate Jira when gpg-agent held the key (FAIL-0021). Every ERT run for five
+days had ended before its summary line, and the two failures printed before the abort
+supplied a plausible reading. Apply: a safety rule that is only prose is a rule that a
+major-mode hook can break without anyone writing a line that looks wrong. Put the fence
+where the calls converge — `tests/run-tests.el` now overrides `jira-api-call` *and*
+`jira-api-tempo-call` to signal — and verify the fence by driving the real path into it
+(the first version guarded one chokepoint; the probe found the second). A major mode is
+not a keymap: turning one on in a test runs whatever its body runs, so read the
+`define-derived-mode` before you `funcall` it. And read ERT's summary line, not its
+failure lines — a run that never printed `Ran N tests` did not run N tests. Related:
+L-034, FAIL-0016.

@@ -88,8 +88,9 @@ for what each one actually proves.
 Ranked. Full detail in the linked records.
 
 1. **Two checkouts of this repo exist and the docs point at the stale one.**
-   `~/.config/emacs` is live (branch `dev`); `~/workspace/Ratatoskr-emacs` is 4 commits
-   behind. `README.org`, `AGENTS.md` and `rata-dashboard-git-repos` all name the stale
+   `~/.config/emacs` is live (branch `master`, `fbf5c6e` on 2026-09-13); `~/workspace/Ratatoskr-emacs`
+   is the `dev` checkout where sessions run. Their `elpaca/sources` are separate clones of
+   separate vintages too (FAIL-0019). `README.org`, `AGENTS.md` and `rata-dashboard-git-repos` all name the stale
    path. → [FAIL-0001](memory/failures/FAIL-0001.md), [knowledge/ENVIRONMENTS.md](knowledge/ENVIRONMENTS.md)
 2. **`just compile` cannot catch semantic errors.** Modules are byte-compiled with no
    package on `load-path`, so every `use-package` body compiles blind and ~130

@@ -79,6 +79,7 @@ that can actually go wrong in an Emacs configuration are:
 | tests/work-agenda-render.el | verification,notes | HIGH | relevant | knowledge/TESTING_STRATEGY.md |
 | scripts/lint.sh | verification | HIGH | fast | knowledge/TESTING_STRATEGY.md |
 | scripts/are-*.sh | verification,are | HIGH | fast | SYSTEM.md |
+| scripts/elpaca-rebuild.el | tooling,artifacts | HIGH | full | memory/failures/FAIL-0015.md |
 | justfile | verification,tooling | HIGH | full | knowledge/TESTING_STRATEGY.md |
 | just/*.just | verification,tooling | HIGH | full | knowledge/TESTING_STRATEGY.md |
 | .githooks/* | verification | HIGH | fast | knowledge/TESTING_STRATEGY.md |

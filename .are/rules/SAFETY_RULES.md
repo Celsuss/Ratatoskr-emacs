@@ -11,6 +11,7 @@ away, and an agent that edits files unattended. These rules cover those.
 
 | Operation | Why |
 |---|---|
+| `just rebuild-packages` | deletes every `.elc` under `elpaca/builds` and all of `eln-cache/`, then recompiles from the sources on disk — the fix after an Emacs upgrade (FAIL-0015). Nothing moves version and nothing else is touched, but a daemon running from that checkout must be stopped first and the run is ~5 min plus a 30-min timeout on `vterm-toggle`; the operator runs it |
 | `just clean` / `just reset` | deletes `elpaca/`, `eln-cache/`, `elpa/`, `auto-save-list/`, `transient/`, **and `custom.el` and `history`**. The package tree is minutes to rebuild and rebuilds at *current* upstream HEAD, so the config that comes back is not the config that went away (no committed lockfile). `custom.el` is not recoverable |
 | `just update` | `elpaca-update-all` moves ~197 packages to upstream HEAD in one step |
 | `git commit`, `git push`, branch or history operations | this is the operator's dotfiles repo with a public remote. Committing is theirs to trigger |

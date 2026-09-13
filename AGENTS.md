@@ -53,7 +53,7 @@ suites. Entry point: **`.are/INDEX.md`**. Operating manual: **`.are/SYSTEM.md`**
 ### Before anything destructive
 
 `.are/rules/SAFETY_RULES.md` lists what is never done autonomously here: `just clean` /
-`reset` / `update`, git commits and history, `~/.authinfo.gpg`, anything under
+`reset` / `update` / `rebuild-packages`, git commits and history, `~/.authinfo.gpg`, anything under
 `~/workspace/second-brain/`, `terraform apply`, mutating `kubectl`, and widening the
 claude-loop's permissions. `lisp/init-claude-loop.el` is the only CRITICAL area — it runs a
 headless agent with `--permission-mode acceptEdits` and an operator-supplied shell command.
@@ -113,6 +113,11 @@ just lint
 
 # Byte-compile all files
 just compile
+
+# Rebuild every package's .elc/.eln with the Emacs installed now — the fix after an
+# Emacs upgrade (FAIL-0015). Deletes only derived artifacts; sources, custom.el and
+# var/ are untouched. Operator-run, like clean; stop a daemon on that checkout first.
+just rebuild-packages
 
 # Clean all generated artifacts (elpaca, eln-cache, etc.)
 just clean

@@ -93,9 +93,18 @@
 ;; `rata-test-agent-shell-fold-chrome-answers-gui-return' asserts Enter folds on
 ;; the chrome, `rata-test-agent-shell-return-still-submits-off-chrome' asserts it
 ;; does not fold anywhere else.  See L-035.
+;;
+;; The map exists upstream since 2026-08-14; before that each fold carried its
+;; own anonymous keymap and there is nothing to extend.  Guarded, because an
+;; `eval-after-load' body that signals turns the first `agent-shell' of the
+;; session into a `void-variable' error -- which is what this did on a
+;; checkout whose agent-shell predates the map (FAIL-0019).  Without the map
+;; the GUI Enter bug is simply still present; the fix is to update agent-shell.
 (with-eval-after-load 'agent-shell-ui
-  (define-key agent-shell-ui-fragment-map (kbd "<return>")
-              #'agent-shell-ui-toggle-fragment))
+  (if (boundp 'agent-shell-ui-fragment-map)
+      (define-key agent-shell-ui-fragment-map (kbd "<return>")
+                  #'agent-shell-ui-toggle-fragment)
+    (message "init-llm: agent-shell predates `agent-shell-ui-fragment-map'; GUI Enter will not fold sections until it is updated (FAIL-0019)")))
 
 (defun rata-agent-shell-send-file (&optional prompt-for-file)
   "Send the current file to an agent shell as an `@' context mention.

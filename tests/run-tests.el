@@ -18,9 +18,31 @@
          user-emacs-directory))
 
 (message "=== Ratatoskr ERT: loading config ===")
+;; `--batch' skips the init files, so Emacs has already stamped `after-init-time'
+;; by the time init.el loads here -- and elpaca takes a different, post-init path
+;; when it is set (queues finalised early, the last throttled orders left queued
+;; while `use-package' bodies run).  Clearing it puts this harness on the path a
+;; real startup takes, the same as `just batch' (FAIL-0020).
+(setq after-init-time nil)
 (load (expand-file-name "early-init.el" user-emacs-directory) nil t)
 (load (expand-file-name "init.el" user-emacs-directory) nil t)
 (message "=== Ratatoskr ERT: config loaded, running tests ===")
+
+;; Nothing in tests/ may reach a network service (AGENTS.md), and nothing may read
+;; `~/.authinfo.gpg' (SAFETY_RULES): the first thing a real jira.el request does is
+;; ask auth-source for the token, which decrypts that file -- a GPG passphrase
+;; prompt on stdin in batch, a silent corporate API call when gpg-agent has the key
+;; cached (FAIL-0021).  jira.el has two chokepoints for every request -- Tempo has
+;; its own -- so both are overridden here to fail the calling test loudly.  A
+;; test that legitimately needs a request stubs the function itself with
+;; `cl-letf', which shadows this.
+(with-eval-after-load 'jira-api
+  (dolist (fn '(jira-api-call jira-api-tempo-call))
+    (advice-add fn :override
+                (lambda (verb endpoint &rest _)
+                  (error "rata-test: `%s' (%s %s) would reach the network; stub it in the test"
+                         fn verb endpoint))
+                '((name . rata-test-no-network)))))
 
 ;;; ============================================================
 ;;; Keybinding extraction helpers
@@ -1680,7 +1702,12 @@ and the mirrored `,\=' suffix resolves to something callable in a live buffer."
                    (buf (generate-new-buffer (format "*rata-test-%s*" mode))))
         (unwind-protect
             (with-current-buffer buf
-              (funcall mode)
+              ;; `jira-tempo-mode' reverts its table as part of turning on, and
+              ;; the revert is a live worklog request; the keymap is all this test
+              ;; needs, so the refresh is stubbed rather than the harness guard
+              ;; tripped (FAIL-0021).
+              (cl-letf (((symbol-function 'jira-tempo--refresh) #'ignore))
+                (funcall mode))
               (pcase-dolist (`(,upstream ,suffix ,label) mirror)
                 (let ((up (lookup-key map (kbd upstream)))
                       (mine (key-binding (kbd (concat ", " suffix)))))
@@ -2312,6 +2339,19 @@ the pin.  Do not just edit the expected value."
 ;;; Test — agent-shell fold chrome vs the GUI Enter key (lisp/init-llm.el)
 ;;; ============================================================
 
+(defun rata-test--agent-shell-needs-fragment-map ()
+  "Skip the calling test when the installed agent-shell predates the fragment map.
+
+`agent-shell-ui-fragment-map' and `agent-shell-ui-make-foldable-text' arrived
+upstream on 2026-08-14.  The fix in `init-llm.el' extends that map, so on an
+older clone there is nothing to test -- the GUI Enter bug is simply still
+present and the remedy is `elpaca-update agent-shell', not a code change.  A
+skip says that; a failure said `void-variable' and read like a broken config
+(FAIL-0019).  With no lockfile, each machine's clone is its own vintage."
+  (unless (and (boundp 'agent-shell-ui-fragment-map)
+               (fboundp 'agent-shell-ui-make-foldable-text))
+    (ert-skip "installed agent-shell predates `agent-shell-ui-fragment-map' (upstream 2026-08-14); update the package to run this test")))
+
 (defun rata-test--agent-shell-binding (keys state position)
   "Return what KEYS resolves to in an agent-shell buffer.
 
@@ -2370,6 +2410,7 @@ widened into `agent-shell-mode-map' instead.  Neither is sufficient
 alone -- the binding has to hold at one position and not the other."
   (require 'agent-shell)
   (require 'agent-shell-ui)
+  (rata-test--agent-shell-needs-fragment-map)
   (let (failures)
     ;; On the chrome, both spellings of Enter fold, in either state -- point,
     ;; not state, is what decides.
@@ -2394,23 +2435,31 @@ everywhere and cost the operator prompt submission.  Both spellings of
 Enter are checked, because the whole bug was one spelling behaving
 differently from the other.
 
-Normal state submits and insert state inserts a newline because
-`evil-collection-repl-submit-state' defaults to normal.  A failure here
-after changing that option is expected -- update the expectations.  A
-failure here with that option untouched means the fold binding leaked out
-of the chrome."
+What Enter resolves to off the chrome is evil-collection's business and
+varies with its vintage: with its `shell-maker' module and `repl-submit'
+theme (upstream since mid-2026) normal state submits and insert state
+inserts a newline; without them (the March 2026 clone on the Arch host)
+normal state is `evil-ret' and insert state is `agent-shell-submit' via
+comint's remap.  The first version of this test hard-coded the former and
+failed on the latter (FAIL-0019).  So the assertion is the invariant the
+fix must keep, not one theme's commands: off the chrome, neither spelling
+of Enter is the fold toggle, and `RET' still resolves to a command.  (A nil
+`<return>' is fine -- that is precisely the case where Emacs falls back to
+translating it to `RET'.)"
   (require 'agent-shell)
   (require 'agent-shell-ui)
+  (rata-test--agent-shell-needs-fragment-map)
   (let (failures)
-    (dolist (expectation '((normal . shell-maker-submit)
-                           (insert . newline)))
+    (dolist (state '(normal insert))
       (dolist (keys '("RET" "<return>"))
-        (let* ((state (car expectation))
-               (want (cdr expectation))
-               (got (rata-test--agent-shell-binding keys state 'prompt)))
-          (unless (eq got want)
-            (push (format "%s state, point off fold chrome: %s -> %s (want %s)"
-                          state keys got want)
+        (let ((got (rata-test--agent-shell-binding keys state 'prompt)))
+          (when (eq got 'agent-shell-ui-toggle-fragment)
+            (push (format "%s state, point off fold chrome: %s -> %s (the fold binding leaked)"
+                          state keys got)
+                  failures))
+          (when (and (equal keys "RET") (not (commandp got)))
+            (push (format "%s state, point off fold chrome: RET -> %S (not a command)"
+                          state got)
                   failures)))))
     (when failures
       (ert-fail (concat "agent-shell prompt submission has regressed:\n"
