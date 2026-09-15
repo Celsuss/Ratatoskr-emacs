@@ -17,7 +17,7 @@ A modular, Evil-based Emacs configuration built for speed and productivity.
 - *Org-mode* — org-roam, org-super-agenda, org-kanban, org-download, org-transclusion, ox-hugo (blog export), org-re-reveal (reveal.js slides)
 - *Kubernetes* — kubel integration for cluster management
 - *Git* — magit, diff-hl (gutter indicators), browse-at-remote
-- *LLM tools* — gptel, ellama, aidermacs (Ollama), agent-shell
+- *LLM tools* — gptel, ellama, aidermacs (Ollama at home, any OpenAI-compatible endpoint such as LiteLLM per machine via =local.el=), agent-shell
 - *Claude Code task loop* — work a =- [ ]= checklist file top to bottom, one headless =claude -p= run per task
 - *SQL client* — ejc-sql with a Snowflake JDBC connection
 - *Khoj* — self-hosted semantic search and chat over your org-roam notes

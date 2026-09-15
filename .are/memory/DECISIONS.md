@@ -610,3 +610,52 @@ noise every five minutes; it is checked in `rata-mail-update` only).
 Related: D-012 (what belongs in `local.el`), L-011 / FAIL-0009 (why the keys are at top
 level and bind wrappers), FAIL-0014 (a dependency installed under a name nothing calls).
 
+
+## D-022 — LLM endpoints and models are one per-machine list; the tracked default is localhost Ollama
+
+**2026-09-14.**
+
+At home the models are local Ollama; at work they sit behind a LiteLLM proxy whose hostname
+is corporate identity. `init-llm.el` had each of gptel, ellama and aidermacs configured by
+hand with its own hostname and model list, so a second machine meant editing three
+`use-package` bodies in a tracked file.
+
+Decided: one variable, `rata-llm-providers`, a list of plists (`:name`, `:protocol` `ollama`
+| `openai`, `:url`, `:models`, optional `:embedding-model` and `:auth-host`), set in
+`local.el` (D-012). Pure functions derive each tool's shape from an entry — gptel's
+constructor call, the `llm` struct ellama wants, aider's `ollama_chat/` or `openai/` model
+name and its environment — and each is tested against a fixture of both protocols.
+
+1. *The tracked default is Ollama on `localhost:11434` with the models the config already
+   used.* This departs from the Jira / mail / Snowflake pattern (nil in git, `user-error`
+   until `local.el` exists), deliberately: those defaults *are* identity, this one is not,
+   and a nil default would leave three packages erroring in three different voices for a
+   machine that only ever wanted local Ollama. `rata-test-llm-tracked-default-is-localhost-only`
+   reads the file on disk and fails on any other host, so the exception cannot widen.
+2. *`openai`, not `litellm`, as the protocol name.* LiteLLM, vLLM, OpenRouter and the like
+   all speak the same chat-completions shape; naming the protocol after one vendor would
+   invite a second one later.
+3. *Keys are never in `local.el`.* An `openai` entry is keyed on its URL host in
+   `~/.authinfo.gpg` (override with `:auth-host`; explicit nil means keyless). gptel and
+   llm both accept a function for the key and call it at request time, so nothing at load
+   and nothing in `tests/` touches the file. aider gets its key from
+   `aidermacs-before-run-backend-hook`, which upstream runs inside a `let` of
+   `process-environment` for exactly this purpose, so the key reaches the aider child and
+   no other process Emacs spawns — not `setenv` at load, which would hand it to every
+   child. The key is a *parameter* of `rata-llm-aider-environment` so the function is
+   pure.
+4. *All entries reach gptel and ellama, the first reaches aider.* Both have a native
+   switcher (`gptel-menu`, `ellama-provider-select`); aider takes one model. A run-time
+   "switch everything" command was not built — the stated need is per machine, not per
+   hour.
+5. *A malformed entry is a `display-warning` at load, not an error.* The leader keys must
+   still exist, and `just batch-strict` fails on warnings, so a typo in `local.el` fails
+   verification rather than surfacing as a `wrong-type-argument` inside gptel later.
+
+Rejected: an environment-variable design (`OPENAI_API_BASE` read at startup) — Emacs
+started from a desktop launcher does not see a shell's exports reliably, and the
+per-machine file already exists; per-tool override variables — three more names for one
+fact, and the first design question would be which wins.
+
+Related: D-012 (what belongs in `local.el`), L-011 / L-039 (why the aider hook and model
+are set outside `:config`), FAIL-0016.

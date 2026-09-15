@@ -8,10 +8,12 @@ lint:
     ./scripts/lint.sh
 
 # Run ERT tests (keybinding safety + module health + no-littering)
+# stdin is /dev/null on purpose: a load-time prompt (vterm's "Compile
+# vterm-module?") then errors out instead of hanging on a socket (FAIL-0022).
 test-ert:
     {{emacs_bin}} --init-directory {{init_dir}} --batch \
         -l ert \
-        -l tests/run-tests.el
+        -l tests/run-tests.el < /dev/null
 
 # Render the "w" work agenda over org fixtures and assert on the visible lines.
 # Separate from `test-ert': it puts org-super-agenda on load-path by hand, because

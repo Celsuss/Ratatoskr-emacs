@@ -67,6 +67,35 @@
 ;; (setq rata-sql-snowflake-database  "CHANGE-ME")
 ;; (setq rata-sql-snowflake-schema    "CHANGE-ME")
 
+;; --- LLM providers (lisp/init-llm.el) ---
+;; gptel, ellama and aidermacs are all configured from `rata-llm-providers';
+;; the first entry is the default for all three.  The tracked default is
+;; Ollama on localhost with the models named in init-llm.el, so a machine
+;; where that is true needs nothing here.  Set it where the models live
+;; somewhere else -- at work, behind a LiteLLM proxy whose hostname is
+;; corporate identity (D-022):
+;;
+;; (setq rata-llm-providers
+;;       '((:name "LiteLLM"
+;;          :protocol openai      ; any OpenAI-compatible chat-completions server
+;;          :url "https://CHANGE-ME.example.com/v1" ; = OPENAI_API_BASE, up to /chat/completions
+;;          :models ("CHANGE-ME-model" "CHANGE-ME-other-model")) ; first = default
+;;         ;; Optional second entry: gptel-menu and ellama-provider-select can
+;;         ;; switch to it; aider only ever uses the first.
+;;         (:name "Ollama"
+;;          :protocol ollama
+;;          :url "http://localhost:11434"
+;;          :models ("qwen3.5-coder:9b-32k")
+;;          :embedding-model "nomic-embed-text")))
+;;
+;; The key is NOT here.  An `openai' entry reads it from ~/.authinfo.gpg at
+;; request time, matched on the URL's host (or an explicit `:auth-host'):
+;;     machine CHANGE-ME.example.com login apikey password <litellm-key>
+;; Ollama needs no key.  A malformed entry is a startup warning naming the
+;; fault, and `rata-test-llm-provider-problems-name-the-entry' fails on it.
+
 ;; --- Khoj (lisp/init-khoj.el) ---
-;; Only if your homelab host differs from the committed default.
-;; (setq khoj-server-url "http://khoj.homelab.local")
+;; Only if your homelab host differs from the committed default.  Set the
+;; `rata-' variable, not `khoj-server-url' itself: the module hands that one to
+;; use-package :custom, which overwrites a plain setq when khoj loads (L-051).
+;; (setq rata-khoj-server-url "http://khoj.homelab.local")

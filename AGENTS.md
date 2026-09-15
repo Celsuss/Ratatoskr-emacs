@@ -194,6 +194,11 @@ checkout needs. A new machine is `cp local.el.example local.el` plus filling in 
   `local.el.example` in the same commit.** `scripts/are-audit.sh` (`local-example-in-sync`)
   fails if a variable named in the template still carries a real value in the tracked
   sources, and if the template names a `rata-` variable nothing defines.
+- **A value the template names must not be the target of a use-package `:custom` clause.**
+  `:custom` expands to `custom-theme-set-variables`, which runs when the *package* loads,
+  after `local.el`, and overwrites a plain `setq` without a word. Route it through a
+  `rata-` variable the clause reads from (`rata-khoj-server-url` is the worked example);
+  the `local-example-in-sync` audit fails on the direct form (L-051).
 - Tokens and passwords do **not** go here. They live in `~/.authinfo.gpg`, read lazily
   through `rata-auth-get` (`lisp/init-system.el:50`) so that startup never blocks on GPG.
 - `lisp/init-sql.el` is the worked example: its six Snowflake parameters are `nil` in git and
@@ -229,6 +234,24 @@ init-present → init-dashboard
 - `init-dev.el` — lsp-mode, apheleia (formatting), flycheck, magit, projectile, vterm, diff-hl
 - `init-lang.el` — cross-cutting language infrastructure: tree-sitter (treesit-auto + grammar sources), dap-mode core, combobulate. Per-language config lives in dedicated `init-<lang>.el` files that load after this one.
 - `init-<lang>.el` — one file per language: `init-rust`, `init-go`, `init-python`, `init-cpp`, `init-cmake`, `init-terraform`, `init-just`, `init-docker`, `init-markdown`, `init-yaml`, `init-ansible`, `init-jupyter`, `init-helm`, `init-pkgbuild`. Each contains the `use-package` forms, mode-local keybindings, and helper functions for that one language.
+- `init-llm.el` — gptel, ellama, aidermacs and agent-shell under `SPC a i`. **The three
+  model tools are configured from one list, `rata-llm-providers`** (D-022): each entry is a
+  plist with a `:name`, a `:protocol` (`ollama`, or `openai` for any OpenAI-compatible
+  chat-completions server such as LiteLLM), a base `:url`, a `:models` list whose first
+  entry is the default, and optionally an `:embedding-model` and an `:auth-host`. Pure
+  functions (`rata-llm-gptel-backend-spec`, `rata-llm-ellama-provider-spec`,
+  `rata-llm-aider-model`, `rata-llm-aider-environment`) derive each tool's own shape from
+  the same entry, and are tested against a fixture of each protocol. The tracked default
+  is Ollama on localhost, which is not identity, so it stays in git; a work proxy is set
+  in `local.el` (the template is in `local.el.example`). **No key is in either file:** an
+  `openai` entry reads it from `~/.authinfo.gpg` via `rata-auth-get`, through a closure
+  gptel and llm call at request time, and for aider from
+  `aidermacs-before-run-backend-hook`, which upstream runs inside a `let` of
+  `process-environment` so the key reaches the aider child and nothing else. gptel and
+  ellama register every entry (switch with `gptel-menu` / `ellama-provider-select`);
+  aider takes the first. A malformed entry is a `display-warning` at load naming the
+  entry and the fault, which `just batch-strict` fails on. The agent-shell half (ACP
+  adapters, the GUI Enter fold fix) is unaffected by the provider list.
 - `init-claude-loop.el` — drives the `claude` CLI through a `- [ ]` checklist file, one headless `claude -p` process per task. Pure Elisp (no external package): `make-process` + a filter that decodes `--output-format stream-json` events into the `*claude-loop*` buffer. The only module in the config with real async-process plumbing, and the only one with its own state machine, so it has conventions of its own:
   - **Control flow is a trampoline, not a callback chain.** Sentinels and timers only record an outcome and call `rata-claude-loop--later`; every transition then runs from a zero-delay timer at top level. Errors signalled inside a sentinel are demoted to a `*Messages*` line, and marking a checkbox calls `save-buffer` and `org-todo` (arbitrary hook code) — neither belongs in a process callback. `rata-claude-loop--guard` turns any error into a visible halt.
   - **Staleness is handled by `:epoch`**, an integer bumped on every spawn and every stop. Callbacks and timers capture the epoch they were created under and no-op on mismatch; one check covers the child, the stderr pipe, the timeout timer, the grace-period kill and the pending step timer. `:outcome` is write-once per attempt so a timeout's verdict survives the kill it causes.

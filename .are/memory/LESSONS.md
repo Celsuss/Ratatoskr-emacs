@@ -1414,3 +1414,40 @@ not a keymap: turning one on in a test runs whatever its body runs, so read the
 `define-derived-mode` before you `funcall` it. And read ERT's summary line, not its
 failure lines — a run that never printed `Ran N tests` did not run N tests. Related:
 L-034, FAIL-0016.
+
+## L-050 — In batch, every minibuffer read is a hang or an abort; fence `read-from-minibuffer` in the harness and give the recipe `/dev/null`
+
+**Date:** 2026-09-14. `(require 'aidermacs)` in a new test loaded its vterm backend, vterm
+asked "Compile vterm-module? (y or n)", and `just test-ert` sat on a socket read for seven
+minutes with no failure and no summary (FAIL-0022). L-049 had fenced the *network*
+chokepoints after a passphrase prompt; the prompt itself — the stdin read — was the
+general case and was still open. Apply: (1) the harness overrides `read-from-minibuffer`,
+`read-string` and `yes-or-no-p` to signal with the prompt text — three, because the last
+two are C primitives that read the minibuffer inside C where advice on the first is
+invisible; a probe of all five prompt kinds (`y-or-n-p`, `yes-or-no-p`, `read-string`,
+`read-passwd`, `completing-read`) is what showed one entry caught only `completing-read`,
+so verify a fence by driving every path into it, not the one you met; (2) the recipe redirects stdin
+from `/dev/null` so a read the advice cannot see errors instead of waiting; (3) a
+`require` in a test is a load of every top-level form in the package *and its requires* —
+read them first, and prefer the sub-file that owns the variable you need
+(`aidermacs-models`, not `aidermacs`). A run that prints no `Ran N tests` line did not run
+N tests; check the process's `wchan` and fd 0 before assuming slowness. Related: L-049,
+FAIL-0021, FAIL-0016.
+
+## L-051 — A use-package `:custom` clause beats a `local.el` setq; a template line that names such a variable is a lie
+
+**Date:** 2026-09-15. `local.el.example` told the reader to `(setq khoj-server-url ...)` for
+a different homelab host, and `init-khoj.el` set the same variable through `:custom`.
+`:custom` expands to `custom-theme-set-variables` under the `use-package` theme, which
+runs when the package loads — after `local.el` — and sets the value unconditionally, so
+the override was overwritten the moment khoj loaded. Probed in batch: `setq`, then a
+theme-set of the same variable; the theme value won. Nothing had ever tested the template
+line, and the audit's comment explicitly excused the variable as "set through :custom".
+Apply: (1) a per-machine value that a module passes to `:custom` goes through a `rata-`
+`defvar` the clause reads from, and the template names the `rata-` variable
+(`rata-khoj-server-url`); (2) the `local-example-in-sync` audit now fails when a
+template variable is the target of any `:custom` clause in `lisp/`;
+(3) `rata-test-khoj-server-url-comes-from-rata-variable` loads khoj and asserts the
+package's variable equals the `rata-` one. The same mechanism is why
+`aidermacs-default-model` in `init-llm.el` is *computed from* `rata-llm-providers` inside
+its `:custom` clause rather than set beside it. Related: D-012, L-011, L-039, FAIL-0016.

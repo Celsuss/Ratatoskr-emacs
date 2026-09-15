@@ -20,6 +20,7 @@
 *** [[https://antonz.org/index.xml][Anton Zhiyanov]] :antonz:databases:golang:
 *** [[https://registerspill.thorstenball.com/feed][Registerspill]] :registerspill:editors:tooling:weekly:
 *** [[https://ludic.mataroa.blog/rss/][Ludic]] :ludic:opinion:slow:
+*** [[https://blog.orhun.dev/rss.xml][Orhun]] :orhun:rust:tooling:
 
 ** Machine Learning                                                  :ml:blog:
 *** [[https://jalammar.github.io/feed.xml][Jay Alammar]] :jayalammar:llm:deep:slow:

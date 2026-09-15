@@ -44,7 +44,7 @@ that can actually go wrong in an Emacs configuration are:
 | lisp/init-present.el | notes,operator-data | MEDIUM | relevant | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | lisp/init-dialogic.el | notes,operator-data | MEDIUM | relevant | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | lisp/init-khoj.el | integrations,operator-data | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
-| lisp/init-llm.el | integrations,operator-data | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
+| lisp/init-llm.el | integrations,operator-data,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-irc.el | integrations,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-elfeed.el | integrations,network | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-jira.el | integrations,network,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |

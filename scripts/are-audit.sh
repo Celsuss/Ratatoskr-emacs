@@ -388,26 +388,40 @@ fi
 # lisp/ where it would reach the public remote again.
 #
 # Only `rata-'-prefixed names are checked for existence; the template may also mention
-# third-party variables (khoj-server-url) that are set through use-package :custom and
-# have no defvar in this tree. The value scan reads the defvar line and the one after
+# third-party variables. The value scan reads the defvar line and the one after
 # it, which is where every value in this repo currently sits.
+#
+# Third: no variable the template tells the reader to setq may be the target of a
+# use-package :custom clause in lisp/. :custom expands to `custom-theme-set-variables',
+# which sets the variable when the package loads — after local.el — so the reader's
+# value is silently overwritten and the template line is a lie. `khoj-server-url' was
+# exactly that until 2026-09-15 (L-051); the fix is a `rata-' variable the :custom
+# clause reads from, which is what the template must name instead.
 echo "=== Check: local-example-in-sync ==="
 example="local.el.example"
 if [ -f "$example" ]; then
     while IFS= read -r var; do
         [ -n "$var" ] || continue
+        if grep -rqE "^[[:space:]]+\(${var}[[:space:]]" lisp/ 2>/dev/null \
+           && grep -rlE "^[[:space:]]+\(${var}[[:space:]]" lisp/ 2>/dev/null \
+              | xargs grep -lE '^[[:space:]]+:custom' >/dev/null 2>&1; then
+            fail "$example tells the reader to setq '$var', but a use-package :custom clause in lisp/ sets it at package load and would overwrite that; route it through a rata- variable (L-051)"
+        fi
         case "$var" in rata-*) ;; *) continue ;; esac
         def=$(grep -rhA1 -E "^\((defvar|defcustom) ${var}( |$)" lisp/ init.el early-init.el 2>/dev/null || true)
         if [ -z "$def" ]; then
             fail "$example sets '$var', which no defvar or defcustom defines"
             continue
         fi
-        # A quoted string in the definition is only allowed if it is a placeholder.
+        # A quoted string in the definition is only allowed if it is a placeholder, or
+        # a name that resolves nowhere but on the operator's own machine or LAN
+        # (localhost, *.homelab.local) — those are not identity, which is why D-022
+        # let localhost Ollama stay tracked and why `rata-khoj-server-url' may too.
         value=$(printf '%s' "$def" | sed -n 's/^([^ ]* [^ ]* \(.*\)$/\1/p')
         case "$value" in
             *'"'*)
                 case "$value" in
-                    *CHANGE-ME* | *YOUR* | *example*) ;;
+                    *CHANGE-ME* | *YOUR* | *example* | *localhost* | *.homelab.local*) ;;
                     *) fail "$var still has a real value in the tracked sources; it belongs in local.el ($example)" ;;
                 esac
                 ;;

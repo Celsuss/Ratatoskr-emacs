@@ -44,6 +44,24 @@
                          fn verb endpoint))
                 '((name . rata-test-no-network)))))
 
+;; The same fence for stdin.  In batch every minibuffer read -- `y-or-n-p',
+;; `yes-or-no-p', `read-string', `read-passwd', `completing-read' -- reads
+;; standard input: EOF when it is /dev/null, a silent hang when it is a socket
+;; or a TTY.  `(require 'aidermacs)' did exactly that: its vterm backend
+;; requires vterm, and vterm asks "Compile vterm-module? (y or n)" at load, so
+;; the suite sat at test 83 of 109 until killed (FAIL-0022).  Three readers
+;; are fenced, not one: `read-string' and `yes-or-no-p' are C primitives that
+;; reach the minibuffer reader inside C, where advice on `read-from-minibuffer'
+;; is invisible -- `y-or-n-p' goes through `read-string' in batch, `yes-or-no-p'
+;; through neither.  Probed: all five prompts above signal this error.  A test
+;; that needs an answer stubs the reader with `cl-letf'.
+(dolist (reader '(read-from-minibuffer read-string yes-or-no-p))
+  (advice-add reader :override
+              (lambda (prompt &rest _)
+                (error "rata-test: something prompted on stdin (%S); stub it in the test"
+                       prompt))
+              '((name . rata-test-no-stdin))))
+
 ;;; ============================================================
 ;;; Keybinding extraction helpers
 ;;; ============================================================
@@ -2286,6 +2304,197 @@ L-029 shape once more, so the two cases are kept apart."
           (set-file-times note (time-add (current-time) 60))
           (should (eq (rata-blog--state note md) 'stale)))
       (delete-directory tmp t))))
+
+;;; ============================================================
+;;; Test — LLM providers drive gptel, ellama and aidermacs (lisp/init-llm.el)
+;;; ============================================================
+
+(defconst rata-test--llm-ollama-provider
+  '(:name "Ollama" :protocol ollama :url "http://localhost:11434"
+    :models ("qwen3.5-coder:9b-32k" "mistral:latest")
+    :embedding-model "nomic-embed-text")
+  "The home shape: local Ollama, no key.")
+
+(defconst rata-test--llm-litellm-provider
+  '(:name "LiteLLM" :protocol openai :url "https://litellm.example.com/v1/"
+    :models ("gpt-x" "gpt-y"))
+  "The work shape: an OpenAI-compatible proxy, keyed.  Trailing slash on
+purpose -- the entry is hand-typed in local.el and both spellings must work.")
+
+(ert-deftest rata-test-llm-ollama-provider-configures-all-three-tools ()
+  "One Ollama entry becomes gptel's, ellama's and aider's own configuration.
+D-022: endpoint and models are data in `rata-llm-providers\='; each tool
+derives its shape from the same entry, so a machine changes one variable."
+  (let* ((p rata-test--llm-ollama-provider)
+         (gptel (rata-llm-gptel-backend-spec p))
+         (ellama (rata-llm-ellama-provider-spec p)))
+    (should (eq (car gptel) 'gptel-make-ollama))
+    (should (equal (cadr gptel) "Ollama"))
+    (let ((args (cddr gptel)))
+      (should (equal (plist-get args :host) "localhost:11434"))
+      (should (equal (plist-get args :protocol) "http"))
+      (should (equal (plist-get args :endpoint) "/api/chat"))
+      ;; Bare tags as symbols: gptel talks to Ollama directly, no litellm prefix.
+      (should (equal (plist-get args :models) '(qwen3.5-coder:9b-32k mistral:latest)))
+      (should-not (plist-get args :key)))
+    (should (eq (rata-llm-gptel-default-model p) 'qwen3.5-coder:9b-32k))
+    (should (eq (car ellama) 'make-llm-ollama))
+    (let ((args (cdr ellama)))
+      (should (equal (plist-get args :scheme) "http"))
+      (should (equal (plist-get args :host) "localhost"))
+      (should (eql (plist-get args :port) 11434))
+      (should (equal (plist-get args :chat-model) "qwen3.5-coder:9b-32k"))
+      (should (equal (plist-get args :embedding-model) "nomic-embed-text")))
+    (should (equal (rata-llm-aider-model p) "ollama_chat/qwen3.5-coder:9b-32k"))
+    (should (equal (rata-llm-aider-environment p nil)
+                   '("OLLAMA_API_BASE=http://localhost:11434")))
+    (should-not (rata-llm-auth-host p))))
+
+(ert-deftest rata-test-llm-openai-provider-configures-all-three-tools ()
+  "An OpenAI-compatible entry reaches all three tools, keyed but key-free.
+The key is a closure over the auth-source host, resolved through
+`rata-auth-get\=' when called and never at load; the config carries the
+host, ~/.authinfo.gpg carries the secret.  Stubbed here: nothing in
+tests/ opens that file."
+  (let* ((p rata-test--llm-litellm-provider)
+         (asked nil)
+         (gptel (rata-llm-gptel-backend-spec p))
+         (ellama (rata-llm-ellama-provider-spec p)))
+    (should (equal (rata-llm-auth-host p) "litellm.example.com"))
+    (should (eq (car gptel) 'gptel-make-openai))
+    (let ((args (cddr gptel)))
+      (should (equal (plist-get args :host) "litellm.example.com"))
+      (should (equal (plist-get args :protocol) "https"))
+      (should (equal (plist-get args :endpoint) "/v1/chat/completions"))
+      (should (equal (plist-get args :models) '(gpt-x gpt-y)))
+      (should (functionp (plist-get args :key)))
+      (cl-letf (((symbol-function 'rata-auth-get)
+                 (lambda (host &optional _user) (setq asked host) "sk-test")))
+        (should (equal (funcall (plist-get args :key)) "sk-test")))
+      (should (equal asked "litellm.example.com")))
+    (should (eq (car ellama) 'make-llm-openai-compatible))
+    (let ((args (cdr ellama)))
+      ;; llm wants the base with exactly one trailing slash.
+      (should (equal (plist-get args :url) "https://litellm.example.com/v1/"))
+      (should (functionp (plist-get args :key)))
+      (should (equal (plist-get args :chat-model) "gpt-x"))
+      (should-not (plist-member args :embedding-model)))
+    (should (equal (rata-llm-aider-model p) "openai/gpt-x"))
+    (should (equal (rata-llm-aider-environment p "sk-test")
+                   '("OPENAI_API_BASE=https://litellm.example.com/v1"
+                     "OPENAI_API_KEY=sk-test")))
+    (should (equal (rata-llm-aider-environment p nil)
+                   '("OPENAI_API_BASE=https://litellm.example.com/v1")))
+    ;; An explicit nil :auth-host means a keyless server, not "derive it".
+    (let ((keyless (append '(:auth-host nil) p)))
+      (should-not (rata-llm-auth-host keyless))
+      (should-not (plist-get (cddr (rata-llm-gptel-backend-spec keyless)) :key)))
+    (let ((named (append '(:auth-host "llm-proxy") p)))
+      (should (equal (rata-llm-auth-host named) "llm-proxy")))))
+
+(ert-deftest rata-test-llm-aider-environment-is-scoped-to-the-aider-child ()
+  "The hook is installed, and what it sets stays inside aidermacs's `let\='.
+aidermacs runs `aidermacs-before-run-backend-hook\=' inside a `let\=' of
+`process-environment\=' (aidermacs-backends.el:91); pushing there hands the
+key to the aider child and to nothing else Emacs spawns."
+  (should (memq #'rata-llm-aider-set-environment aidermacs-before-run-backend-hook))
+  (let ((rata-llm-providers (list rata-test--llm-litellm-provider))
+        (before (getenv "OPENAI_API_KEY")))
+    (cl-letf (((symbol-function 'rata-auth-get)
+               (lambda (host &optional _user) (concat "key-for-" host))))
+      (let ((process-environment (copy-sequence process-environment)))
+        (rata-llm-aider-set-environment)
+        (should (equal (getenv "OPENAI_API_BASE") "https://litellm.example.com/v1"))
+        (should (equal (getenv "OPENAI_API_KEY") "key-for-litellm.example.com"))))
+    (should (equal (getenv "OPENAI_API_KEY") before))))
+
+(ert-deftest rata-test-llm-provider-problems-name-the-entry ()
+  "A malformed entry is reported by index and name, one line per fault.
+The loaded value is checked too: on a machine whose local.el entry is
+wrong, this is the test that says so, in the same words as the startup
+warning."
+  (should-not (rata-llm-provider-problems (list rata-test--llm-ollama-provider
+                                                rata-test--llm-litellm-provider)))
+  (should-not (rata-llm-provider-problems rata-llm-providers))
+  (should (equal (rata-llm-provider-problems "ollama")
+                 '("rata-llm-providers is not a list")))
+  (let ((problems (rata-llm-provider-problems
+                   '((:name "Bad" :protocol litellm :url "litellm.example.com" :models ())
+                     (:protocol ollama)))))
+    (should (= (length problems) 4))
+    (should (cl-every (lambda (s) (string-prefix-p "entry 0 (Bad)" s))
+                      (seq-take problems 3)))
+    (should (string-match-p ":protocol" (nth 0 problems)))
+    (should (string-match-p ":url" (nth 1 problems)))
+    (should (string-match-p ":models" (nth 2 problems)))
+    (should (string-prefix-p "entry 1 (unnamed)" (nth 3 problems)))))
+
+(ert-deftest rata-test-llm-tracked-default-is-localhost-only ()
+  "The default in the tracked source names no host but localhost.
+D-022: Ollama on localhost may stay in git because it is not identity;
+anything else -- a work proxy, a homelab hostname -- belongs in local.el.
+Reads the file on disk, not the loaded value, which local.el may have
+replaced on this machine."
+  (let ((default
+         (with-temp-buffer
+           (insert-file-contents
+            (expand-file-name "lisp/init-llm.el" user-emacs-directory))
+           (goto-char (point-min))
+           (re-search-forward "^(defcustom rata-llm-providers$")
+           (eval (read (current-buffer)) t))))
+    (should (consp default))
+    (should-not (rata-llm-provider-problems default))
+    (dolist (provider default)
+      (should (eq (plist-get provider :protocol) 'ollama))
+      (should (equal (url-host (url-generic-parse-url (plist-get provider :url)))
+                     "localhost")))))
+
+(ert-deftest rata-test-llm-tools-start-on-the-default-provider ()
+  "Once loaded, gptel, ellama and aidermacs all sit on the first provider.
+This is the FAIL-0016 check for this module: the two :config bodies must
+actually run and agree with the data, and the aidermacs :custom value must
+be applied when its `defcustom\=' runs (it is void before the package loads,
+like the ACP adapter pins -- so the package is loaded here first)."
+  (let ((default (rata-llm-default-provider)))
+    ;; `aidermacs-models', not `aidermacs': the umbrella pulls in the vterm
+    ;; backend, and vterm prompts to compile its module at load (FAIL-0022).
+    (skip-unless (and (require 'aidermacs-models nil t) (require 'gptel nil t)
+                      (require 'ellama nil t)))
+    (should (equal aidermacs-default-model (rata-llm-aider-model default)))
+    (should (equal (gptel-backend-name gptel-backend) (plist-get default :name)))
+    (should (eq gptel-model (rata-llm-gptel-default-model default)))
+    (should (= (length ellama-providers) (length rata-llm-providers)))
+    (should (equal (caar ellama-providers) (plist-get default :name)))
+    (should (eq ellama-provider (cdar ellama-providers)))))
+
+;;; ============================================================
+;;; Test — Khoj's server comes from a variable local.el can set (lisp/init-khoj.el)
+;;; ============================================================
+
+(ert-deftest rata-test-khoj-server-url-comes-from-rata-variable ()
+  "`khoj-server-url\=' is `rata-khoj-server-url\=' once khoj has loaded.
+L-051: use-package :custom runs `custom-theme-set-variables\=' when the
+package loads, after local.el, so a template line saying
+\=(setq khoj-server-url ...) was overwritten the moment khoj loaded.  The
+module now hands :custom the `rata-\=' variable, and local.el.example names
+that one.  Loads khoj with its auto-index timer disabled: the package
+would otherwise schedule `khoj--server-index-files\=' -- a network call --
+sixty seconds in."
+  (should (boundp 'rata-khoj-server-url))
+  (should (stringp rata-khoj-server-url))
+  (defvar khoj-auto-index)
+  (defvar khoj--index-timer)
+  (let ((khoj-auto-index nil))
+    (skip-unless (require 'khoj nil t)))
+  (when (and (boundp 'khoj--index-timer) khoj--index-timer)
+    (cancel-timer khoj--index-timer))
+  (should (equal khoj-server-url rata-khoj-server-url))
+  ;; The template must name the variable that actually works.
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "local.el.example" user-emacs-directory))
+    (should (search-forward "(setq rata-khoj-server-url" nil t))
+    (goto-char (point-min))
+    (should-not (search-forward "(setq khoj-server-url" nil t))))
 
 ;;; ============================================================
 ;;; Test — agent-shell ACP adapter pins (lisp/init-llm.el)
