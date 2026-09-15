@@ -1,6 +1,9 @@
 ;;; -*- lexical-binding: t; -*-
 ;;; init-elfeed.el --- Elfeed RSS reader configuration
 
+(eval-when-compile
+  (defvar elfeed-search-filter))
+
 (defcustom rata-elfeed-feeds-file
   (expand-file-name "feeds.org" user-emacs-directory)
   "Path to the org file declaring elfeed feeds."
@@ -80,6 +83,25 @@ than derived from LABEL so that the command names stay greppable."
   "Set elfeed search FILTER string."
   (elfeed-search-set-filter filter))
 
+(defun rata-elfeed--toggle-unread-filter (filter)
+  "Toggle FILTER between unread-only and all-posts modes.
+All terms other than `+unread' are preserved."
+  (let* ((terms (split-string filter "[ \t]+" t))
+         (unread-only (member "+unread" terms)))
+    (string-join (if unread-only
+                     (delete "+unread" terms)
+                   (append terms '("+unread")))
+                 " ")))
+
+(defun rata-elfeed-toggle-unread-filter ()
+  "Toggle the current Elfeed view between unread-only and all posts."
+  (interactive)
+  (let* ((unread-only (member "+unread"
+                              (split-string elfeed-search-filter "[ \t]+" t)))
+         (filter (rata-elfeed--toggle-unread-filter elfeed-search-filter)))
+    (elfeed-search-set-filter filter)
+    (message "Elfeed: showing %s" (if unread-only "all posts" "unread posts"))))
+
 (defun rata-elfeed--view-symbol (slug)
   "Return the command symbol for view SLUG."
   (intern (format "rata-elfeed-filter-%s" slug)))
@@ -97,6 +119,8 @@ commands satisfy `commandp' whether or not elfeed itself has loaded."
   "Bind the keyed `rata-elfeed-views' under `f' in `elfeed-search-mode-map'.
 Must run after elfeed loads — the keymap does not exist before that."
   (let ((args (list "f"  '(:ignore t :which-key "filter")
+                    "fR" '(rata-elfeed-toggle-unread-filter
+                            :which-key "toggle unread/all")
                     "fv" '(rata-elfeed-filter-view :which-key "pick view..."))))
     (pcase-dolist (`(,key ,slug ,label ,_filter) rata-elfeed-views)
       (when key

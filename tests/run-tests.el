@@ -1920,6 +1920,36 @@ Date (@), feed (=) and title (~) terms are not tags and are skipped."
         (push (substring term 1) tags)))
     tags))
 
+(ert-deftest rata-test-elfeed-toggle-unread-filter-preserves-view-terms ()
+  "The all-posts toggle must change only Elfeed's unread term."
+  (should (equal (rata-elfeed--toggle-unread-filter
+                  "@6-months-ago +unread +emacs -news")
+                 "@6-months-ago +emacs -news"))
+  (should (equal (rata-elfeed--toggle-unread-filter
+                  "@6-months-ago +emacs -news")
+                 "@6-months-ago +emacs -news +unread")))
+
+(ert-deftest rata-test-elfeed-toggle-unread-filter-command ()
+  "The interactive toggle updates Elfeed's filter and reports its state."
+  (let ((elfeed-search-filter "@6-months-ago +unread +emacs")
+        filter message)
+    (cl-letf (((symbol-function 'elfeed-search-set-filter)
+               (lambda (value) (setq filter value)))
+              ((symbol-function 'message)
+               (lambda (format-string &rest args)
+                 (setq message (apply #'format format-string args)))))
+      (rata-elfeed-toggle-unread-filter))
+    (should (equal filter "@6-months-ago +emacs"))
+    (should (equal message "Elfeed: showing all posts"))))
+
+(ert-deftest rata-test-elfeed-toggle-unread-filter-key-is-live ()
+  "`f R' must reach the unread/all-posts toggle in Elfeed search buffers."
+  (skip-unless (require 'elfeed nil t))
+  (rata-elfeed-bind-view-keys)
+  (should (eq (lookup-key (evil-get-auxiliary-keymap elfeed-search-mode-map 'normal)
+                          (kbd "f R"))
+              'rata-elfeed-toggle-unread-filter)))
+
 (ert-deftest rata-test-elfeed-root-tag-present ()
   "feeds.org must carry the tag `elfeed-org' looks for.
 `rmh-elfeed-org-tree-id' is never set in this config, so the default
