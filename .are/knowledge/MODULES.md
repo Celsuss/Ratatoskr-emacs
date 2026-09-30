@@ -55,6 +55,7 @@ that can actually go wrong in an Emacs configuration are:
 | lisp/init-ui.el | ui | MEDIUM | relevant | knowledge/ARCHITECTURE.md |
 | lisp/init-dashboard.el | ui | MEDIUM | relevant | knowledge/ENVIRONMENTS.md |
 | lisp/init-persp.el | ui,state | MEDIUM | relevant | knowledge/ARCHITECTURE.md |
+| lisp/init-agent-center.el | ui,state | MEDIUM | relevant | knowledge/ARCHITECTURE.md |
 | lisp/init-gamedev.el | languages,subprocess | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-k8s.el | integrations | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-mcp.el | integrations,unloaded | LOW | fast | knowledge/ARCHITECTURE.md |

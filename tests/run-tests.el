@@ -228,6 +228,8 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC f f" . find-file)
     ("SPC j d" . xref-find-definitions)
     ("SPC J j" . jira-issues)
+    ("SPC a i o" . rata-agent-center-toggle)
+    ("SPC a i n" . rata-agent-center-next-attention)
     ("SPC J l" . rata-jira-org-link-heading)
     ("SPC o b d d" . rata-dialogic-insert-block)
     ("SPC o b e" . org-hugo-export-wim-to-md)
@@ -2973,6 +2975,591 @@ the difference between a mailbox and a duplicated one."
                       rata-mail-bridge-cert-candidates))
     ;; No real address leaked into the template.
     (should (string-match-p "CHANGE-ME@proton.me" text))))
+
+;;; ============================================================
+;;; init-agent-center: state model and registry
+;;; ============================================================
+;; Nothing here starts an agent: events are synthetic alists of the shape
+;; `agent-shell--emit-event' builds, fed straight to the handler.
+
+(defun rata-test-agent-center--ev (event &rest data)
+  "Build an agent-shell event alist for EVENT with DATA as a plist."
+  (let ((alist (list (cons :event event))))
+    (when data
+      (let (pairs)
+        (while data
+          (push (cons (pop data) (pop data)) pairs))
+        (push (cons :data (nreverse pairs)) alist)))
+    alist))
+
+(defmacro rata-test-agent-center--with-registry (&rest body)
+  "Run BODY against an empty private registry, with rendering stubbed out."
+  (declare (indent 0))
+  `(let ((rata-agent-center--registry (make-hash-table :test #'eq))
+         (renders 0))
+     (ignore renders)
+     (cl-letf (((symbol-function 'rata-agent-center--schedule-render)
+                (lambda () (cl-incf renders))))
+       ,@body)))
+
+(ert-deftest rata-test-agent-center-next-state-table ()
+  "Every row of the plan's state table is a transition."
+  (let ((ev #'rata-test-agent-center--ev))
+    ;; needs-input
+    (should (eq (rata-agent-center--next-state 'working (funcall ev 'permission-request) nil)
+                'needs-input))
+    ;; error
+    (should (eq (rata-agent-center--next-state 'working (funcall ev 'error :message "x") nil)
+                'error))
+    ;; done: a finished turn nobody is looking at
+    (should (eq (rata-agent-center--next-state 'working (funcall ev 'turn-complete) nil)
+                'done))
+    ;; ...and ready when the shell is the selected window's buffer
+    (should (eq (rata-agent-center--next-state 'working (funcall ev 'turn-complete) t)
+                'ready))
+    ;; working
+    (dolist (e '(input-submitted permission-response tool-call-update))
+      (should (eq (rata-agent-center--next-state 'ready (funcall ev e) nil) 'working)))
+    ;; starting, and the handshake events between do not leave it
+    (should (eq (rata-agent-center--next-state 'ready (funcall ev 'init-started) nil)
+                'starting))
+    (dolist (e '(init-client init-handshake init-session session-selected init-finished))
+      (should (eq (rata-agent-center--next-state 'starting (funcall ev e) nil) 'starting)))
+    ;; ready: prompt shown, or a `done' shell visited
+    (should (eq (rata-agent-center--next-state 'starting (funcall ev 'prompt-ready) nil)
+                'ready))
+    (should (eq (rata-agent-center--next-state 'done (funcall ev 'visited) t) 'ready))
+    ;; Visiting only clears `done'; it never hides a question or an error.
+    (dolist (s '(needs-input error working))
+      (should (eq (rata-agent-center--next-state s (funcall ev 'visited) t) s)))
+    ;; A tool call updating while a permission question is open does not hide it:
+    ;; only the answer does.
+    (should (eq (rata-agent-center--next-state 'needs-input (funcall ev 'tool-call-update) nil)
+                'needs-input))
+    ;; Streamed chunks and unknown events change nothing.
+    (dolist (e '(agent-message-chunk idle session-title-changed file-write no-such-event))
+      (should (eq (rata-agent-center--next-state 'done (funcall ev e) nil) 'done)))))
+
+(ert-deftest rata-test-agent-center-state-order ()
+  "Sort order is the plan's: attention first, idle last."
+  (should (equal rata-agent-center-states
+                 '(needs-input error done working starting ready)))
+  (should (< (rata-agent-center--state-rank 'needs-input)
+             (rata-agent-center--state-rank 'error)
+             (rata-agent-center--state-rank 'done)
+             (rata-agent-center--state-rank 'working)
+             (rata-agent-center--state-rank 'starting)
+             (rata-agent-center--state-rank 'ready)))
+  ;; An unknown state sorts after every known one rather than signalling.
+  (should (> (rata-agent-center--state-rank 'bogus)
+             (rata-agent-center--state-rank 'ready))))
+
+(ert-deftest rata-test-agent-center-reconcile-trusts-status ()
+  "`agent-shell-status' overrides a recorded state events cannot explain."
+  (should (eq (rata-agent-center--reconcile 'working 'blocked nil) 'needs-input))
+  (should (eq (rata-agent-center--reconcile 'ready 'busy nil) 'working))
+  (should (eq (rata-agent-center--reconcile 'done 'busy nil) 'working))
+  ;; Recorded busy, status idle, no `turn-complete' seen: the turn ended unseen.
+  (should (eq (rata-agent-center--reconcile 'working 'ready nil) 'done))
+  (should (eq (rata-agent-center--reconcile 'working 'ready t) 'ready))
+  (should (eq (rata-agent-center--reconcile 'needs-input 'ready nil) 'done))
+  ;; Agreement, and the states status cannot see, are left alone.
+  (dolist (s '(done ready error starting))
+    (should (eq (rata-agent-center--reconcile s 'ready nil) s)))
+  (should (eq (rata-agent-center--reconcile 'working 'busy nil) 'working))
+  (should (eq (rata-agent-center--reconcile 'needs-input 'blocked nil) 'needs-input))
+  ;; No status (shell gone, agent-shell unloaded): keep what we have.
+  (should (eq (rata-agent-center--reconcile 'working nil nil) 'working)))
+
+(ert-deftest rata-test-agent-center-registry-follows-events ()
+  "A registered shell's entry tracks state, title, stop reason and cost."
+  (rata-test-agent-center--with-registry
+    (with-temp-buffer
+      (let* ((buf (current-buffer))
+             (ev #'rata-test-agent-center--ev)
+             (handler (progn (rata-agent-center--add-entry
+                              buf :layout "work" :project "~/src/x/" :agent "Claude")
+                             (rata-agent-center--make-handler buf)))
+             (get (lambda (k) (plist-get (rata-agent-center--entry buf) k))))
+        (should (eq (funcall get :state) 'starting))
+        (should (equal (funcall get :layout) "work"))
+        (should (equal (funcall get :agent) "Claude"))
+        (funcall handler (funcall ev 'prompt-ready))
+        (should (eq (funcall get :state) 'ready))
+        (funcall handler (funcall ev 'input-submitted :prompt "hi"))
+        (should (eq (funcall get :state) 'working))
+        (let ((since (funcall get :since)))
+          ;; Same state again: the clock does not restart.
+          (funcall handler (funcall ev 'tool-call-update :tool-call-id "t1"))
+          (should (eq (funcall get :since) since)))
+        (funcall handler (funcall ev 'permission-request :request-id 1))
+        (should (eq (funcall get :state) 'needs-input))
+        (funcall handler (funcall ev 'permission-response :request-id 1))
+        (should (eq (funcall get :state) 'working))
+        (funcall handler (funcall ev 'session-title-changed :title "Fix the parser"))
+        (should (equal (funcall get :title) "Fix the parser"))
+        (funcall handler (funcall ev 'turn-complete
+                                  :stop-reason "end_turn"
+                                  :usage '((:cost-amount . 0.12) (:cost-currency . "USD"))))
+        (should (eq (funcall get :state) 'done))
+        (should (equal (funcall get :last-stop-reason) "end_turn"))
+        (should (equal (funcall get :cost) 0.12))
+        (funcall handler (funcall ev 'error :code -1 :message "overloaded"))
+        (should (eq (funcall get :state) 'error))
+        (should (equal (funcall get :error) "overloaded"))
+        ;; Every event that changed something asked for a render; none rendered.
+        (should (> renders 0))
+        (funcall handler (funcall ev 'clean-up))
+        (should-not (rata-agent-center--entry buf))))))
+
+(ert-deftest rata-test-agent-center-turn-complete-while-visible-is-ready ()
+  "A turn that finishes in front of you is not `done' (nothing unread)."
+  (rata-test-agent-center--with-registry
+    (with-temp-buffer
+      (let ((buf (current-buffer)))
+        (rata-agent-center--add-entry buf :state 'working)
+        (save-window-excursion
+          (set-window-buffer (selected-window) buf)
+          (funcall (rata-agent-center--make-handler buf)
+                   (rata-test-agent-center--ev 'turn-complete)))
+        (should (eq (plist-get (rata-agent-center--entry buf) :state) 'ready))))))
+
+(ert-deftest rata-test-agent-center-erroring-callback-shows-error ()
+  "A bug in the handler lands on the entry as `error', not in *Messages*.
+agent-shell demotes a subscriber's error to a `message', which would hide it."
+  (rata-test-agent-center--with-registry
+    (with-temp-buffer
+      (let ((buf (current-buffer)))
+        (rata-agent-center--add-entry buf :state 'working)
+        (cl-letf (((symbol-function 'rata-agent-center--next-state)
+                   (lambda (&rest _) (error "Boom in next-state"))))
+          ;; Must not signal: the handler contains its own failure.
+          (funcall (rata-agent-center--make-handler buf)
+                   (rata-test-agent-center--ev 'input-submitted)))
+        (let ((entry (rata-agent-center--entry buf)))
+          (should (eq (plist-get entry :state) 'error))
+          (should (string-match-p "Boom in next-state" (plist-get entry :error))))))))
+
+(ert-deftest rata-test-agent-center-layout-capture ()
+  "The layout is the current persp at start, else the persp holding the buffer."
+  (should (featurep 'persp-mode))
+  (let ((name "rata-test-agent-center"))
+    (unwind-protect
+        (with-temp-buffer
+          (let ((buf (current-buffer)))
+            ;; Opened now: the current layout, whatever holds the buffer.
+            (should (equal (rata-agent-center--layout-for buf 'current)
+                           (safe-persp-name (get-current-persp))))
+            ;; Adopted later: the layout the buffer was added to wins.
+            (persp-add-new name)
+            (persp-add-buffer buf (persp-get-by-name name) nil nil)
+            (should (equal (rata-agent-center--layout-for buf 'adopted) name))))
+      (persp-remove-by-name name))))
+
+(ert-deftest rata-test-agent-center-adopt-and-disable ()
+  "Existing shells are adopted once; disable unsubscribes every token."
+  (rata-test-agent-center--with-registry
+    (let ((a (generate-new-buffer " *rata-test-shell-a*"))
+          (b (generate-new-buffer " *rata-test-shell-b*"))
+          (subscribed nil) (unsubscribed nil) (token 0))
+      (unwind-protect
+          (progn
+            (dolist (buf (list a b))
+              ;; Enough of a shell for the guard, without running the mode.
+              (with-current-buffer buf (setq-local major-mode 'agent-shell-mode)))
+            (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () (list a b)))
+                      ;; Adoption waits for the feature, not an autoload stub.
+                      ((symbol-function 'rata-agent-center--agent-shell-loaded-p)
+                       (lambda () t))
+                      ((symbol-function 'agent-shell-status) (lambda (&rest _) 'ready))
+                      ((symbol-function 'agent-shell-subscribe-to)
+                       (lambda (&rest args)
+                         (push (plist-get args :shell-buffer) subscribed)
+                         (cl-incf token)))
+                      ((symbol-function 'agent-shell-unsubscribe)
+                       (lambda (&rest args)
+                         (push (plist-get args :subscription) unsubscribed))))
+              (rata-agent-center--adopt)
+              (rata-agent-center--adopt)   ; idempotent: no second subscription
+              (should (= (length subscribed) 2))
+              (should (rata-agent-center--entry a))
+              (should (rata-agent-center--entry b))
+              (should (plist-get (rata-agent-center--entry a) :token))
+              (rata-agent-center-disable)
+              (should (equal (sort unsubscribed #'<) '(1 2)))
+              (should (= (hash-table-count rata-agent-center--registry) 0))
+              (should-not (memq #'rata-agent-center--on-mode-hook agent-shell-mode-hook))))
+        (kill-buffer a)
+        (kill-buffer b)
+        ;; Leave the real hook as init left it.
+        (rata-agent-center-enable)))))
+
+(ert-deftest rata-test-agent-center-sweep-drops-dead-buffers ()
+  "Entries whose buffer died without a `clean-up' are dropped at sweep."
+  (rata-test-agent-center--with-registry
+    (let ((buf (generate-new-buffer " *rata-test-dead-shell*")))
+      (rata-agent-center--add-entry buf)
+      (kill-buffer buf)
+      (rata-agent-center--sweep)
+      (should (= (hash-table-count rata-agent-center--registry) 0)))))
+
+;;; --- init-agent-center: the *Agents* panel (phase 2) ---
+
+(defun rata-test-agent-center--panel-windows ()
+  "Every window in the selected frame showing *Agents*, as (SIDE . WIDTH)."
+  (let ((buf (get-buffer rata-agent-center-buffer-name)))
+    (mapcar (lambda (w) (cons (window-parameter w 'window-side) (window-total-width w)))
+            (seq-filter (lambda (w) (and buf (eq (window-buffer w) buf)))
+                        (window-list nil 'nomini)))))
+
+(ert-deftest rata-test-agent-center-panel-survives-layout-switch ()
+  "Exactly one *Agents* side window after every layout switch while pinned,
+and none after closing -- in either layout.
+persp-mode saves each layout's window configuration, side windows included,
+and restores it on switch (probed 2026-09-30, L-053): left alone, the panel
+vanishes in a layout it was never opened in and comes back in one it was
+closed in."
+  (should (bound-and-true-p persp-mode))
+  (let ((orig (safe-persp-name (get-current-persp)))
+        (rata-agent-center-side 'right)
+        (rata-agent-center-width 45))
+    (unwind-protect
+        (progn
+          (persp-add-new "rata-ac-a")
+          (persp-add-new "rata-ac-b")
+          (persp-switch "rata-ac-a")
+          (rata-agent-center-toggle)
+          (should (equal (rata-test-agent-center--panel-windows) '((right . 45))))
+          (dolist (layout '("rata-ac-b" "rata-ac-a" "rata-ac-b" "rata-ac-a"))
+            (persp-switch layout)
+            (should (equal (safe-persp-name (get-current-persp)) layout))
+            (should (equal (rata-test-agent-center--panel-windows) '((right . 45)))))
+          ;; A side window survives `delete-other-windows' (SPC w m).
+          (delete-other-windows (get-mru-window nil nil t))
+          (should (equal (rata-test-agent-center--panel-windows) '((right . 45))))
+          ;; Closed: unpinned, and no layout's saved configuration brings it back.
+          (rata-agent-center-close)
+          (should-not (rata-test-agent-center--panel-windows))
+          (dolist (layout '("rata-ac-b" "rata-ac-a" "rata-ac-b"))
+            (persp-switch layout)
+            (should-not (rata-test-agent-center--panel-windows))))
+      (rata-agent-center-close)
+      (persp-switch orig)
+      (persp-remove-by-name "rata-ac-a")
+      (persp-remove-by-name "rata-ac-b"))))
+
+(ert-deftest rata-test-agent-center-panel-kept-out-of-saved-layouts ()
+  "*Agents* is never written into a persp state file."
+  (let ((buf (get-buffer-create rata-agent-center-buffer-name)))
+    (should (persp-buffer-filtered-out-p buf persp-filter-save-buffers-functions))
+    (should (memq #'rata-agent-center--persp-save-filter
+                  persp-filter-save-buffers-functions))))
+
+(ert-deftest rata-test-agent-center-age-strings ()
+  "Time in state is one short unit, like `3m'."
+  (should (equal (rata-agent-center--age 0) "0s"))
+  (should (equal (rata-agent-center--age 59) "59s"))
+  (should (equal (rata-agent-center--age 185) "3m"))
+  (should (equal (rata-agent-center--age 3700) "1h"))
+  (should (equal (rata-agent-center--age 90000) "1d")))
+
+(ert-deftest rata-test-agent-center-long-title-is-truncated ()
+  "A long session title is cut to its column, so the row stays one line wide."
+  (with-temp-buffer
+    (let* ((cols (append (rata-agent-center--row
+                          (list :buffer (current-buffer) :state 'ready :agent "Claude"
+                                :title "Refactor the jira sprint grouping" :since 0)
+                          0)
+                         nil))
+           (title (aref (cadr cols) 2)))
+      (should (<= (string-width title) rata-agent-center--title-width))
+      (should (string-suffix-p "…" title)))))
+
+(ert-deftest rata-test-agent-center-render-groups-and-order ()
+  "A fixture registry renders grouped by layout, most urgent group and row first."
+  (rata-test-agent-center--with-registry
+    (let* ((mk (lambda (name) (generate-new-buffer (format " *rata-ac-%s*" name))))
+           (w1 (funcall mk "w1")) (w2 (funcall mk "w2"))
+           (h1 (funcall mk "h1")) (z1 (funcall mk "z1"))
+           (panel nil))
+      (unwind-protect
+          (progn
+            (rata-agent-center--add-entry w1 :layout "work" :project "~/src/x/"
+                                          :agent "Claude" :title "Tidy" :state 'ready)
+            (rata-agent-center--add-entry w2 :layout "work" :project "~/src/x/"
+                                          :agent "Pi" :title "Fix parser" :state 'needs-input)
+            (rata-agent-center--add-entry h1 :layout "home" :project "~/blog/"
+                                          :agent "Claude" :title "Post" :state 'done)
+            (rata-agent-center--add-entry z1 :layout "zeta" :project "~/z/"
+                                          :agent "Claude" :title nil :state 'error)
+            (rata-agent-center--put h1 :last-stop-reason "end_turn" :cost 0.12)
+            (setq panel (rata-agent-center--refresh-buffer))
+            (with-current-buffer panel
+              (should (derived-mode-p 'rata-agent-center-mode))
+              (let ((lines (split-string (buffer-substring-no-properties
+                                          (point-min) (point-max))
+                                         "\n" t)))
+                (should (= (length lines) 7))
+                ;; Groups by their most urgent row: needs-input, error, done.
+                (should (string-match-p "\\`work — ~/src/x/" (nth 0 lines)))
+                (should (string-match-p "input .*Pi .*Fix parser" (nth 1 lines)))
+                (should (string-match-p "ready .*Claude .*Tidy" (nth 2 lines)))
+                (should (string-match-p "\\`zeta — ~/z/" (nth 3 lines)))
+                (should (string-match-p "error .*Claude" (nth 4 lines)))
+                (should (string-match-p "\\`home — ~/blog/" (nth 5 lines)))
+                (should (string-match-p "done .*Claude .*Post.*end_turn.*\\$0\\.12"
+                                        (nth 6 lines))))
+              ;; A row's id is its shell buffer: that is what RET acts on.
+              (goto-char (point-min))
+              (forward-line 1)
+              (should (eq (tabulated-list-get-id) w2))
+              ;; The badge carries the state's face.
+              (should (search-forward "input" (line-end-position) t))
+              (should (eq (get-text-property (match-beginning 0) 'face)
+                          'rata-agent-center-needs-input))))
+        (mapc #'kill-buffer (list w1 w2 h1 z1))
+        (when (buffer-live-p panel) (kill-buffer panel))))))
+
+(ert-deftest rata-test-agent-center-render-is-debounced-and-gated ()
+  "Events arm one timer; a render with the panel hidden prints nothing."
+  (let ((rata-agent-center--registry (make-hash-table :test #'eq))
+        (rata-agent-center--render-timer nil))
+    (when (get-buffer rata-agent-center-buffer-name)
+      (kill-buffer rata-agent-center-buffer-name))
+    (unwind-protect
+        (progn
+          (rata-agent-center--schedule-render)
+          (let ((timer rata-agent-center--render-timer))
+            (should (timerp timer))
+            (rata-agent-center--schedule-render)
+            (should (eq rata-agent-center--render-timer timer)))
+          (rata-agent-center--render)
+          (should-not rata-agent-center--render-timer)
+          (should-not (get-buffer rata-agent-center-buffer-name)))
+      (when (timerp rata-agent-center--render-timer)
+        (cancel-timer rata-agent-center--render-timer)))))
+
+(ert-deftest rata-test-agent-center-panel-keys ()
+  "RET, o, q and g r are live in normal state in the panel."
+  (let ((buf (get-buffer-create "*rata-test-agents*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (rata-agent-center-mode)
+          (should (eq evil-state 'normal))
+          (should (eq (key-binding (kbd "RET")) 'rata-agent-center-visit))
+          (should (eq (key-binding (kbd "o")) 'rata-agent-center-show))
+          (should (eq (key-binding (kbd "q")) 'rata-agent-center-close))
+          (should (eq (key-binding (kbd "g r")) 'rata-agent-center-refresh))
+          ;; Evil motion still works: this is a list, not an emacs-state buffer.
+          (should (eq (key-binding (kbd "j")) 'evil-next-line)))
+      (kill-buffer buf))))
+
+(ert-deftest rata-test-agent-center-no-shackle-rule ()
+  "shackle must not place *Agents*: it is a side window, and a rule would fight it."
+  (should-not (seq-find (lambda (rule)
+                          (and (stringp (car rule))
+                               (string-match-p (regexp-quote (car rule))
+                                               rata-agent-center-buffer-name)))
+                        shackle-rules)))
+
+;;; --- init-agent-center: navigation and actions (phase 3) ---
+
+(defmacro rata-test-agent-center--with-fixture (bindings &rest body)
+  "Run BODY with a private registry holding live buffers from BINDINGS.
+Each binding is (VAR LAYOUT STATE SINCE); the buffers are killed after."
+  (declare (indent 1))
+  `(rata-test-agent-center--with-registry
+     (let ,(mapcar (lambda (b) `(,(car b) (generate-new-buffer
+                                            ,(format " *rata-ac-%s*" (car b)))))
+                   bindings)
+       (unwind-protect
+           (progn
+             ,@(mapcar (lambda (b)
+                         `(progn
+                            (rata-agent-center--add-entry
+                             ,(car b) :layout ,(nth 1 b) :project "~/src/x/"
+                             :agent "Claude" :title ,(symbol-name (car b))
+                             :state ',(nth 2 b))
+                            (rata-agent-center--put ,(car b) :since ,(nth 3 b))))
+                       bindings)
+             ,@body)
+         (mapc (lambda (buf) (when (buffer-live-p buf) (kill-buffer buf)))
+               (list ,@(mapcar #'car bindings)))))))
+
+(ert-deftest rata-test-agent-center-most-urgent-picks-right-buffer ()
+  "Next attention: most urgent state first, longest waiting within a state."
+  (rata-test-agent-center--with-fixture ((a "l" ready 1) (b "l" working 2)
+                                         (c "l" done 100) (d "l" needs-input 300)
+                                         (e "l" error 50) (f "l" needs-input 200))
+    (should (eq (plist-get (rata-agent-center--most-urgent) :buffer) f))
+    (rata-agent-center--put f :state 'ready)
+    (rata-agent-center--put d :state 'ready)
+    (should (eq (plist-get (rata-agent-center--most-urgent) :buffer) e))
+    (rata-agent-center--put e :state 'working)
+    (should (eq (plist-get (rata-agent-center--most-urgent) :buffer) c))
+    (rata-agent-center--put c :state 'ready)
+    ;; `working' and `ready' never need you.
+    (should-not (rata-agent-center--most-urgent))))
+
+(ert-deftest rata-test-agent-center-next-attention-shows-the-shell ()
+  "`SPC a i n' puts the most urgent shell in front of you; `done' becomes seen."
+  (let ((here (rata-agent-center--current-layout)))
+    (rata-test-agent-center--with-fixture ((c here done 100) (r here ready 1))
+      (save-window-excursion
+        (rata-agent-center-next-attention)
+        (should (eq (window-buffer (selected-window)) c))
+        (should (eq (plist-get (rata-agent-center--entry c) :state) 'ready))
+        (should-error (rata-agent-center-next-attention) :type 'user-error)))))
+
+(ert-deftest rata-test-agent-center-visiting-clears-done ()
+  "A `done' shell becomes `ready' once it is the selected window's buffer."
+  (should (memq #'rata-agent-center--on-window-change
+                (default-value 'window-selection-change-functions)))
+  (should (memq #'rata-agent-center--on-window-change
+                (default-value 'window-buffer-change-functions)))
+  (rata-test-agent-center--with-fixture ((seen "l" done 1) (unseen "l" done 1)
+                                         (asking "l" needs-input 1))
+    (save-window-excursion
+      (set-window-buffer (selected-window) seen)
+      (rata-agent-center--on-window-change (selected-frame))
+      (should (eq (plist-get (rata-agent-center--entry seen) :state) 'ready))
+      (should (eq (plist-get (rata-agent-center--entry unseen) :state) 'done))
+      ;; A question is not answered by looking at it.
+      (set-window-buffer (selected-window) asking)
+      (rata-agent-center--on-window-change (selected-frame))
+      (should (eq (plist-get (rata-agent-center--entry asking) :state) 'needs-input)))))
+
+(ert-deftest rata-test-agent-center-attention-row-motion ()
+  "]] and [[ move between rows that need you, skipping headings and idle rows."
+  (rata-test-agent-center--with-fixture ((w1 "work" needs-input 1) (w2 "work" ready 1)
+                                         (h1 "home" done 1) (h2 "home" working 1))
+    (let ((panel (rata-agent-center--refresh-buffer)))
+      (unwind-protect
+          (with-current-buffer panel
+            (goto-char (point-min))
+            (rata-agent-center-next-attention-row)
+            (should (eq (tabulated-list-get-id) w1))
+            (rata-agent-center-next-attention-row)
+            (should (eq (tabulated-list-get-id) h1))
+            ;; None further: point stays put.
+            (rata-agent-center-next-attention-row)
+            (should (eq (tabulated-list-get-id) h1))
+            (rata-agent-center-previous-attention-row)
+            (should (eq (tabulated-list-get-id) w1)))
+        (kill-buffer panel)))))
+
+(ert-deftest rata-test-agent-center-fold-survives-rerender ()
+  "Folding a layout hides its rows, and stays folded across re-renders."
+  (let ((rata-agent-center--folded nil))
+    (rata-test-agent-center--with-fixture ((w1 "work" ready 1) (w2 "work" done 1)
+                                           (h1 "home" working 1))
+      (let ((panel (rata-agent-center--refresh-buffer))
+            (lines (lambda () (split-string (buffer-substring-no-properties
+                                             (point-min) (point-max))
+                                            "\n" t))))
+        (unwind-protect
+            (with-current-buffer panel
+              (should (= (length (funcall lines)) 5))
+              ;; From a row, the fold applies to the row's group.
+              (goto-char (point-min))
+              (forward-line 1)
+              (should (eq (tabulated-list-get-id) w2))
+              (rata-agent-center-toggle-group)
+              (should (equal rata-agent-center--folded '("work")))
+              (should (= (length (funcall lines)) 3))
+              (should (string-match-p "\\`work — .*2 hidden" (car (funcall lines))))
+              ;; Point is left on the folded heading.
+              (should (= (line-number-at-pos) 1))
+              (rata-agent-center--refresh-buffer)
+              (should (= (length (funcall lines)) 3))
+              ;; From the heading, it unfolds.
+              (rata-agent-center-toggle-group)
+              (should-not rata-agent-center--folded)
+              (should (= (length (funcall lines)) 5)))
+          (kill-buffer panel))))))
+
+(ert-deftest rata-test-agent-center-interrupt-and-new-shell ()
+  "K interrupts the row's shell after asking; c starts a shell in the row's project."
+  (let ((dir (file-name-as-directory (make-temp-file "rata-ac-proj" t)))
+        (interrupted nil) (started nil))
+    (unwind-protect
+        (rata-test-agent-center--with-fixture ((s (rata-agent-center--current-layout)
+                                                  working 1))
+          (rata-agent-center--put s :project (abbreviate-file-name dir))
+          (let ((panel (rata-agent-center--refresh-buffer)))
+            (unwind-protect
+                (with-current-buffer panel
+                  (goto-char (point-min))
+                  (forward-line 1)
+                  (should (eq (tabulated-list-get-id) s))
+                  (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t))
+                            ((symbol-function 'agent-shell-interrupt)
+                             (lambda (&optional force)
+                               (setq interrupted (list (current-buffer) force))))
+                            ((symbol-function 'agent-shell-new-shell)
+                             (lambda () (interactive)
+                               (setq started (expand-file-name default-directory)))))
+                    (rata-agent-center-interrupt)
+                    (should (equal interrupted (list s t)))
+                    (save-window-excursion
+                      (rata-agent-center-new-shell))
+                    (should (equal started dir))))
+              (kill-buffer panel))))
+      (delete-directory dir t))))
+
+(ert-deftest rata-test-agent-center-phase3-keys ()
+  "]] [[ TAB za c K are live in normal state in the panel."
+  (let ((buf (get-buffer-create "*rata-test-agents-3*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (rata-agent-center-mode)
+          (should (eq (key-binding (kbd "]]")) 'rata-agent-center-next-attention-row))
+          (should (eq (key-binding (kbd "[[")) 'rata-agent-center-previous-attention-row))
+          (should (eq (key-binding (kbd "TAB")) 'rata-agent-center-toggle-group))
+          (should (eq (key-binding (kbd "za")) 'rata-agent-center-toggle-group))
+          (should (eq (key-binding (kbd "c")) 'rata-agent-center-new-shell))
+          (should (eq (key-binding (kbd "K")) 'rata-agent-center-interrupt)))
+      (kill-buffer buf))))
+
+;;; --- init-agent-center: mode-line segment (phase 4) ---
+
+(ert-deftest rata-test-agent-center-mode-line-text ()
+  "The segment counts what needs you and what is busy; empty when nothing is."
+  (should (equal (rata-agent-center--mode-line-text nil) ""))
+  (should (equal (rata-agent-center--mode-line-text '((ready . 3) (starting . 1))) ""))
+  (should (equal (substring-no-properties
+                  (rata-agent-center--mode-line-text
+                   '((working . 3) (done . 1) (needs-input . 2) (ready . 4))))
+                 "⚠2 ✓1 ●3"))
+  (should (equal (substring-no-properties
+                  (rata-agent-center--mode-line-text '((error . 1) (working . 1))))
+                 "✗1 ●1"))
+  ;; Each count wears its state's face, and a click opens the panel.
+  (let ((text (rata-agent-center--mode-line-text '((needs-input . 2)))))
+    (should (eq (get-text-property 0 'face text) 'rata-agent-center-needs-input))
+    (should (eq (lookup-key (get-text-property 0 'local-map text) [mode-line mouse-1])
+                'rata-agent-center-toggle))))
+
+(ert-deftest rata-test-agent-center-mode-line-counts-registry ()
+  "The segment reads the registry, and is on `global-mode-string'."
+  (should (member 'rata-agent-center-mode-line global-mode-string))
+  (should (get 'rata-agent-center-mode-line 'risky-local-variable))
+  (rata-test-agent-center--with-fixture ((a "l" needs-input 1) (b "l" working 1)
+                                         (c "l" working 1) (d "l" ready 1))
+    (should (equal (rata-agent-center--counts)
+                   '((needs-input . 1) (working . 2) (ready . 1))))
+    ;; Through the construct's own function: batch `format-mode-line' never
+    ;; evaluates `:eval' (probed on 31.1, L-054), so it would print "" regardless.
+    (should (equal rata-agent-center-mode-line '(:eval (rata-agent-center--mode-line-segment))))
+    (should (equal (substring-no-properties (rata-agent-center--mode-line-segment))
+                   " ⚠1 ●2")))
+  (rata-test-agent-center--with-registry
+    (should (equal (rata-agent-center--mode-line-segment) ""))))
+
+(ert-deftest rata-test-agent-center-hooked-at-startup ()
+  "The module is loaded by init and listens for new shells."
+  (should (featurep 'init-agent-center))
+  (should (memq #'rata-agent-center--on-mode-hook agent-shell-mode-hook)))
 
 ;;; ============================================================
 ;;; Run all tests

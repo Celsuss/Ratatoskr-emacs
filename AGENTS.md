@@ -221,7 +221,7 @@ init-cmake → init-terraform → init-just → init-docker → init-markdown �
 init-yaml → init-ansible → init-jupyter → init-helm → init-pkgbuild →
 init-casual → init-sql → init-k8s → init-gamedev → init-snippets →
 init-llm → init-claude-loop → init-khoj → init-irc → init-elfeed → init-mail → init-jira →
-init-persp → init-org → init-blog → init-dialogic →
+init-persp → init-agent-center → init-org → init-blog → init-dialogic →
 init-present → init-dashboard
 ```
 
@@ -300,6 +300,33 @@ init-present → init-dashboard
     retries being told to fix a break it inherited. The baseline's output is deliberately
     discarded rather than kept as retry feedback.
   - Tests: pure functions in `tests/run-tests.el`; the state machine in `tests/claude-loop-e2e.el` via `just test-claude-loop`, against a stub CLI with no API calls.
+- `init-agent-center.el` — the `*Agents*` panel (`SPC a i o`): every live agent-shell
+  session across all persp layouts, grouped by layout, with a state per shell —
+  `needs-input` (permission question open), `error`, `done` (turn finished while you were
+  not looking), `working`, `starting`, `ready` — most urgent first. `SPC a i n` jumps
+  straight to the shell that most needs you; `global-mode-string` carries `⚠2 ✓1 ●3`
+  counts so the panel need not be open (no desktop notifications, operator decision).
+  Plan and design: `plans/ai-control-center.md`. Owns no package, like `init-claude-loop.el`.
+  Four things are load-bearing. **One pure function owns every transition**
+  (`rata-agent-center--next-state`), driven by agent-shell's event stream through
+  `agent-shell-subscribe-to` on `agent-shell-mode-hook`; `agent-shell-status` is the truth
+  it is reconciled against at render time (`rata-agent-center--reconcile`). **Callbacks
+  only record and schedule** (a 0.2 s debounced render, a no-op while the panel is hidden)
+  — the claude-loop trampoline discipline — and a handler error lands on the entry as
+  `error`, because agent-shell demotes a subscriber error to a `message`. **The panel is a
+  side window that persp must never save:** persp stores each layout's window state,
+  side windows included, and restores it on switch (L-053), so the panel deletes itself
+  in `persp-before-deactivate-functions` (which runs before persp saves) and re-displays
+  in `persp-activated-functions` while pinned; `q` unpins. No shackle rule for
+  `*Agents*` (`rata-test-agent-center-no-shackle-rule`). **agent-shell is never
+  required**: adoption of already-open shells waits on
+  `rata-agent-center--agent-shell-loaded-p` (`featurep`, because `agent-shell-buffers`
+  is an autoload and `fboundp` would load it — L-052). Panel keys (normal state, via
+  `evil-define-key*`): `RET` go (layout, then shell), `o` show, `]]`/`[[` next/previous
+  row that needs you, `TAB`/`za` fold a layout (a folded-layouts set re-applied on every
+  render — tabulated-list has no fold of its own), `c` new shell in the row's project,
+  `K` interrupt, `g r` refresh, `q` close. Tests: `rata-test-agent-center-*` in
+  `tests/run-tests.el`, all on synthetic event alists — nothing starts an agent.
 - `init-mail.el` — email under `SPC a e`: mu4e reading a Maildir that `mbsync` fills from
   Proton Mail Bridge, `smtpmail` sending through Bridge's SMTP port (D-021). Three things
   are structural. **mu4e is not an elpaca package**: its elisp is version-locked to the `mu`

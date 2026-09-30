@@ -283,6 +283,7 @@ also runs the verification levels on pull requests and pushes to =master=
 | =init-elfeed=     | Elfeed RSS reader with tagged feeds                     |
 | =init-mail=       | mu4e over Proton Mail Bridge; mbsync fetch, smtpmail send |
 | =init-persp=      | Workspace management via persp-mode                     |
+| =init-agent-center= | =*Agents*= panel: every agent-shell session across layouts, by state |
 | =init-org=        | Org-roam, org-super-agenda, org-kanban, org-transclusion |
 | =init-present=    | Reveal.js slide export from org (org-re-reveal)          |
 | =init-dashboard=  | Start page with agenda, roam stats, git status          |
@@ -317,6 +318,37 @@ All keybindings use =general.el= with =SPC= as the global leader in Evil normal/
 | =SPC a g= | Gamedev    |
 | =SPC a i= | AI tools   |
 | =SPC a k= | Kubernetes |
+
+** Agents panel
+
+=SPC a i o= opens =*Agents*= in a right-hand side window: every live agent-shell
+session in every persp layout, grouped by layout, most urgent first. It stays
+open across layout switches and =SPC w m= until you close it with =q=.
+
+| State   | Meaning                                               |
+|---------+-------------------------------------------------------|
+| =⚠ input= | waiting on a permission answer                      |
+| =✗ error= | the last request failed                             |
+| =✓ done=  | finished while you were not looking; cleared on visit |
+| =● work=  | agent busy                                          |
+| =… start= | handshaking                                         |
+| =· ready= | idle, seen                                          |
+
+| Key         | Action                                                  |
+|-------------+---------------------------------------------------------|
+| =SPC a i o= | Toggle the panel                                        |
+| =SPC a i n= | Jump to the shell that most needs you, panel or not     |
+| =RET=       | Go to the row's layout and shell                        |
+| =o=         | Show the shell, keep focus in the panel                 |
+| =]]= / =[[= | Next / previous row that needs you                      |
+| =TAB= / =za= | Fold or unfold a layout                                |
+| =c=         | New agent-shell in the row's layout and project         |
+| =K=         | Interrupt the row's shell (asks first)                  |
+| =g r=       | Refresh                                                 |
+| =q=         | Close the panel                                         |
+
+The mode line shows the same counts (=⚠2 ✓1 ●3=) while the panel is closed;
+click it to open the panel.
 
 ** Claude Code Task Loop
 

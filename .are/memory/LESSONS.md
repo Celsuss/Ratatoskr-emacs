@@ -1451,3 +1451,45 @@ template variable is the target of any `:custom` clause in `lisp/`;
 package's variable equals the `rata-` one. The same mechanism is why
 `aidermacs-default-model` in `init-llm.el` is *computed from* `rata-llm-providers` inside
 its `:custom` clause rather than set beside it. Related: D-012, L-011, L-039, FAIL-0016.
+
+## L-052 — On Emacs 31, `featurep` ignores a `let` of `features`; guard on a function a test can stub
+
+**Date:** 2026-09-30. `init-agent-center.el` adopts already-open shells only once agent-shell
+has loaded, and the guard is `featurep`, not `fboundp` — `agent-shell-buffers` is an
+autoload, so `fboundp` is true at startup and calling it would load the package, defeating
+its `:commands` deferral (the same cost as L-028). The adoption test then faked the feature
+with `(cl-letf ((features (cons 'agent-shell features))) ...)` and still saw nothing adopted.
+Probed on 31.1: under `(let ((features (cons 'x features))) ...)` `(memq 'x features)` is
+true and `(featurep 'x)` is nil; after `(provide 'x)`, `(let ((features nil)) (featurep 'x))`
+is still t. The primitive no longer reads the dynamic value. Apply: (1) a load-state guard a
+test must flip goes behind a one-line predicate (`rata-agent-center--agent-shell-loaded-p`)
+that the test stubs with `cl-letf`; (2) an autoloaded symbol is never evidence that its
+package is loaded — `fboundp` is true for the stub. Related: L-028, FAIL-0012.
+
+## L-053 — persp-mode saves and restores side windows with each layout; take a panel off before the save
+
+**Date:** 2026-09-30. Probed in a fully initialised batch Emacs (Emacs 31.1, persp-mode
+from `elpaca/sources`) before writing `init-agent-center.el`'s pin code: open a
+`display-buffer-in-side-window` panel in layout A, switch to B — **gone**; back to A —
+**back**, still a right side window of the same width. persp stores each layout's window
+state (side windows included) in `persp-frame-save-state` and puts it back on activation,
+so a panel belongs to whichever layouts it was open in when you left them. Closing it in B
+would not stop A from restoring it. Apply: a frame-wide panel deletes itself in
+`persp-before-deactivate-functions` — which persp runs *before* `persp-frame-save-state`
+(`persp--deactivate`) — so no layout ever stores it, and re-displays in
+`persp-activated-functions` while a pin flag is set. `persp-filter-save-buffers-functions`
+is a different mechanism (state *files*, not switches) and already skips `*`-named buffers
+by default. `rata-test-agent-center-panel-survives-layout-switch` drives both directions,
+`delete-other-windows`, and close-then-switch. Not proven here: the GUI frame (batch has one
+80x25 TTY frame) and `persp-save-state-to-file` with the panel open.
+
+## L-054 — Batch `format-mode-line` never evaluates `:eval`; a mode-line test that uses it passes or fails on nothing
+
+**Date:** 2026-09-30. `rata-test-agent-center-mode-line-counts-registry` rendered
+`rata-agent-center-mode-line` (`(:eval ...)`) with `format-mode-line` and got `""`, though
+the segment function returned `" ⚠1 ●2"`. Probed with `emacs -Q --batch` on 31.1:
+`(format-mode-line '(:eval "abc"))` is `""`, and a `setq` inside the `:eval` never runs. A
+test that asserts an *empty* segment through `format-mode-line` would therefore pass
+whatever the code does. Apply: assert the construct's shape (`(:eval (FN))`) and call FN
+directly; keep FN free of side effects, since redisplay runs it. Related: L-052 (another
+Emacs 31 primitive that a batch test cannot drive the obvious way).
