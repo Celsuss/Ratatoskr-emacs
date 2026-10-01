@@ -258,6 +258,15 @@ init-present → init-dashboard
   - **Success is decided from the `result` event, never the exit code alone** (`rata-claude-loop--classify`). `claude -p` exits 0 for a task that gave up and for one whose edits were all silently denied. `:pending` must be flushed at EOF — the CLI does not newline-terminate its last line, and that line carries the result event.
   - **Failures retry by resuming the session** (`--resume` with the captured `session_id`), bounded by `rata-claude-loop-max-attempts`. `--resume` inherits no configuration, so `rata-claude-loop--common-args` exists to re-pass every flag.
   - **Checkboxes are matched by text, not line number**, and an ambiguous match halts rather than ticking the wrong box.
+  - **A plan written as `## Phase N` / `## Task N` headings runs as-is.** In a non-Org
+    file with *no* checklist item at all (open or ticked — checkboxes win, so a phase is
+    never sent with its sub-boxes and then made to run them again), any Markdown heading
+    matching `rata-claude-loop-heading-regexp` is a task, its detail is its section down
+    to the next heading of the same level, and it is closed by appending ` [done]` or
+    ` [skipped]`. Pre-marking a phase `[skipped]` by hand keeps it out of a run. Fenced
+    code is skipped, and so is a matching heading inside another task heading's section
+    (`### Task 1.1` under `## Phase 1` is Phase 1's detail, not a second run). Every scan goes through `rata-claude-loop--open-tasks`, so the first
+    task, the open count behind the progress guard and the ambiguity check cannot disagree.
   - Its output buffer derives from `special-mode`, which is in none of evil's state lists — so buffer-local keys go through `evil-define-key*` (the function form; `evil-define-key` is a macro and would compile to a broken function call), not plain `define-key`.
   - **A failed task does not have to end the run.** `rata-claude-loop-on-task-failure`
     is `halt` (default, right when you are watching), `skip` (mark the box `[-]`, record

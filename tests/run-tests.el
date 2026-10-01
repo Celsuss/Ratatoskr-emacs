@@ -575,6 +575,86 @@ default keyword set has none, so the fallback is DONE plus a tag."
     (should (string-match-p "DONE" (buffer-string)))
     (should (string-match-p ":skipped:" (buffer-string)))))
 
+(ert-deftest rata-test-claude-loop-scan-phase-headings ()
+  "A plan's Phase/Task headings are tasks; closed, fenced and look-alikes are not."
+  (with-temp-buffer
+    (insert "# Plan\n"                                 ; 1
+            "## 0. Target\n"                           ; 2 not a task
+            "## Tasks\n"                               ; 3 `Tasks' is not `Task'
+            "## Phase 0 — Scaffold [done]\n"           ; 4 closed
+            "## Phase 1 — Client\n"                    ; 5 open
+            "```sh\n# Task: not a heading\n```\n"      ; 6-8 fenced
+            "### Task 1.1 — probe  \n"                 ; 9 inside Phase 1: detail
+            "## phase lowercase\n"                     ; 10 case-sensitive
+            "## Phase 7 — Deferred [skipped]\n"        ; 11 closed
+            "### Task 7.1 — orphan\n"                  ; 12 inside closed Phase 7
+            "## Phases\n"                              ; 13 not a task
+            "### Phase 8 — Nested  \n")                ; 14 open, any level
+    (should (equal (rata-claude-loop--open-tasks)
+                   '((5 . "Phase 1 — Client") (14 . "Phase 8 — Nested"))))
+    (should (equal (rata-claude-loop--scan-buffer) '(5 . "Phase 1 — Client")))
+    (should (= (rata-claude-loop--count-in-buffer) 2))))
+
+(ert-deftest rata-test-claude-loop-nested-heading-runs-once ()
+  "A Task heading under a Phase is the Phase's detail, never a second task.
+Otherwise its work is sent once inside the Phase's prompt and again on its
+own -- and a findings subsection such as `#### Phase 0 findings' becomes
+work to do."
+  (with-temp-buffer
+    (insert "## Phase 1 — Client\n"
+            "### Task 1.1 — probe\n"
+            "#### Phase 1 findings\n"
+            "## Phase 2 — Logs\n")
+    (should (equal (rata-claude-loop--open-tasks)
+                   '((1 . "Phase 1 — Client") (4 . "Phase 2 — Logs"))))
+    (should (string-match-p "Task 1.1" (rata-claude-loop--body-at 1)))
+    ;; Closing the outer heading does not promote the inner one.
+    (should (rata-claude-loop--mark-in-buffer 1 'done))
+    (should (equal (rata-claude-loop--open-tasks) '((4 . "Phase 2 — Logs"))))))
+
+(ert-deftest rata-test-claude-loop-checkboxes-win-over-headings ()
+  "Any checklist item, even a ticked one, turns heading tasks off.
+Otherwise a phase would be sent with its sub-boxes as detail, and each of
+those boxes would then run again as a task of its own."
+  (with-temp-buffer
+    (insert "## Phase 1 — Client\n- [X] done already\n")
+    (should-not (rata-claude-loop--open-tasks))
+    (erase-buffer)
+    (insert "## Phase 1 — Client\n- [ ] sub-task\n")
+    (should (equal (rata-claude-loop--open-tasks) '((2 . "sub-task")))))
+  (let ((rata-claude-loop-heading-regexp nil))
+    (with-temp-buffer
+      (insert "## Phase 1 — Client\n")
+      (should-not (rata-claude-loop--open-tasks)))))
+
+(ert-deftest rata-test-claude-loop-mark-heading ()
+  "A heading task is closed by appending a marker, which closes it for the scan."
+  (with-temp-buffer
+    (insert "## Phase 0 — A  \n## Phase 1 — B\n")
+    (should (rata-claude-loop--mark-in-buffer 1 'done))
+    (should (rata-claude-loop--mark-in-buffer 2 'skipped))
+    (should (equal (buffer-string)
+                   "## Phase 0 — A [done]\n## Phase 1 — B [skipped]\n"))
+    (should-not (rata-claude-loop--open-tasks))
+    ;; Already closed: no change, so the progress guard is never fooled.
+    (should-not (rata-claude-loop--mark-in-buffer 1 'done))
+    (should (equal (rata-claude-loop--find-task-line 1 "Phase 0 — A") nil))))
+
+(ert-deftest rata-test-claude-loop-body-heading ()
+  "A heading task's detail is its section, subsections and fences included."
+  (with-temp-buffer
+    (insert "## Phase 1 — Client\n"
+            "intro line\n"
+            "### Verification\n"
+            "run the tests\n"
+            "```sh\n# not a heading\n```\n"
+            "## Phase 2 — Logs\n"
+            "not part of phase 1\n")
+    (should (equal (rata-claude-loop--body-at 1)
+                   (concat "intro line\n### Verification\nrun the tests\n"
+                           "```sh\n# not a heading\n```")))
+    (should (equal (rata-claude-loop--body-at 8) "not part of phase 1"))))
+
 (ert-deftest rata-test-claude-loop-project-root-refuses-home ()
   "A repository marker in $HOME must not make $HOME the project root."
   (should (equal (rata-claude-loop--project-root (expand-file-name "~/tasks.md"))

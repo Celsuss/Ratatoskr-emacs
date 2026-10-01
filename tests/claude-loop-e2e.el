@@ -544,6 +544,72 @@ if [ $n -le 1 ]; then echo 'FAILED: test_thing'; exit 1; fi; echo 'all good'"
 (setenv "FAKE_MODE" "ok")
 
 ;;; ------------------------------------------------------------------
+;;; 15. A plan written as Phase headings runs without a checklist
+;;; ------------------------------------------------------------------
+
+;; A pre-skipped phase is how an operator keeps one out of a run; it must be
+;; neither attempted nor touched.  Each phase's prompt carries its own
+;; section and not the next one's.
+(setenv "FAKE_MODE" "ok")
+(setenv "FAKE_PROMPT_FILE" rata-e2e--prompt)
+(ignore-errors (delete-file rata-e2e--prompt))
+(let* ((file (rata-e2e--tasks
+              (concat "# Plan\n\n## 0. Findings\nnot a task\n\n"
+                      "## Phase 0 — Scaffold\nmake pyproject\n\n"
+                      "## Phase 1 — Client [skipped]\nblocked on creds\n\n"
+                      "## Phase 2 — Logs\nredact secrets\n### Verification\n"
+                      "pytest green\n")))
+       (status (rata-e2e--run file)))
+  (rata-e2e--check "phases: finished" status 'finished)
+  (rata-e2e--check "phases: open headings marked done, skipped one untouched"
+                   (rata-e2e--contents file)
+                   (concat "# Plan\n\n## 0. Findings\nnot a task\n\n"
+                           "## Phase 0 — Scaffold [done]\nmake pyproject\n\n"
+                           "## Phase 1 — Client [skipped]\nblocked on creds\n\n"
+                           "## Phase 2 — Logs [done]\nredact secrets\n"
+                           "### Verification\npytest green\n"))
+  (rata-e2e--check "phases: exactly two tasks run"
+                   (rata-claude-loop--get :index) 2)
+  (let ((prompt (with-temp-buffer
+                  (insert-file-contents rata-e2e--prompt)
+                  (buffer-string))))
+    (rata-e2e--check "phases: last prompt names its phase and carries its section"
+                     (and (string-match-p "Phase 2 — Logs" prompt)
+                          (string-match-p "redact secrets" prompt)
+                          (string-match-p "pytest green" prompt)
+                          t)
+                     t)
+    (rata-e2e--check "phases: no other phase's section leaked in"
+                     (string-match-p "make pyproject\\|blocked on creds" prompt)
+                     nil)))
+(setenv "FAKE_PROMPT_FILE" nil)
+
+;; A Task heading inside a Phase's section is that Phase's detail: one run,
+;; one marker, and the inner heading is left exactly as written.
+(let* ((file (rata-e2e--tasks
+              "## Phase 1 — Client\n### Task 1.1 — probe\nping it\n"))
+       (status (rata-e2e--run file)))
+  (rata-e2e--check "phases: nested heading finishes" status 'finished)
+  (rata-e2e--check "phases: nested heading not run on its own"
+                   (rata-claude-loop--get :index) 1)
+  (rata-e2e--check "phases: only the outer heading marked"
+                   (rata-e2e--contents file)
+                   "## Phase 1 — Client [done]\n### Task 1.1 — probe\nping it\n"))
+
+;; A failed phase under `skip' is closed with the skipped marker, so the run
+;; moves on instead of handing the same heading back forever.
+(setenv "FAKE_MODE" "blocked")
+(setq rata-claude-loop-on-task-failure 'skip)
+(let* ((file (rata-e2e--tasks "## Phase 0 — A\n## Task 1 — B\n"))
+       (status (rata-e2e--run file)))
+  (rata-e2e--check "phases: skip policy finishes" status 'finished)
+  (rata-e2e--check "phases: failed headings marked skipped"
+                   (rata-e2e--contents file)
+                   "## Phase 0 — A [skipped]\n## Task 1 — B [skipped]\n"))
+(setq rata-claude-loop-on-task-failure 'halt)
+(setenv "FAKE_MODE" "ok")
+
+;;; ------------------------------------------------------------------
 
 (delete-directory rata-e2e--dir t)
 (message "\n==== claude-loop e2e: %s ===="

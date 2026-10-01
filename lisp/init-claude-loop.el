@@ -138,6 +138,18 @@ Group 1 must be the task description.  Only used in `org-mode' files."
   :type 'regexp
   :group 'rata-claude-loop)
 
+(defcustom rata-claude-loop-heading-regexp
+  "^#\\{1,6\\}[ \t]+\\(\\(?:Phase\\|Task\\)\\b.*\\)$"
+  "Regexp matching a Markdown heading that is a task; group 1 is the text.
+Lets a plan written as `## Phase 0 -- ...' sections run without first
+being rewritten as a checklist.  Matched case-sensitively, and only in a
+non-Org file that holds no checklist item at all: see
+`rata-claude-loop--headings-apply-p'.  A finished heading is marked by
+appending \" [done]\" or \" [skipped]\", which is also how to keep a phase
+out of a run -- mark it skipped by hand.  nil disables heading tasks."
+  :type '(choice (const :tag "Off" nil) regexp)
+  :group 'rata-claude-loop)
+
 (defcustom rata-claude-loop-org-cancelled-keywords '("CANCELLED" "CANCELED" "KILL")
   "Org keywords meaning \"deliberately not done\", tried in order.
 A skipped Org task moves to the first of these present in
@@ -194,10 +206,12 @@ before the prompt is built."
   :type 'boolean
   :group 'rata-claude-loop)
 
-(defcustom rata-claude-loop-task-body-limit 2000
+(defcustom rata-claude-loop-task-body-limit 4000
   "Maximum characters of task detail to include in a prompt.
 Truncated from the end, the opposite of `rata-claude-loop-feedback-limit':
-the top of a task description is the part that defines it."
+the top of a task description is the part that defines it.  Sized for a
+whole plan section under a Phase heading, which ends in its verification
+steps -- the part a tighter limit would cut first."
   :type 'integer
   :group 'rata-claude-loop)
 
@@ -415,7 +429,8 @@ run."
   :group 'rata-claude-loop)
 
 (defcustom rata-claude-loop-task-file-names
-  '("tasks.md" "TASKS.md" "tasks.org" "TASKS.org" "TODO.md" "TODO.org")
+  '("tasks.md" "TASKS.md" "tasks.org" "TASKS.org" "TODO.md" "TODO.org"
+    "PLAN.md" "plan.md")
   "File names searched for at the project root when no task file is obvious."
   :type '(repeat string)
   :group 'rata-claude-loop)
@@ -759,30 +774,96 @@ the project root, then ask."
       (list rata-claude-loop-task-regexp rata-claude-loop-org-todo-regexp)
     (list rata-claude-loop-task-regexp)))
 
-(defun rata-claude-loop--scan-buffer ()
-  "Return (LINE . TEXT) for the first open task in the current buffer, or nil."
-  (save-excursion
-    (let ((best nil))
-      (dolist (regexp (rata-claude-loop--task-regexps))
-        (goto-char (point-min))
-        (when (re-search-forward regexp nil t)
-          (let ((position (match-beginning 0)))
-            (when (or (null best) (< position (car best)))
-              (setq best (list position
-                               (line-number-at-pos position)
-                               (string-trim (match-string 1))))))))
-      (when best
-        (cons (nth 1 best) (nth 2 best))))))
+(defconst rata-claude-loop--checklist-item-regexp "^[ \t]*[-+*] \\[[ xX-]\\]"
+  "Regexp matching a checklist item in any state, open or closed.")
 
-(defun rata-claude-loop--count-in-buffer ()
-  "Return the number of open tasks in the current buffer."
+(defconst rata-claude-loop--heading-closed-regexp
+  "[ \t]\\[\\(?:done\\|skipped\\)\\]\\'"
+  "Regexp matching the marker that closes a heading task's text.")
+
+(defconst rata-claude-loop--fence-regexp "^[ \t]*\\(```\\|~~~\\)"
+  "Regexp matching a Markdown code fence; group 1 is the fence itself.")
+
+(defun rata-claude-loop--fence-step (fence line)
+  "Return the fence state after LINE, given the open FENCE (or nil).
+Only the fence that opened a block closes it, so a ``` line inside a ~~~
+block is content."
+  (cond
+   ((not (string-match rata-claude-loop--fence-regexp line)) fence)
+   ((null fence) (match-string 1 line))
+   ((equal fence (match-string 1 line)) nil)
+   (t fence)))
+
+(defun rata-claude-loop--headings-apply-p ()
+  "Return non-nil when Phase/Task headings count as tasks in this buffer.
+Only outside Org, where TODO keywords already do this job, and only in a
+file with no checklist item at all, open or ticked.  Checkboxes win so an
+existing checklist behaves exactly as before, and so a phase is never sent
+with its own sub-boxes as detail and then made to run each of them again."
+  (and rata-claude-loop-heading-regexp
+       (not (derived-mode-p 'org-mode))
+       (save-excursion
+         (goto-char (point-min))
+         (not (re-search-forward rata-claude-loop--checklist-item-regexp
+                                 nil t)))))
+
+(defun rata-claude-loop--heading-tasks ()
+  "Return (LINE . TEXT) for every open Phase/Task heading in the buffer.
+Headings already closed with a done or skipped marker are left out, and
+so is anything inside fenced code: a `# Task' comment in a shell block is
+not a heading.  So is a matching heading inside another task's section,
+open or closed: that section is the outer task's detail, and running the
+inner one too would do its work twice -- the same reason checkboxes win."
   (save-excursion
-    (let ((count 0))
+    (goto-char (point-min))
+    (let ((case-fold-search nil)
+          (line 1)
+          (fence nil)
+          (scope nil)                   ; level of the enclosing task heading
+          (tasks nil))
+      (while (not (eobp))
+        (let ((text (buffer-substring-no-properties (line-beginning-position)
+                                                    (line-end-position))))
+          (if (or fence (string-match-p rata-claude-loop--fence-regexp text))
+              (setq fence (rata-claude-loop--fence-step fence text))
+            (when (string-match "\\`\\(#+\\)[ \t]" text)
+              (let ((level (length (match-string 1 text))))
+                (when (and scope (<= level scope))
+                  (setq scope nil))
+                (when (and (null scope)
+                           (string-match rata-claude-loop-heading-regexp text))
+                  (setq scope level)
+                  (let ((task (string-trim (match-string 1 text))))
+                    (unless (string-match-p
+                             rata-claude-loop--heading-closed-regexp task)
+                      (push (cons line task) tasks))))))))
+        (setq line (1+ line))
+        (forward-line 1))
+      (nreverse tasks))))
+
+(defun rata-claude-loop--open-tasks ()
+  "Return (LINE . TEXT) for every open task in the current buffer, in order.
+The one enumeration every other scan goes through, so the first task, the
+open count and the unambiguous-match check can never disagree about what
+counts as a task."
+  (let ((tasks (and (rata-claude-loop--headings-apply-p)
+                    (rata-claude-loop--heading-tasks))))
+    (save-excursion
       (dolist (regexp (rata-claude-loop--task-regexps))
         (goto-char (point-min))
         (while (re-search-forward regexp nil t)
-          (setq count (1+ count))))
-      count)))
+          (push (cons (line-number-at-pos (match-beginning 0))
+                      (string-trim (match-string 1)))
+                tasks))))
+    (sort tasks (lambda (a b) (< (car a) (car b))))))
+
+(defun rata-claude-loop--scan-buffer ()
+  "Return (LINE . TEXT) for the first open task in the current buffer, or nil."
+  (car (rata-claude-loop--open-tasks)))
+
+(defun rata-claude-loop--count-in-buffer ()
+  "Return the number of open tasks in the current buffer."
+  (length (rata-claude-loop--open-tasks)))
 
 (defun rata-claude-loop--dedent (lines)
   "Return LINES with the whitespace common to all of them removed."
@@ -849,15 +930,41 @@ it, and a property drawer in a prompt reads as noise."
       (unless done (forward-line 1)))
     (rata-claude-loop--body-string (nreverse lines))))
 
+(defun rata-claude-loop--heading-body-at-point ()
+  "Return the section under the Markdown heading at point, or nil.
+Runs to the next heading of the same level or higher, so a phase's own
+subsections belong to it.  A `#' line inside fenced code is content."
+  (let ((level (save-excursion (beginning-of-line) (skip-chars-forward "#")))
+        (lines nil)
+        (fence nil)
+        (done nil))
+    (forward-line 1)
+    (while (and (not done) (not (eobp)))
+      (let ((line (buffer-substring-no-properties (line-beginning-position)
+                                                  (line-end-position))))
+        (if (or fence (string-match-p rata-claude-loop--fence-regexp line))
+            (progn (setq fence (rata-claude-loop--fence-step fence line))
+                   (push line lines))
+          (if (and (string-match "\\`\\(#+\\)[ \t]" line)
+                   (<= (length (match-string 1 line)) level))
+              (setq done t)
+            (push line lines))))
+      (unless done (forward-line 1)))
+    (rata-claude-loop--body-string (nreverse lines))))
+
 (defun rata-claude-loop--body-at (line)
   "Return the detail written under the task on LINE of this buffer, or nil."
-  (save-excursion
-    (goto-char (point-min))
-    (forward-line (1- line))
-    (if (and (derived-mode-p 'org-mode)
+  (let ((heading (and (rata-claude-loop--headings-apply-p)
+                      (assq line (rata-claude-loop--heading-tasks)))))
+    (save-excursion
+      (goto-char (point-min))
+      (forward-line (1- line))
+      (cond
+       ((and (derived-mode-p 'org-mode)
              (looking-at rata-claude-loop-org-todo-regexp))
-        (rata-claude-loop--org-body-at-point)
-      (rata-claude-loop--indented-body-at-point))))
+        (rata-claude-loop--org-body-at-point))
+       (heading (rata-claude-loop--heading-body-at-point))
+       (t (rata-claude-loop--indented-body-at-point))))))
 
 (defun rata-claude-loop--task-body (file line)
   "Return the detail written under the task on LINE of FILE, or nil."
@@ -867,13 +974,7 @@ it, and a property drawer in a prompt reads as noise."
 
 (defun rata-claude-loop--task-at-line-p (line text)
   "Return non-nil when LINE of the current buffer is an open task reading TEXT."
-  (save-excursion
-    (goto-char (point-min))
-    (forward-line (1- line))
-    (seq-some (lambda (regexp)
-                (and (looking-at regexp)
-                     (equal (string-trim (match-string 1)) text)))
-              (rata-claude-loop--task-regexps))))
+  (equal (cdr (assq line (rata-claude-loop--open-tasks))) text))
 
 (defun rata-claude-loop--find-task-line (line text)
   "Return the line of the current buffer holding the open task TEXT, or nil.
@@ -883,15 +984,11 @@ ambiguous match: ticking the wrong box is worse than halting and saying
 so."
   (if (rata-claude-loop--task-at-line-p line text)
       line
-    (save-excursion
-      (let ((matches nil))
-        (dolist (regexp (rata-claude-loop--task-regexps))
-          (goto-char (point-min))
-          (while (re-search-forward regexp nil t)
-            (when (equal (string-trim (match-string 1)) text)
-              (push (line-number-at-pos (match-beginning 0)) matches))))
-        (setq matches (delete-dups matches))
-        (and (= (length matches) 1) (car matches))))))
+    (let ((matches (delete-dups
+                    (mapcar #'car
+                            (seq-filter (lambda (task) (equal (cdr task) text))
+                                        (rata-claude-loop--open-tasks))))))
+      (and (= (length matches) 1) (car matches)))))
 
 (defun rata-claude-loop--org-mark (marker)
   "Move the Org heading at point to a state representing MARKER.
@@ -912,19 +1009,29 @@ none — so fall back to DONE plus a tag, which keeps the intent."
 (defun rata-claude-loop--mark-in-buffer (line marker)
   "Mark the task on LINE of the current buffer with MARKER.
 MARKER is `done' or `skipped'.  Returns non-nil when the line changed."
-  (save-excursion
-    (goto-char (point-min))
-    (forward-line (1- line))
-    (cond
-     ;; Org TODO heading: go through org so logging/repeaters behave.
-     ((and (derived-mode-p 'org-mode)
-           (looking-at rata-claude-loop-org-todo-regexp))
-      (rata-claude-loop--org-mark marker)
-      t)
-     ((looking-at "^\\([ \t]*[-+*] \\)\\[ \\]")
-      (replace-match (concat "\\1[" (if (eq marker 'done) "X" "-") "]")
-                     nil nil)
-      t))))
+  (let ((heading (and (rata-claude-loop--headings-apply-p)
+                      (assq line (rata-claude-loop--heading-tasks)))))
+    (save-excursion
+      (goto-char (point-min))
+      (forward-line (1- line))
+      (cond
+       ;; Phase/Task heading: it has no box, so a marker is appended instead.
+       ;; Only an open one is in `heading', so a closed line reports no change.
+       (heading
+        (end-of-line)
+        (delete-region (progn (skip-chars-backward " \t") (point))
+                       (line-end-position))
+        (insert (if (eq marker 'done) " [done]" " [skipped]"))
+        t)
+       ;; Org TODO heading: go through org so logging/repeaters behave.
+       ((and (derived-mode-p 'org-mode)
+             (looking-at rata-claude-loop-org-todo-regexp))
+        (rata-claude-loop--org-mark marker)
+        t)
+       ((looking-at "^\\([ \t]*[-+*] \\)\\[ \\]")
+        (replace-match (concat "\\1[" (if (eq marker 'done) "X" "-") "]")
+                       nil nil)
+        t)))))
 
 (defun rata-claude-loop--mark-task (file line text marker)
   "Mark the task TEXT of FILE, expected on LINE, with MARKER.
@@ -2042,15 +2149,9 @@ also prompt for the directory Claude should run in."
     (user-error "Cannot find %s in `exec-path'" rata-claude-loop-executable))
   (unless buffer-file-name
     (user-error "This buffer is not visiting a file"))
-  (let ((line (line-number-at-pos))
-        (task (save-excursion
-                (beginning-of-line)
-                (cond
-                 ((looking-at rata-claude-loop-task-regexp) (match-string 1))
-                 ((and (derived-mode-p 'org-mode)
-                       (looking-at rata-claude-loop-org-todo-regexp))
-                  (match-string 1))
-                 (t (user-error "No open task on this line"))))))
+  (let* ((line (line-number-at-pos))
+         (task (or (cdr (assq line (rata-claude-loop--open-tasks)))
+                   (user-error "No open task on this line"))))
     (rata-claude-loop--offer-save buffer-file-name)
     (rata-claude-loop--begin buffer-file-name
                              (rata-claude-loop--project-root buffer-file-name)
