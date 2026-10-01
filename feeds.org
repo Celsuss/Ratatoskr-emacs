@@ -22,15 +22,15 @@
 *** [[https://ludic.mataroa.blog/rss/][Ludic]] :ludic:opinion:slow:
 *** [[https://blog.orhun.dev/rss.xml][Orhun]] :orhun:rust:tooling:
 
-** Machine Learning                                                  :ml:blog:
-*** [[https://jalammar.github.io/feed.xml][Jay Alammar]] :jayalammar:llm:deep:slow:
-*** [[https://lilianweng.github.io/index.xml][Lil'Log]] :lillog:research:deep:slow:
-*** [[https://huyenchip.com/feed.xml][Huyen Chip]] :huyen_chip:mlops:llm:deep:
-*** [[https://sebastianraschka.com/rss_feed.xml][Sebastian Raschka]] :sebastianraschka:llm:research:deep:
-*** [[https://magazine.sebastianraschka.com/feed][Ahead of AI]] :aheadofai:llm:research:weekly:
-*** [[https://www.interconnects.ai/feed][Interconnects]] :interconnects:llm:research:policy:
-*** [[https://importai.substack.com/feed][Import AI]] :importai:research:policy:weekly:aggregator:
-*** [[https://eugeneyan.com/rss/][Eugene Yan]] :eugeneyan:mlops:recsys:
+** Machine Learning                                                       :ml:
+*** [[https://jalammar.github.io/feed.xml][Jay Alammar]] :jayalammar:blog:llm:deep:slow:
+*** [[https://lilianweng.github.io/index.xml][Lil'Log]] :lillog:blog:research:deep:slow:
+*** [[https://huyenchip.com/feed.xml][Huyen Chip]] :huyen_chip:blog:mlops:llm:deep:
+*** [[https://sebastianraschka.com/rss_feed.xml][Sebastian Raschka]] :sebastianraschka:blog:llm:research:deep:
+*** [[https://magazine.sebastianraschka.com/feed][Ahead of AI]] :aheadofai:blog:llm:research:weekly:
+*** [[https://www.interconnects.ai/feed][Interconnects]] :interconnects:blog:llm:research:policy:
+*** [[https://importai.substack.com/feed][Import AI]] :importai:blog:research:policy:weekly:aggregator:
+*** [[https://eugeneyan.com/rss/][Eugene Yan]] :eugeneyan:blog:mlops:recsys:
 *** [[https://www.answer.ai/index.xml][Answer.AI]] :answerai:llm:research:corp:
 *** [[https://huggingface.co/blog/feed.xml][Hugging Face]] :huggingface:llm:corp:
 *** [[https://research.google/blog/rss/][Google Research]] :google_research:research:corp:
