@@ -767,6 +767,62 @@ carries the `result' event the loop makes every decision from."
                                               ((tool_name . "Bash"))))))
                                0))))))
 
+(ert-deftest rata-test-claude-loop-cli-attempt-record ()
+  "The CLI's result event and exit code become the backend-neutral record."
+  (should (equal (rata-claude-loop--cli-attempt
+                  '((subtype . "error_max_turns") (is_error . t)
+                    (permission_denials . (((tool_name . "Edit")))))
+                  1)
+                 '(:result-p t :subtype "error_max_turns" :is-error t
+                   :exit-code 1 :denials (((tool_name . "Edit"))))))
+  (should (equal (rata-claude-loop--cli-attempt nil 0)
+                 '(:result-p nil :subtype nil :is-error nil
+                   :exit-code 0 :denials nil))))
+
+(ert-deftest rata-test-claude-loop-classify-attempt-is-backend-neutral ()
+  "Classification reads the record, never a backend's wire format.
+A backend with no process reports no exit code; that must not crash the
+classifier, and a denial in the record must count exactly as one in a
+CLI result event does."
+  (let ((rata-claude-loop--state nil))
+    (should-not (rata-claude-loop--classify-attempt
+                 '(:result-p t :subtype "success" :exit-code nil)))
+    (should (eq 'no-result
+                (car (rata-claude-loop--classify-attempt
+                      '(:result-p nil :exit-code nil)))))
+    (let ((verdict (rata-claude-loop--classify-attempt
+                    '(:result-p t :subtype "success" :exit-code nil
+                      :denials (((tool_name . "Bash")
+                                 (tool_input . ((command . "just test")))))
+                      :report done))))
+      (should (eq 'unverified (car verdict)))
+      (should (string-match-p "Bash(just:\\*)" (cdr verdict))))
+    (should (eq 'blocked
+                (car (rata-claude-loop--classify-attempt
+                      '(:result-p t :subtype "success"
+                        :report blocked :report-reason "no creds")))))))
+
+(ert-deftest rata-test-claude-loop-backend-dispatch ()
+  "Calls go to the run's backend, which outranks the configured one."
+  (let* ((calls nil)
+         (rata-claude-loop--backends
+          `((one :live-p ,(lambda () (push 'one calls) 'one-live))
+            (two :live-p ,(lambda () (push 'two calls) 'two-live))))
+         (rata-claude-loop-backend 'one)
+         (rata-claude-loop--state nil))
+    (should (eq (rata-claude-loop--backend-call :live-p) 'one-live))
+    (setq rata-claude-loop--state (list :backend 'two))
+    (should (eq (rata-claude-loop--backend-call :live-p) 'two-live))
+    (should (equal calls '(two one)))
+    ;; An op a backend lacks is a bug, said as one.
+    (should-error (rata-claude-loop--backend-call :start "t" "f" nil))
+    (setq rata-claude-loop--state (list :backend 'gone))
+    (should-error (rata-claude-loop--backend-call :live-p) :type 'user-error))
+  ;; The shipped backend implements every op the contract names.
+  (let ((cli (cdr (assq 'cli rata-claude-loop--backends))))
+    (dolist (op '(:check :start :retry :attempt :live-p :stop :kill))
+      (should (functionp (plist-get cli op))))))
+
 (ert-deftest rata-test-claude-loop-denial-pattern ()
   "A denial suggests the narrowest --allowedTools pattern that would fit it."
   (cl-flet ((pattern (denial) (rata-claude-loop--denial-pattern denial)))

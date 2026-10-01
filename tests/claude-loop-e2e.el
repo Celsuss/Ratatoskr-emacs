@@ -610,6 +610,86 @@ if [ $n -le 1 ]; then echo 'FAILED: test_thing'; exit 1; fi; echo 'all good'"
 (setenv "FAKE_MODE" "ok")
 
 ;;; ------------------------------------------------------------------
+;;; 16. The backend seam: a run driven by an in-process fake backend
+;;; ------------------------------------------------------------------
+
+;; Nothing below spawns a process.  The fake implements the contract in
+;; `rata-claude-loop--backends' and nothing else, so a run that finishes
+;; here proves the contract is enough to drive the real state machine --
+;; which is what a second backend relies on.  The run's backend is read
+;; once at start: the configured value is pointed at a backend that does
+;; not exist as soon as the run begins, and the run must not notice.
+(defvar rata-e2e--fake-script nil
+  "Plists (:record RECORD :report VERDICT), one per attempt, in order.")
+(defvar rata-e2e--fake-calls nil "Backend calls seen, newest first.")
+(defvar rata-e2e--fake-record nil "The record the current attempt reports.")
+
+(defun rata-e2e--fake-begin (op &rest args)
+  "Begin a fake attempt for OP with ARGS: complete it asynchronously."
+  (push (cons op args) rata-e2e--fake-calls)
+  (rata-claude-loop--attempt-begin)
+  ;; The contract: a session id as soon as one is known, or no retry.
+  (unless (rata-claude-loop--get :session-id)
+    (rata-claude-loop--put :session-id "fake-session"))
+  (let ((step (pop rata-e2e--fake-script))
+        (epoch (rata-claude-loop--get :epoch)))
+    (setq rata-e2e--fake-record (plist-get step :record))
+    ;; Like a sentinel: record, then schedule; never act in the callback.
+    (run-at-time 0 nil
+                 (lambda ()
+                   (when (rata-claude-loop--epoch-current-p epoch)
+                     (rata-claude-loop--put :report (plist-get step :report))
+                     (rata-claude-loop--later
+                      (lambda () (rata-claude-loop--after-claude nil))))))))
+
+(defun rata-e2e--fake-ok (&optional denials)
+  "Return a fake attempt step that succeeded, with DENIALS if any."
+  (list :record (list :result-p t :subtype "success" :exit-code nil
+                      :denials denials)
+        :report 'done))
+
+(setf (alist-get 'fake rata-claude-loop--backends)
+      (list :check #'ignore
+            :start (lambda (&rest args) (apply #'rata-e2e--fake-begin :start args))
+            :retry (lambda (&rest args) (apply #'rata-e2e--fake-begin :retry args))
+            :attempt (lambda (_code) rata-e2e--fake-record)
+            :live-p #'ignore
+            :stop #'ignore
+            :kill #'ignore))
+
+(setq rata-claude-loop-max-attempts 2
+      rata-e2e--fake-calls nil
+      rata-e2e--fake-script
+      (list (rata-e2e--fake-ok '(((tool_name . "Bash")
+                                  (tool_input . ((command . "just test"))))))
+            (rata-e2e--fake-ok)
+            (rata-e2e--fake-ok)))
+(let* ((file (rata-e2e--tasks "- [ ] one\n- [ ] two\n"))
+       (rata-claude-loop-backend 'fake))
+  (rata-claude-loop--begin file (file-name-directory file) nil)
+  (setq rata-claude-loop-backend 'no-such-backend)
+  (rata-claude-loop--advance)
+  (let ((status (rata-e2e--wait)))
+    (rata-e2e--check "backend: fake run finishes" status 'finished)
+    (rata-e2e--check "backend: both boxes ticked" (rata-e2e--contents file)
+                     "- [X] one\n- [X] two\n")
+    (rata-e2e--check "backend: the run kept the backend it started with"
+                     (rata-claude-loop--get :backend) 'fake)
+    (rata-e2e--check "backend: start, retry, start"
+                     (mapcar #'car (reverse rata-e2e--fake-calls))
+                     '(:start :retry :start))
+    (rata-e2e--check "backend: the denied Bash in a record became the retry reason"
+                     (and (string-match-p "Bash"
+                                          (nth 1 (cadr (reverse rata-e2e--fake-calls))))
+                          t)
+                     t)
+    (rata-e2e--check "backend: the retry suggests the pattern from the record"
+                     (rata-e2e--saw "Bash(just:\\*)") t)
+    (rata-e2e--check "backend: script fully consumed" rata-e2e--fake-script nil)))
+(setq rata-claude-loop-backend 'cli)
+(setf (alist-get 'fake rata-claude-loop--backends nil t) nil)
+
+;;; ------------------------------------------------------------------
 
 (delete-directory rata-e2e--dir t)
 (message "\n==== claude-loop e2e: %s ===="

@@ -1493,3 +1493,18 @@ test that asserts an *empty* segment through `format-mode-line` would therefore 
 whatever the code does. Apply: assert the construct's shape (`(:eval (FN))`) and call FN
 directly; keep FN free of side effects, since redisplay runs it. Related: L-052 (another
 Emacs 31 primitive that a batch test cannot drive the obvious way).
+
+## L-055 — Write a fake implementation before calling an interface extracted; it finds what the interface secretly assumes
+
+**Date:** 2026-10-01. Phase 1 of `plans/claude-loop-agent-shell.md` pulled the CLI out of
+`init-claude-loop.el` behind `rata-claude-loop--backends`. Every existing test passed
+unchanged — which proved the CLI path was preserved and nothing about the seam, because
+those tests only ever drive the one implementation that already satisfies every hidden
+assumption. The first run through an in-process fake backend (e2e §16) halted with "no
+session to resume": the shared failure path refuses a retry without `:session-id`, which
+the CLI sets as a side effect of parsing its `init` event. Nothing in the contract said
+so. Apply: when extracting an interface, add a second, minimal implementation in the test
+suite in the same change and drive a full run through it; whatever it trips over is
+either a contract obligation to document (as here) or an implementation detail leaking
+through the seam (move it behind). Related: the backend docstring now states the
+`:session-id` obligation.

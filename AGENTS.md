@@ -257,6 +257,17 @@ init-present → init-dashboard
   - **Staleness is handled by `:epoch`**, an integer bumped on every spawn and every stop. Callbacks and timers capture the epoch they were created under and no-op on mismatch; one check covers the child, the stderr pipe, the timeout timer, the grace-period kill and the pending step timer. `:outcome` is write-once per attempt so a timeout's verdict survives the kill it causes.
   - **Success is decided from the `result` event, never the exit code alone** (`rata-claude-loop--classify`). `claude -p` exits 0 for a task that gave up and for one whose edits were all silently denied. `:pending` must be flushed at EOF — the CLI does not newline-terminate its last line, and that line carries the result event.
   - **Failures retry by resuming the session** (`--resume` with the captured `session_id`), bounded by `rata-claude-loop-max-attempts`. `--resume` inherits no configuration, so `rata-claude-loop--common-args` exists to re-pass every flag.
+  - **How an attempt reaches Claude is a backend** (`rata-claude-loop-backend`, default
+    `cli`; the table is `rata-claude-loop--backends`). A backend implements `:check
+    :start :retry :attempt :live-p :stop :kill` and nothing else; the state machine,
+    marking, verify, budgets and journal are shared. It reports an attempt as a
+    normalised record (`rata-claude-loop--cli-attempt` documents the keys), and
+    `rata-claude-loop--classify-attempt` reads only that, never a backend's wire format.
+    Every attempt starts with `rata-claude-loop--attempt-begin` (epoch bump, verdicts
+    cleared), and a backend must record `:session-id` or the attempt cannot be retried.
+    The run captures its backend in `:backend` at start. e2e §16 drives a full run
+    through an in-process fake backend, which is the proof the contract suffices.
+    Plan for an agent-shell (ACP) backend: `plans/claude-loop-agent-shell.md`.
   - **Checkboxes are matched by text, not line number**, and an ambiguous match halts rather than ticking the wrong box.
   - **A plan written as `## Phase N` / `## Task N` headings runs as-is.** In a non-Org
     file with *no* checklist item at all (open or ticked — checkboxes win, so a phase is

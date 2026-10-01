@@ -264,6 +264,25 @@ Normalised attempt record, `classify` reads it, backend dispatch via
 `rata-claude-loop-backend` = `cli`. **Every existing test must pass unchanged** — that is
 the proof the refactor preserved behaviour. New pure tests for the record.
 
+**Done 2026-10-01.** As built:
+- `rata-claude-loop--backends` is an alist of backend → plist of `:check :start :retry
+  :attempt :live-p :stop :kill`; `rata-claude-loop--backend-call` dispatches on the run's
+  `:backend` (captured in `--begin`), else the defcustom. Phase 2 registers
+  `agent-shell` with a `setf` from its own file — the core never names it.
+- `rata-claude-loop--cli-attempt` defines the record; `--classify-attempt` is pure over
+  it; the denial helpers take denials as an argument. `classify`'s signature is
+  unchanged, so `rata-test-claude-loop-classify*` ran untouched.
+- `rata-claude-loop--attempt-begin` (epoch bump + per-attempt reset) is shared; every
+  backend calls it first.
+- **Contract found by the fake-backend e2e (§16):** a backend must set `:session-id`, or
+  `rata-claude-loop--fail` refuses to retry ("no session to resume"). Kept as a contract
+  rather than loosened — both backends have a real session id. Documented in the table's
+  docstring.
+- Left CLI-flavoured for Phase 2 to move behind the seam: `--after-claude` flushes the
+  CLI's stdout/stderr line buffers (a no-op for others); the retry banner says "resuming
+  session"; `rata-claude-loop-open-session` opens `claude --resume` (still right for ACP
+  sessions, but a live shell would be better — Phase 3).
+
 ### Phase 2 — ACP backend, deny policy
 `lisp/init-claude-loop-acp.el`: config/meta builder, start/stop/teardown, event→record
 mapping, responder dispatcher. New stub ACP agent (`tests/fake-claude-acp`, scripted
