@@ -3176,6 +3176,18 @@ the difference between a mailbox and a duplicated one."
     (dolist (e '(agent-message-chunk idle session-title-changed file-write no-such-event))
       (should (eq (rata-agent-center--next-state 'done (funcall ev e) nil) 'done)))))
 
+(ert-deftest rata-test-agent-center-last-column-shows-only-the-unusual ()
+  "The Last column carries an error or an unusual stop reason, nothing else.
+`end_turn' and the cost were dropped to save panel width (2026-10-02)."
+  (should (equal (rata-agent-center--last
+                  '(:last-stop-reason "end_turn" :cost 0.12)) ""))
+  (should (equal (rata-agent-center--last '()) ""))
+  (should (equal (rata-agent-center--last
+                  '(:last-stop-reason "max_tokens" :cost 0.12)) "max_tokens"))
+  (should (equal (rata-agent-center--last
+                  '(:last-stop-reason "end_turn" :error "request failed"))
+                 "request failed")))
+
 (ert-deftest rata-test-agent-center-state-order ()
   "Sort order is the plan's: attention first, idle last."
   (should (equal rata-agent-center-states
@@ -3443,8 +3455,9 @@ closed in."
                 (should (string-match-p "\\`zeta — ~/z/" (nth 3 lines)))
                 (should (string-match-p "error .*Claude" (nth 4 lines)))
                 (should (string-match-p "\\`home — ~/blog/" (nth 5 lines)))
-                (should (string-match-p "done .*Claude .*Post.*end_turn.*\\$0\\.12"
-                                        (nth 6 lines))))
+                (should (string-match-p "done .*Claude .*Post" (nth 6 lines)))
+                ;; A normal end and the cost are left out to save width.
+                (should-not (string-match-p "end_turn\\|\\$" (nth 6 lines))))
               ;; A row's id is its shell buffer: that is what RET acts on.
               (goto-char (point-min))
               (forward-line 1)

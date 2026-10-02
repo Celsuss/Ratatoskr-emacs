@@ -302,7 +302,7 @@ tests can stub it -- Emacs 31's `featurep' ignores a `let' of `features'."
   "Frame side the *Agents* panel is shown on."
   :type '(choice (const left) (const right) (const top) (const bottom)))
 
-(defcustom rata-agent-center-width 45
+(defcustom rata-agent-center-width 60
   "Width in columns of the *Agents* panel (height, on top or bottom)."
   :type 'integer)
 
@@ -317,8 +317,9 @@ tests can stub it -- Emacs 31's `featurep' ignores a `let' of `features'."
   "Badge of a busy shell (gruvbox yellow).")
 (defface rata-agent-center-starting '((t :foreground "#83a598"))
   "Badge of a shell still handshaking (gruvbox blue).")
-(defface rata-agent-center-ready '((t :foreground "#928374"))
-  "Badge of an idle, seen shell (gruvbox grey).")
+(defface rata-agent-center-ready '((t :foreground "#d3869b"))
+  "Badge of an idle, seen shell (gruvbox purple).
+Not grey: grey reads as disabled and is hard to see on the dark background.")
 (defface rata-agent-center-group-heading '((t :inherit bold))
   "Layout heading in the *Agents* panel.")
 
@@ -342,14 +343,14 @@ tests can stub it -- Emacs 31's `featurep' ignores a `let' of `features'."
           (t (format "%dd" (/ s 86400))))))
 
 (defun rata-agent-center--last (entry)
-  "The panel's last column for ENTRY: error, else stop reason and cost."
+  "The panel's last column for ENTRY: error, else an unusual stop reason.
+`end_turn' is how almost every turn ends, so it is left out, and so is the
+cost (still recorded as :cost): the column is for what needs reading."
   (or (plist-get entry :error)
-      (string-join (delq nil (list (plist-get entry :last-stop-reason)
-                                   (when-let* ((cost (plist-get entry :cost)))
-                                     (format "$%.2f" cost))))
-                   " ")))
+      (let ((reason (plist-get entry :last-stop-reason)))
+        (if (member reason '(nil "end_turn")) "" reason))))
 
-(defconst rata-agent-center--title-width 14
+(defconst rata-agent-center--title-width 20
   "Width of the Title column; longer titles are cut with an ellipsis.")
 
 (defun rata-agent-center--row (entry now)
