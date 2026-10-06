@@ -48,9 +48,15 @@ compile:
     errors=0
     for f in init.el lisp/init-*.el; do
         echo "Compiling $f..."
+        # use-package-ensure-function ignore: plain --batch runs package.el, and
+        # compiling `:ensure t' installs at compile time -- it contacted
+        # elpa.gnu.org for every module and hung for minutes per file when that
+        # host was down, and it filled ./elpa/ with copies nothing loads
+        # (FAIL-0023).  Compiling checks syntax; it must not install anything.
         if ! {{emacs_bin}} --init-directory {{init_dir}} --batch \
             --eval "(setq byte-compile-error-on-warn nil)" \
-            -f batch-byte-compile "$f" 2>&1; then
+            --eval "(setq use-package-ensure-function #'ignore)" \
+            -f batch-byte-compile "$f" < /dev/null 2>&1; then
             errors=$((errors + 1))
         fi
     done

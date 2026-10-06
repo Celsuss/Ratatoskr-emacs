@@ -247,7 +247,8 @@ so deferred packages (loaded via :commands) pass correctly."
     ;; explains what is missing instead of the key being dead).
     ("SPC a e e" . rata-mail)
     ("SPC a e u" . rata-mail-update)
-    ("SPC a e d" . rata-mail-doctor))
+    ("SPC a e d" . rata-mail-doctor)
+    ("SPC a r h" . rata-elfeed-hn-open-item))
   "Leader keys that must resolve immediately after init, with their commands.
 Not exhaustive — a contract for the keys most likely to be broken by the
 failure mode in .are/memory/failures/FAIL-0009.md.  Extend it when a
@@ -2188,6 +2189,756 @@ two upstream entry points have to keep existing across package updates."
   (should (fboundp 'elfeed-db-save))
   (skip-unless (require 'elfeed-org nil t))
   (should (fboundp 'rmh-elfeed-org-process-advice)))
+
+;;; ============================================================
+;;; Test — Hacker News in elfeed (lisp/init-elfeed-hn.el)
+;;; ============================================================
+;;
+;; Nothing here reaches hn.algolia.com or an article's site: the fence below
+;; makes `rata-elfeed-hn--retrieve' -- the module's only network function --
+;; fail the calling test, and every test that needs a reply swaps in
+;; `rata-test-hn--with-net', which answers from tests/fixtures/hn/.
+
+(require 'init-elfeed-hn)
+
+(advice-add 'rata-elfeed-hn--retrieve :override
+            (lambda (url &rest _)
+              (error "rata-test: `rata-elfeed-hn--retrieve' (%s) would reach the network; stub it in the test"
+                     url))
+            '((name . rata-test-no-network)))
+
+(defun rata-test-hn--fixture (name)
+  "Return the contents of tests/fixtures/hn/NAME as a string."
+  (with-temp-buffer
+    (insert-file-contents
+     (expand-file-name (concat "tests/fixtures/hn/" name) user-emacs-directory))
+    (buffer-string)))
+
+(defun rata-test-hn--json (name)
+  "Parse fixture NAME the way `rata-elfeed-hn--fetch-json' does."
+  (json-parse-string (rata-test-hn--fixture name)
+                     :object-type 'alist :array-type 'list
+                     :null-object nil :false-object nil))
+
+(defvar rata-test-hn--pending nil
+  "Requests the fake network has received and not yet answered: (URL CALLBACK).")
+
+(defvar rata-test-hn--requests nil
+  "Every URL the fake network was asked for, oldest first.")
+
+(defvar rata-test-hn--caps nil
+  "The size cap each request was made with: an alist of URL to MAX-BYTES.")
+
+(defvar rata-test-hn--routes nil
+  "The fake network's answers: an alist of URL to result plist.")
+
+(defmacro rata-test-hn--with-net (routes &rest body)
+  "Run BODY with the network replaced by ROUTES, an alist of URL to result.
+A request is held until `rata-test-hn--flush', so a test controls when a
+reply arrives.  An unrouted URL answers (:error \"no fixture\")."
+  (declare (indent 1))
+  `(let ((rata-test-hn--pending nil)
+         (rata-test-hn--requests nil)
+         (rata-test-hn--caps nil)
+         (rata-test-hn--routes ,routes))
+     (cl-letf (((symbol-function 'rata-elfeed-hn--retrieve)
+                (lambda (url max callback)
+                  (setq rata-test-hn--requests (append rata-test-hn--requests (list url)))
+                  (push (cons url max) rata-test-hn--caps)
+                  (push (list url callback) rata-test-hn--pending))))
+       (clrhash rata-elfeed-hn--cache)
+       (clrhash rata-elfeed-hn--article-cache)
+       ,@body)))
+
+(defun rata-test-hn--drain ()
+  "Run the timers a reply is delivered from."
+  (dotimes (_ 5) (accept-process-output nil 0.01)))
+
+(defun rata-test-hn--flush ()
+  "Answer every pending request from `rata-test-hn--routes', then drain timers."
+  (while rata-test-hn--pending
+    (let ((requests (reverse rata-test-hn--pending)))
+      (setq rata-test-hn--pending nil)
+      (pcase-dolist (`(,url ,callback) requests)
+        (funcall callback (or (cdr (assoc url rata-test-hn--routes))
+                              (list :error "no fixture"))))
+      (rata-test-hn--drain))))
+
+(defun rata-test-hn--ok (body &optional type)
+  "A successful fake response carrying BODY, of content TYPE."
+  (list :ok t :type (or type "application/json") :body body))
+
+(defun rata-test-hn--api (id)
+  "The Algolia URL for item ID."
+  (concat rata-elfeed-hn-api-url (number-to-string id)))
+
+(ert-deftest rata-test-hn-item-id-from-each-feed-shape ()
+  "The item id comes out of what elfeed already stored, for both HN feeds.
+And only from the shapes those feeds write: a blog post that links to an
+HN discussion is not an HN entry, or its article would be replaced."
+  ;; news.ycombinator.com/rss: the content is the one link.
+  (should (equal (rata-elfeed-hn-item-id
+                  "<a href=\"https://news.ycombinator.com/item?id=49283063\">Comments</a>"
+                  "https://example.com/article")
+                 49283063))
+  ;; hnrss.org, as stored in elfeed-db on 2026-10-06.
+  (should (equal (rata-elfeed-hn-item-id
+                  (concat "<p>Article URL: <a href=\"https://www.nature.com/a\">https://www.nature.com/a</a></p>\n"
+                          "<p>Comments URL: <a href=\"https://news.ycombinator.com/item?id=49312008\">"
+                          "https://news.ycombinator.com/item?id=49312008</a></p>\n<p>Points: 192</p>")
+                  "https://www.nature.com/a")
+                 49312008))
+  ;; Ask HN: the link is the item itself.
+  (should (equal (rata-elfeed-hn-item-id "<p>What do you use?</p>"
+                                         "https://news.ycombinator.com/item?id=123")
+                 123))
+  ;; Not HN.
+  (should-not (rata-elfeed-hn-item-id
+               "Discussed <a href=\"https://news.ycombinator.com/item?id=5\">on HN</a>."
+               "https://blog.example.com/post"))
+  (should-not (rata-elfeed-hn-item-id nil nil))
+  (should-not (rata-elfeed-hn-item-id "" "https://news.ycombinator.com/item?id=5&p=2")))
+
+(ert-deftest rata-test-hn-parse-thread-edge-cases ()
+  "Order, depth, deleted comments and counts from a hand-built reply."
+  (let* ((thread (rata-elfeed-hn--thread-from-json (rata-test-hn--json "thread-edge.json")))
+         (top (plist-get thread :comments)))
+    (should (equal (plist-get thread :title) "Show HN: A test thread"))
+    (should (equal (plist-get thread :points) 42))
+    (should (equal (plist-get thread :url) "https://example.com/post"))
+    ;; The poll option is not a comment; order is the reply's order.
+    (should (equal (mapcar (lambda (c) (plist-get c :id)) top) '(1001 1004 1006)))
+    ;; A deleted comment with no replies is gone ...
+    (should (equal (mapcar (lambda (c) (plist-get c :id))
+                           (plist-get (nth 0 top) :children))
+                   '(1002)))
+    ;; ... one with a live reply stays, so the reply keeps its parent.
+    (should (plist-get (nth 1 top) :deleted))
+    (should (equal (plist-get (car (plist-get (nth 1 top) :children)) :author) "carol"))
+    (should (equal (plist-get (car (plist-get (nth 1 top) :children)) :depth) 1))
+    (should (equal (plist-get (nth 0 top) :depth) 0))
+    (should (equal (plist-get (nth 0 top) :replies) 1))
+    (should (equal (plist-get (nth 1 top) :replies) 1))
+    ;; alice, bob, carol, dave -- the placeholder is not a comment.
+    (should (equal (plist-get thread :count) 4))))
+
+(ert-deftest rata-test-hn-parse-real-thread ()
+  "A reply captured from the live API parses whole, in order.
+tests/fixtures/hn/item-8863.json is the Dropbox launch thread, captured
+2026-10-06: 71 comments, none deleted."
+  (let* ((json (rata-test-hn--json "item-8863.json"))
+         (thread (rata-elfeed-hn--thread-from-json json)))
+    (should (equal (plist-get thread :count) 71))
+    (should (equal (plist-get thread :author) "dhouston"))
+    (should (equal (mapcar (lambda (c) (plist-get c :id)) (plist-get thread :comments))
+                   (mapcar (lambda (c) (alist-get 'id c)) (alist-get 'children json))))))
+
+(ert-deftest rata-test-hn-fetch-json-results-not-signals ()
+  "A good reply parses; a bad body and a failed request are results."
+  (rata-test-hn--with-net
+      (list (cons (rata-test-hn--api 1000) (rata-test-hn--ok (rata-test-hn--fixture "thread-edge.json")))
+            (cons (rata-test-hn--api 1) (rata-test-hn--ok "<html>not json"))
+            (cons (rata-test-hn--api 2) (list :error "HTTP 503")))
+    (let (got)
+      (dolist (id '(1000 1 2))
+        (rata-elfeed-hn--fetch-json id (lambda (r) (push (cons id r) got))))
+      (rata-test-hn--flush)
+      (should (equal (alist-get 'title (plist-get (alist-get 1000 got) :ok))
+                     "Show HN: A test thread"))
+      (should (string-prefix-p "bad reply" (plist-get (alist-get 1 got) :error)))
+      (should (equal (alist-get 2 got) '(:error "HTTP 503"))))))
+
+(ert-deftest rata-test-hn-fetch-thread-caches-and-reports-failure ()
+  "A thread is fetched once per session unless forced; a failure is a result."
+  (rata-test-hn--with-net
+      (list (cons (rata-test-hn--api 2000) (rata-test-hn--ok (rata-test-hn--fixture "ask-2000.json"))))
+    (let (got)
+      (rata-elfeed-hn--fetch-thread 2000 nil (lambda (r) (push r got)))
+      (rata-test-hn--flush)
+      (rata-elfeed-hn--fetch-thread 2000 nil (lambda (r) (push r got)))
+      (rata-test-hn--drain)
+      (should (= (length got) 2))
+      (should (equal (plist-get (plist-get (car got) :ok) :count) 1))
+      (should (equal (length rata-test-hn--requests) 1))
+      (rata-elfeed-hn--fetch-thread 2000 t #'ignore)
+      (should (equal (length rata-test-hn--requests) 2))
+      ;; Unrouted: the request fails, and the failure arrives as a value.
+      (setq got nil)
+      (rata-elfeed-hn--fetch-thread 99 nil (lambda (r) (push r got)))
+      (rata-test-hn--flush)
+      (should (equal got '((:error "no fixture")))))))
+
+(ert-deftest rata-test-hn-guard-drops-stale-replies ()
+  "A reply for a buffer that has moved on, or died, does nothing."
+  (let ((buf (generate-new-buffer " *hn-guard*"))
+        (ran nil))
+    (unwind-protect
+        (with-current-buffer buf
+          (setq rata-elfeed-hn--key 'entry-a)
+          (let ((current (rata-elfeed-hn--guard buf (lambda (x) (push x ran))))
+                (bumped (rata-elfeed-hn--guard buf (lambda (x) (push x ran)))))
+            (funcall current 1)
+            (should (equal ran '(1)))
+            ;; `g', or `n' to another HN entry: the redraw bumps the generation.
+            (cl-incf rata-elfeed-hn--generation)
+            (funcall bumped 2)
+            (should (equal ran '(1)))
+            ;; Same generation, different entry.
+            (let ((g (rata-elfeed-hn--guard buf (lambda (x) (push x ran)))))
+              (setq rata-elfeed-hn--key 'entry-b)
+              (funcall g 3)
+              (should (equal ran '(1))))
+            ;; An error inside is a message, never a signal out of a callback.
+            (let ((g (rata-elfeed-hn--guard buf (lambda (_) (error "boom")))))
+              (should-not (condition-case nil (progn (funcall g 4) nil) (error t))))
+            (let ((g (rata-elfeed-hn--guard buf (lambda (x) (push x ran)))))
+              (kill-buffer buf)
+              (funcall g 5)
+              (should (equal ran '(1))))))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest rata-test-hn-read-response ()
+  "url.el's response buffer becomes a result: status, cap, charset."
+  (cl-flet ((response (code ctype body &optional max)
+              (with-temp-buffer
+                (set-buffer-multibyte nil)
+                (insert "HTTP/1.1 " (number-to-string code) " X\nContent-Type: " ctype "\n\n")
+                (setq-local url-http-end-of-headers (1- (point)))
+                (insert (encode-coding-string body 'utf-8))
+                (setq-local url-http-response-status code)
+                (setq-local url-http-content-type ctype)
+                (rata-elfeed-hn--read-response nil max))))
+    (should (equal (response 200 "text/html; charset=UTF-8" "<p>héllo</p>")
+                   '(:ok t :type "text/html" :body "<p>héllo</p>")))
+    (should (equal (response 404 "text/html" "gone") '(:error "HTTP 404")))
+    (should (equal (plist-get (response 200 "text/html" (make-string 3000 ?x) 2048) :error)
+                   "over 2 KB"))
+    (should (equal (rata-elfeed-hn--read-response '(:error (error http 500)) nil)
+                   '(:error "HTTP 500")))))
+
+(defconst rata-test-hn--feed-url "https://news.ycombinator.com/rss")
+
+(defmacro rata-test-hn--with-elfeed (&rest body)
+  "Run BODY with elfeed loaded over an in-memory database.
+`elfeed-db' is bound non-nil, so `elfeed-db-ensure' never loads the real
+database and nothing is written back; entries are shown with the
+mail-style renderer into the current window's buffer list, not a popup."
+  (declare (indent 0))
+  `(progn
+     (skip-unless (require 'elfeed nil t))
+     (require 'elfeed-show)
+     (require 'shr)
+     (let ((elfeed-db (list :version 4))
+           (elfeed-db-feeds (make-hash-table :test 'equal))
+           (elfeed-show-entry-switch #'set-buffer)
+           (elfeed-show-unique-buffers nil)
+           (elfeed-show-refresh-function #'elfeed-show-refresh--mail-style)
+           ;; Batch has no font metrics, so pixel filling breaks every word
+           ;; onto its own line; character filling is what the asserts read.
+           (shr-use-fonts nil))
+       (puthash rata-test-hn--feed-url
+                (elfeed-feed--create :id rata-test-hn--feed-url :url rata-test-hn--feed-url
+                                     :title "Hacker News")
+                elfeed-db-feeds)
+       (unwind-protect (progn ,@body)
+         (when (get-buffer "*elfeed-entry*")
+           (kill-buffer "*elfeed-entry*"))))))
+
+(defun rata-test-hn--entry (id title link content)
+  "An elfeed entry from the news.ycombinator.com feed, not stored anywhere."
+  (elfeed-entry--create :id (cons "news.ycombinator.com" (format "%s" id))
+                        :title title :link link :date 1700000000
+                        :content content :content-type 'html
+                        :feed-id rata-test-hn--feed-url :tags '(hn)))
+
+(defun rata-test-hn--rss-entry (id title)
+  "An entry shaped like news.ycombinator.com/rss: the content is one link."
+  (rata-test-hn--entry
+   id title "https://example.com/post"
+   (format "<a href=\"https://news.ycombinator.com/item?id=%d\">Comments</a>" id)))
+
+(defun rata-test-hn--blog-entry ()
+  "An entry from some other feed."
+  (rata-test-hn--entry "blog" "A blog post" "https://blog.example.com/post"
+                       "<p>Hello <b>world</b>, discussed <a href=\"https://news.ycombinator.com/item?id=5\">on HN</a>.</p>"))
+
+(defun rata-test-hn--show (entry)
+  "Show ENTRY through the real `elfeed-show-entry'; return its buffer."
+  (elfeed-show-entry entry)
+  (get-buffer "*elfeed-entry*"))
+
+(defun rata-test-hn--blocks ()
+  "Return (ID DEPTH GUTTER-WIDTH) per comment block in the buffer, in order."
+  (let (out (pos (point-min)))
+    (while (setq pos (text-property-not-all pos (point-max) 'rata-elfeed-hn-id nil))
+      (push (list (get-text-property pos 'rata-elfeed-hn-id)
+                  (get-text-property pos 'rata-elfeed-hn-depth)
+                  (length (get-text-property pos 'line-prefix)))
+            out)
+      (setq pos (or (next-single-property-change pos 'rata-elfeed-hn-id) (point-max))))
+    (nreverse out)))
+
+(defun rata-test-hn--block-text (id)
+  "Return comment ID's block as a string, with its properties."
+  (let* ((start (text-property-any (point-min) (point-max) 'rata-elfeed-hn-id id))
+         (end (next-single-property-change start 'rata-elfeed-hn-id nil (point-max))))
+    (buffer-substring start end)))
+
+(ert-deftest rata-test-hn-hook-keeps-elfeeds-own ()
+  "Our function joins `elfeed-show-update-hook' without displacing elfeed's.
+`add-hook' before elfeed-show loads would bind the variable first, and
+elfeed's `defvar' -- which holds its readable and fetch-link functions --
+would then never take effect."
+  (should (featurep 'init-elfeed-hn))
+  (skip-unless (require 'elfeed-show nil t))
+  (should (memq 'rata-elfeed-hn-show-update elfeed-show-update-hook))
+  (should (memq 'elfeed-show-auto-readable elfeed-show-update-hook))
+  (should (memq 'elfeed-show-auto-fetch-link elfeed-show-update-hook)))
+
+(ert-deftest rata-test-hn-entry-shows-thread ()
+  "An HN entry draws, after elfeed's own text, one block per comment."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net
+        (list (cons (rata-test-hn--api 1000)
+                    (rata-test-hn--ok (rata-test-hn--fixture "thread-edge.json"))))
+      (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+        (should (string-match-p "Comments: loading…" (buffer-string)))
+        (rata-test-hn--flush)
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          (should-not (string-match-p "loading…" text))
+          (should (string-match-p "^4 comments · 42 points$" text))
+          (should (< (string-match "^Title: Show HN" text)
+                     (string-match "^4 comments" text))))
+        ;; Live comments in order, two gutter columns per level; the deleted
+        ;; parent of carol's reply stays as a placeholder.
+        (should (equal (rata-test-hn--blocks)
+                       '((1001 0 0) (1002 1 2) (1004 0 0) (1005 1 2) (1006 0 0))))
+        (should (string-prefix-p "[deleted]" (rata-test-hn--block-text 1004)))
+        (should (string-match-p "\\`alice · .* ago · 1 reply\n"
+                                (substring-no-properties (rata-test-hn--block-text 1001))))
+        (should (string-match-p "First comment, with emphasis and a link"
+                                (substring-no-properties (rata-test-hn--block-text 1001))))))))
+
+(ert-deftest rata-test-hn-comment-html-is-inert ()
+  "Comment text is drawn as text: no Org link, no script, no Lisp."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net
+        (list (cons (rata-test-hn--api 1000)
+                    (rata-test-hn--ok (rata-test-hn--fixture "thread-edge.json"))))
+      (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+        (rata-test-hn--flush)
+        (let* ((block (rata-test-hn--block-text 1006))
+               (at (string-match (regexp-quote "[[elisp:(delete-file \"x\")]]") block)))
+          (should at)
+          (should-not (string-match-p "alert" block))
+          (should (string-match-p "(x)" block))
+          (dolist (prop '(shr-url keymap button action follow-link))
+            (should-not (get-text-property at prop block))))))))
+
+(ert-deftest rata-test-hn-non-hn-entry-untouched ()
+  "Any other entry draws exactly as it does without this module."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net nil
+      (let* ((entry (rata-test-hn--blog-entry))
+             (with (with-current-buffer (rata-test-hn--show entry) (buffer-string)))
+             (without (let ((elfeed-show-update-hook
+                             (remq 'rata-elfeed-hn-show-update elfeed-show-update-hook)))
+                        (with-current-buffer (rata-test-hn--show entry) (buffer-string)))))
+        (should (equal-including-properties with without))
+        (should-not rata-test-hn--requests)))))
+
+(ert-deftest rata-test-hn-reply-for-a-left-entry-is-dropped ()
+  "Moving on before the reply arrives leaves the new entry clean."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net
+        (list (cons (rata-test-hn--api 1000)
+                    (rata-test-hn--ok (rata-test-hn--fixture "thread-edge.json")))
+              (cons (rata-test-hn--api 2000)
+                    (rata-test-hn--ok (rata-test-hn--fixture "ask-2000.json"))))
+      ;; HN entry, then a blog entry, then the reply.
+      (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+      (with-current-buffer (rata-test-hn--show (rata-test-hn--blog-entry))
+        (rata-test-hn--flush)
+        (should-not (text-property-not-all (point-min) (point-max) 'rata-elfeed-hn-section nil))
+        (should-not (string-match-p "Comments:\\|comments ·" (buffer-string))))
+      ;; HN entry, then another HN entry: only the second thread is drawn.
+      (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+      (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 2000 "Ask HN"))
+        (rata-test-hn--flush)
+        (should (equal (rata-test-hn--blocks) '((2001 0 0))))
+        (should (= 1 (how-many "^1 comment · 7 points$" (point-min) (point-max))))))))
+
+(ert-deftest rata-test-hn-failed-fetch-says-so ()
+  "A failed fetch is a line in the buffer naming the reason and the retry key."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net
+        (list (cons (rata-test-hn--api 1000) (list :error "HTTP 503")))
+      (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+        (rata-test-hn--flush)
+        (should (string-match-p "^Comments: fetch failed (HTTP 503) — , c to retry$"
+                                (buffer-substring-no-properties (point-min) (point-max))))))))
+
+(defun rata-test-hn--text ()
+  "The current buffer's text, without properties."
+  (buffer-substring-no-properties (point-min) (point-max)))
+
+(defun rata-test-hn--section-text (name)
+  "The text of section NAME in the current buffer, or nil."
+  (when-let* ((b (rata-elfeed-hn--section-bounds name)))
+    (buffer-substring-no-properties (car b) (cdr b))))
+
+(defconst rata-test-hn--article-url "https://example.com/post")
+
+(defun rata-test-hn--story-routes (article)
+  "Routes for the edge thread, with ARTICLE as the reply for its article."
+  (list (cons (rata-test-hn--api 1000)
+              (rata-test-hn--ok (rata-test-hn--fixture "thread-edge.json")))
+        (cons rata-test-hn--article-url article)))
+
+(ert-deftest rata-test-hn-readable-text ()
+  "eww's reader view keeps an article and rejects a cookie wall."
+  (let ((dom (rata-elfeed-hn--readable-text (rata-test-hn--fixture "article.html"))))
+    (should dom)
+    (should (string-match-p "three properties we now think" (dom-texts dom))))
+  (should-not (rata-elfeed-hn--readable-text (rata-test-hn--fixture "cookie-wall.html")))
+  (should-not (rata-elfeed-hn--readable-text "")))
+
+(ert-deftest rata-test-hn-story-and-article-replace-comments-word ()
+  "A Comments-only entry shows the story and the readable article instead."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net
+        (rata-test-hn--story-routes
+         (rata-test-hn--ok (rata-test-hn--fixture "article.html") "text/html"))
+      (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+        ;; Both requests are out at once: the article does not wait for the thread.
+        (should (equal (sort (copy-sequence rata-test-hn--requests) #'string<)
+                       (sort (list (rata-test-hn--api 1000) rata-test-hn--article-url) #'string<)))
+        (should (equal (alist-get rata-test-hn--article-url rata-test-hn--caps nil nil #'equal)
+                       rata-elfeed-hn-article-max-bytes))
+        (rata-test-hn--flush)
+        (let ((story (rata-test-hn--section-text 'story))
+              (text (rata-test-hn--text)))
+          (should (string-match-p "^Show HN: A test thread$" story))
+          (should (string-match-p "^example\\.com · 42 points · by op · .* ago · 4 comments$" story))
+          (should (string-match-p "three properties we now think"
+                                  (replace-regexp-in-string "\n" " " (rata-test-hn--section-text 'article))))
+          ;; elfeed's own content -- the one word -- is gone.
+          (should-not (string-match-p "^Comments$" text))
+          (should (string-match-p "^4 comments · 42 points$" text))
+          (should (< (string-match "Show HN: A test thread\n" text)
+                     (string-match "three properties" text)
+                     (string-match "^4 comments" text))))))))
+
+(ert-deftest rata-test-hn-ask-hn-shows-post-text ()
+  "An Ask HN entry shows the post's own text, and fetches no article."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net
+        (list (cons (rata-test-hn--api 2000)
+                    (rata-test-hn--ok (rata-test-hn--fixture "ask-2000.json"))))
+      (with-current-buffer
+          (rata-test-hn--show
+           (rata-test-hn--entry 2000 "Ask HN: How do you read Hacker News?"
+                                "https://news.ycombinator.com/item?id=2000"
+                                "<p>I mostly read it in Emacs.</p><p>Comments URL: <a href=\"https://news.ycombinator.com/item?id=2000\">x</a></p>"))
+        (rata-test-hn--flush)
+        (should (equal rata-test-hn--requests (list (rata-test-hn--api 2000))))
+        (should (string-match-p "I mostly read it in Emacs these days\\."
+                                (rata-test-hn--section-text 'article)))
+        (should (string-match-p "^7 points · by asker · .* · 1 comment$"
+                                (rata-test-hn--section-text 'story)))
+        (should (equal (rata-test-hn--blocks) '((2001 0 0))))))))
+
+(ert-deftest rata-test-hn-article-failures-degrade ()
+  "Each way an article can fail leaves the link line and its reason.
+The comments render regardless."
+  (pcase-dolist (`(,reply ,reason)
+                 `((,(rata-test-hn--ok "%PDF-1.7" "application/pdf") "application/pdf")
+                   ((:error "over 2048 KB") "over 2048 KB")
+                   (,(rata-test-hn--ok (rata-test-hn--fixture "cookie-wall.html") "text/html")
+                    "no readable text")
+                   ((:error "HTTP 403") "HTTP 403")
+                   ((:error "timed out") "timed out")))
+    (rata-test-hn--with-elfeed
+      (rata-test-hn--with-net (rata-test-hn--story-routes reply)
+        (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+          (rata-test-hn--flush)
+          (should (equal (string-trim (rata-test-hn--section-text 'article))
+                         (format "article not fetched (%s) — , o to open" reason)))
+          (should (string-match-p "example\\.com · 42 points" (rata-test-hn--section-text 'story)))
+          (should (= (length (rata-test-hn--blocks)) 5)))))))
+
+(ert-deftest rata-test-hn-article-fetch-can-be-turned-off ()
+  "With `rata-elfeed-hn-fetch-article' nil the article's site is never contacted."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net
+        (rata-test-hn--story-routes (rata-test-hn--ok (rata-test-hn--fixture "article.html") "text/html"))
+      (let ((rata-elfeed-hn-fetch-article nil))
+        (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+          (rata-test-hn--flush)
+          (should (equal rata-test-hn--requests (list (rata-test-hn--api 1000))))
+          (should (string-match-p "article not fetched (turned off)"
+                                  (rata-test-hn--section-text 'article)))
+          (should (= (length (rata-test-hn--blocks)) 5)))))))
+
+(ert-deftest rata-test-hn-story-replaces-content-under-goodies-renderer ()
+  "The content is replaced under elfeed-goodies' renderer too.
+This config uses `elfeed-goodies/show-refresh--plain', which draws a
+newline and the content with no marker property -- the mail-style
+renderer's `elfeed-entry-content' marker is not there to find."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net
+        (rata-test-hn--story-routes (list :error "HTTP 403"))
+      (let ((elfeed-show-refresh-function
+             (if (fboundp 'elfeed-goodies/show-refresh--plain)
+                 #'elfeed-goodies/show-refresh--plain
+               ;; Its body, as of 2026-10-06, for when goodies is not loaded.
+               (lambda ()
+                 (let ((inhibit-read-only t))
+                   (erase-buffer)
+                   (insert "\n")
+                   (elfeed-insert-html (elfeed-deref (elfeed-entry-content elfeed-show-entry)))
+                   (goto-char (point-min)))))))
+        (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+          (rata-test-hn--flush)
+          (let ((text (rata-test-hn--text)))
+            (should (string-prefix-p "\n\nShow HN: A test thread\n" text))
+            (should-not (string-match-p "^Comments$" text))
+            (should (= (length (rata-test-hn--blocks)) 5))))))))
+
+(defmacro rata-test-hn--with-thread (&rest body)
+  "Run BODY in an elfeed entry buffer showing the edge thread, in normal state."
+  (declare (indent 0))
+  `(rata-test-hn--with-elfeed
+     (rata-test-hn--with-net
+         (rata-test-hn--story-routes (list :error "HTTP 403"))
+       (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+         (rata-test-hn--flush)
+         (evil-local-mode 1)
+         (evil-normal-state)
+         ,@body))))
+
+(defun rata-test-hn--goto-comment (id)
+  "Move point to the start of comment ID."
+  (goto-char (text-property-any (point-min) (point-max) 'rata-elfeed-hn-id id)))
+
+(defun rata-test-hn--hidden ()
+  "The ids of the comment blocks that are invisible, in order."
+  (cl-loop for b in (rata-elfeed-hn--blocks)
+           when (invisible-p (nth 0 b)) collect (nth 3 b)))
+
+(ert-deftest rata-test-hn-keys-resolve-in-elfeed-show ()
+  "Every thread key resolves in normal state, and elfeed's own keys survive."
+  (rata-test-hn--with-thread
+    (should rata-elfeed-hn-thread-mode)
+    (pcase-dolist (`(,key ,command ,_label) rata-elfeed-hn--keys)
+      (should (equal (cons key (key-binding (kbd key))) (cons key command))))
+    (let ((ours (mapcar (lambda (k) (key-binding (kbd k))) '("]]" "[[" "TAB"))))
+      (rata-elfeed-hn-thread-mode -1)
+      (should (equal ours (mapcar (lambda (k) (key-binding (kbd k))) '("]]" "[[" "TAB"))))
+      (should-not (memq (key-binding (kbd "za")) '(rata-elfeed-hn-toggle-fold))))))
+
+(ert-deftest rata-test-hn-keys-only-where-there-is-a-thread ()
+  "The reused entry buffer drops the thread keys on a non-HN entry."
+  (rata-test-hn--with-thread
+    (rata-test-hn--show (rata-test-hn--blog-entry))
+    (should-not rata-elfeed-hn-thread-mode)))
+
+(ert-deftest rata-test-hn-fold-hides-exactly-the-replies ()
+  "`za' hides a comment's replies and nothing else; again shows them."
+  (rata-test-hn--with-thread
+    (rata-test-hn--goto-comment 1001)
+    (forward-line 1)                    ; anywhere in the comment will do
+    (rata-elfeed-hn-toggle-fold)
+    (should (equal (rata-test-hn--hidden) '(1002)))
+    (should-not (invisible-p (1- (nth 1 (car (rata-elfeed-hn--block-at))))))
+    (rata-elfeed-hn-toggle-fold)
+    (should-not (rata-test-hn--hidden))
+    (rata-elfeed-hn-fold)
+    (rata-elfeed-hn-fold)                ; idempotent
+    (rata-elfeed-hn-unfold)
+    (should-not (rata-test-hn--hidden))
+    ;; A comment with no replies has nothing to fold.
+    (rata-test-hn--goto-comment 1006)
+    (rata-elfeed-hn-toggle-fold)
+    (should-not (rata-test-hn--hidden))))
+
+(ert-deftest rata-test-hn-fold-all-leaves-top-level ()
+  "`zM' leaves only depth-0 comments visible; `zR' shows everything."
+  (rata-test-hn--with-thread
+    (rata-elfeed-hn-fold-all)
+    (should (equal (rata-test-hn--hidden) '(1002 1005)))
+    (rata-elfeed-hn-unfold-all)
+    (should-not (rata-test-hn--hidden))))
+
+(ert-deftest rata-test-hn-large-thread-opens-folded ()
+  "Over `rata-elfeed-hn-fold-threshold' comments, replies open folded."
+  (let ((rata-elfeed-hn-fold-threshold 3))
+    (rata-test-hn--with-thread
+      (should (equal (rata-test-hn--hidden) '(1002 1005)))))
+  (let ((rata-elfeed-hn-fold-threshold 4))
+    (rata-test-hn--with-thread
+      (should-not (rata-test-hn--hidden)))))
+
+(ert-deftest rata-test-hn-sibling-and-parent-navigation ()
+  "`zj'/`zk' move between comments at one depth, skipping replies; `zu' goes up."
+  (rata-test-hn--with-thread
+    (cl-flet ((at () (get-text-property (point) 'rata-elfeed-hn-id)))
+      (goto-char (point-min))
+      (rata-elfeed-hn-next-sibling)       ; from the story: the first comment
+      (should (equal (at) 1001))
+      (rata-elfeed-hn-next-sibling)       ; skips bob's reply
+      (should (equal (at) 1004))
+      (rata-elfeed-hn-next-sibling)
+      (should (equal (at) 1006))
+      (should-error (rata-elfeed-hn-next-sibling) :type 'user-error)
+      (rata-elfeed-hn-previous-sibling)
+      (should (equal (at) 1004))
+      (rata-test-hn--goto-comment 1005)
+      (should-error (rata-elfeed-hn-next-sibling) :type 'user-error) ; last reply under 1004
+      (rata-elfeed-hn-parent)
+      (should (equal (at) 1004))
+      (should-error (rata-elfeed-hn-parent) :type 'user-error))))
+
+(ert-deftest rata-test-hn-permalink-and-browser-commands ()
+  "`, y' copies the comment's permalink; `, o'/`, O' bypass the routing."
+  (rata-test-hn--with-thread
+    (let ((kill-ring nil) opened)
+      (rata-test-hn--goto-comment 1005)
+      (rata-elfeed-hn-copy-permalink)
+      (should (equal (car kill-ring) "https://news.ycombinator.com/item?id=1005"))
+      (cl-letf (((symbol-function 'browse-url)
+                 (lambda (url &rest _)
+                   (push (cons url (cl-some (lambda (h) (eq (cdr h) 'rata-elfeed-hn-browse-url))
+                                            browse-url-handlers))
+                         opened))))
+        (rata-elfeed-hn-open-article)
+        (rata-elfeed-hn-open-thread-in-browser))
+      (should (equal opened '(("https://news.ycombinator.com/item?id=1000")
+                              ("https://example.com/post")))))))
+
+(ert-deftest rata-test-hn-item-url-routing ()
+  "Item URLs, and nothing else, route to the HN buffer."
+  (dolist (url '("https://news.ycombinator.com/item?id=1"
+                 "http://news.ycombinator.com/item?id=42"
+                 "https://www.news.ycombinator.com/item?id=42"))
+    (should (rata-elfeed-hn--route-p url))
+    (should (equal (rata-elfeed-hn--parse-item url)
+                   (string-to-number (car (last (split-string url "=")))))))
+  (dolist (url '("https://news.ycombinator.com/news"
+                 "https://news.ycombinator.com/item?id="
+                 "https://news.ycombinator.com/item?id=5&p=2"
+                 "https://evil.example/news.ycombinator.com/item?id=1"
+                 "https://news.ycombinator.com.evil.example/item?id=1"))
+    (should-not (rata-elfeed-hn--route-p url)))
+  (should (equal (rata-elfeed-hn--parse-item " 8863 ") 8863))
+  (should (equal (rata-elfeed-hn--parse-item 8863) 8863))
+  (should-not (rata-elfeed-hn--parse-item "news"))
+  (require 'browse-url)
+  (should (eq (cdr (cl-find-if (lambda (h) (functionp (car h))) browse-url-handlers
+                               :key (lambda (h) (and (eq (cdr h) 'rata-elfeed-hn-browse-url) h))))
+              'rata-elfeed-hn-browse-url))
+  (should (eq (browse-url-select-handler "https://news.ycombinator.com/item?id=1")
+              'rata-elfeed-hn-browse-url))
+  (let ((rata-elfeed-hn-route-item-links nil))
+    (should-not (eq (browse-url-select-handler "https://news.ycombinator.com/item?id=1")
+                    'rata-elfeed-hn-browse-url))))
+
+(ert-deftest rata-test-hn-open-item-buffer ()
+  "An item opened by URL shows story, article and thread in `*HN <id>*'."
+  (rata-test-hn--with-net
+      (rata-test-hn--story-routes
+       (rata-test-hn--ok (rata-test-hn--fixture "article.html") "text/html"))
+    (require 'shr)                      ; so the binding below is dynamic
+    (let ((shr-use-fonts nil))
+      (cl-letf (((symbol-function 'pop-to-buffer) #'set-buffer))
+        (unwind-protect
+            (progn
+              (rata-elfeed-hn-open-item "https://news.ycombinator.com/item?id=1000")
+              (with-current-buffer "*HN 1000*"
+                (should (derived-mode-p 'rata-elfeed-hn-item-mode))
+                (should rata-elfeed-hn-thread-mode)
+                ;; No entry here: the article URL comes with the thread.
+                (should (equal rata-test-hn--requests (list (rata-test-hn--api 1000))))
+                (rata-test-hn--flush)
+                (should (equal (cadr rata-test-hn--requests) rata-test-hn--article-url))
+                (should (string-match-p "^Show HN: A test thread$" (rata-test-hn--section-text 'story)))
+                (should (string-match-p "three properties"
+                                        (replace-regexp-in-string
+                                         "\n" " " (rata-test-hn--section-text 'article))))
+                (should (= (length (rata-test-hn--blocks)) 5))
+                ;; `g' redraws from the network, not the caches: the thread,
+                ;; then -- once the thread names it -- the article again.
+                (revert-buffer)
+                (rata-test-hn--flush)
+                (should (= (length rata-test-hn--requests) 4))
+                (should (= (length (rata-test-hn--blocks)) 5))))
+          (when (get-buffer "*HN 1000*") (kill-buffer "*HN 1000*")))))))
+
+(ert-deftest rata-test-hn-curl-args ()
+  "curl follows redirects, bounds time and, when asked, size; URL comes last."
+  (let ((args (rata-elfeed-hn--curl-args "https://example.com/a" 2048 20)))
+    (should (member "--location" args))
+    (should (equal (cadr (member "--max-time" args)) "20"))
+    (should (equal (cadr (member "--max-filesize" args)) "2048"))
+    (should (equal (last args 2) '("--" "https://example.com/a"))))
+  (should-not (member "--max-filesize" (rata-elfeed-hn--curl-args "https://x" nil 20))))
+
+(ert-deftest rata-test-hn-curl-result ()
+  "curl's stdout, exit code and stderr become a result, never a signal."
+  (let ((ok (encode-coding-string "<p>héllo</p>\n200 text/html; charset=UTF-8" 'utf-8)))
+    (should (equal (rata-elfeed-hn--curl-result ok 0 "" nil)
+                   '(:ok t :type "text/html" :body "<p>héllo</p>"))))
+  (should (equal (rata-elfeed-hn--curl-result "gone\n404 text/html" 0 "" nil)
+                 '(:error "HTTP 404")))
+  (should (equal (rata-elfeed-hn--curl-result "%PDF\n200 application/pdf" 0 "" nil)
+                 '(:ok t :type "application/pdf" :body "%PDF")))
+  (should (equal (rata-elfeed-hn--curl-result "" 28 "curl: (28) Operation timed out" nil)
+                 '(:error "timed out")))
+  (should (equal (rata-elfeed-hn--curl-result "" 63 "" 2048) '(:error "over 2 KB")))
+  (should (equal (rata-elfeed-hn--curl-result (concat (make-string 3000 ?x) "\n200 text/html") 0 "" 2048)
+                 '(:error "over 2 KB")))
+  (should (equal (rata-elfeed-hn--curl-result "" 6 "curl: (6) Could not resolve host: x\n" nil)
+                 '(:error "Could not resolve host: x")))
+  (should (equal (rata-elfeed-hn--curl-result "" 7 "" nil) '(:error "curl exited 7")))
+  (should (equal (rata-elfeed-hn--curl-result "no status line" 0 "" nil)
+                 '(:error "no response"))))
+
+(ert-deftest rata-test-hn-curl-retrieve-plumbing ()
+  "A real process through `rata-elfeed-hn--curl-retrieve', against a stub curl.
+This is the path that replaced url.el for articles: url.el does not race
+IPv6 against IPv4, so on a network with an unrouted IPv6 address every
+site that publishes an AAAA record timed out."
+  (let* ((program (expand-file-name "tests/fixtures/hn/fake-curl" user-emacs-directory))
+         (args-file (make-temp-file "rata-fake-curl-args"))
+         (process-environment
+          (append (list (concat "RATA_FAKE_CURL_BODY="
+                                (expand-file-name "tests/fixtures/hn/article.html" user-emacs-directory))
+                        (concat "RATA_FAKE_CURL_ARGS=" args-file))
+                  process-environment))
+         result)
+    (unwind-protect
+        (progn
+          (rata-elfeed-hn--curl-retrieve program "https://example.com/post" 4096
+                                         (lambda (r) (setq result r)))
+          (with-timeout (10 (ert-fail "the stub curl never finished"))
+            (while (not result) (accept-process-output nil 0.05)))
+          (should (eq (plist-get result :ok) t))
+          (should (equal (plist-get result :type) "text/html"))
+          (should (string-match-p "three properties we now think" (plist-get result :body)))
+          (should (member "https://example.com/post"
+                          (with-temp-buffer (insert-file-contents args-file)
+                                            (split-string (buffer-string) "\n" t))))
+          ;; A failing curl reports its exit, not a hang and not a signal.
+          (setq result nil)
+          (let ((process-environment (cons "RATA_FAKE_CURL_EXIT=28" process-environment)))
+            (rata-elfeed-hn--curl-retrieve program "https://example.com/post" nil
+                                           (lambda (r) (setq result r)))
+            (with-timeout (10 (ert-fail "the stub curl never finished"))
+              (while (not result) (accept-process-output nil 0.05))))
+          (should (equal result '(:error "timed out")))
+          (should-not (cl-find-if (lambda (b) (string-prefix-p " *rata-elfeed-hn-curl" (buffer-name b)))
+                                  (buffer-list))))
+      (delete-file args-file))))
 
 ;;; ============================================================
 ;;; Test — dialogic formatting (lisp/init-dialogic.el)

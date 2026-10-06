@@ -1,0 +1,22 @@
+{"id":1000,"type":"story","author":"op","created_at_i":1700000000,"points":42,"parent_id":null,"story_id":1000,
+ "title":"Show HN: A test thread","url":"https://example.com/post","text":null,"options":[],
+ "children":[
+  {"id":1001,"type":"comment","author":"alice","created_at_i":1700000600,"points":null,"parent_id":1000,"story_id":1000,"title":null,"url":null,"options":[],
+   "text":"<p>First comment, with <i>emphasis</i> and a <a href=\"https://example.org/x\">link</a>.</p>",
+   "children":[
+     {"id":1002,"type":"comment","author":"bob","created_at_i":1700001200,"points":null,"parent_id":1001,"story_id":1000,"title":null,"url":null,"options":[],
+      "text":"A reply to alice.","children":[]},
+     {"id":1003,"type":"comment","author":null,"created_at_i":1700001300,"points":null,"parent_id":1001,"story_id":1000,"title":null,"url":null,"options":[],
+      "text":null,"children":[]}
+   ]},
+  {"id":1004,"type":"comment","author":null,"created_at_i":1700002000,"points":null,"parent_id":1000,"story_id":1000,"title":null,"url":null,"options":[],
+   "text":null,
+   "children":[
+     {"id":1005,"type":"comment","author":"carol","created_at_i":1700002600,"points":null,"parent_id":1004,"story_id":1000,"title":null,"url":null,"options":[],
+      "text":"Replying to a comment that was since deleted.","children":[]}
+   ]},
+  {"id":1006,"type":"comment","author":"dave","created_at_i":1700003000,"points":null,"parent_id":1000,"story_id":1000,"title":null,"url":null,"options":[],
+   "text":"Try [[elisp:(delete-file \"x\")]] or <script>alert(1)</script>this.<p><pre><code>  (x)\n</code></pre>","children":[]},
+  {"id":1007,"type":"pollopt","author":"op","created_at_i":1700003100,"points":3,"parent_id":1000,"story_id":1000,"title":null,"url":null,"options":[],
+   "text":"A poll option, not a comment.","children":[]}
+ ]}

@@ -1,0 +1,7 @@
+{"id":2000,"type":"story","author":"asker","created_at_i":1700000000,"points":7,"parent_id":null,"story_id":2000,
+ "title":"Ask HN: How do you read Hacker News?","url":null,
+ "text":"I mostly read it in <i>Emacs</i> these days.<p>What about you?","options":[],
+ "children":[
+  {"id":2001,"type":"comment","author":"reader","created_at_i":1700000900,"points":null,"parent_id":2000,"story_id":2000,"title":null,"url":null,"options":[],
+   "text":"In elfeed.","children":[]}
+ ]}

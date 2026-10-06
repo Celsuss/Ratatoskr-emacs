@@ -160,6 +160,18 @@ if [ -n "$just_recipes" ] && [ -f scripts/are-verify.sh ]; then
     done < <(printf '%s\n' "$just_recipes" | grep -E '^test-' || true)
 fi
 
+# --- Check: compile-installs-nothing ---------------------------------------------
+# FAIL-0023: `just compile' runs bare --batch, where package.el is live and compiling a
+# `:ensure t' form installs at compile time -- every gate above `fast' then waited on
+# elpa.gnu.org, and hung outright the day it was down. The recipe disables installing;
+# this keeps a rewrite of it from quietly dropping that. Read through `just --show',
+# not a grep of one file, for the reason in L-034.
+echo "=== Check: compile-installs-nothing ==="
+if printf '%s\n' "$just_recipes" | grep -qxF compile; then
+    just --show compile 2>/dev/null | grep -q "use-package-ensure-function #'ignore" \
+        || fail "the compile recipe no longer sets use-package-ensure-function to ignore, so compiling installs packages over the network (FAIL-0023)"
+fi
+
 # --- Check: docs-commands --------------------------------------------------------
 # L-016: AGENTS.md told every session to "always consult `repomix-output.xml` first" for
 # months. The file had never existed here -- the paragraph was pasted from a Terraform
@@ -289,7 +301,7 @@ echo "=== Check: stray-files ==="
 while IFS= read -r p; do
     [ -n "$p" ] || continue
     case "$p" in
-        *.el | *.md | *.org | *.sh | *.yaml | *.yml | *.json | *.png | *.example | snippets/*) continue ;;
+        *.el | *.md | *.org | *.sh | *.yaml | *.yml | *.json | *.png | *.example | snippets/* | tests/fixtures/*) continue ;;
     esac
     warn "unexpected untracked file: '$p' (FAIL-0007)"
 done < <(git ls-files --others --exclude-standard 2>/dev/null || true)

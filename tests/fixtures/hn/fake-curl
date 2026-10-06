@@ -1,0 +1,12 @@
+#!/bin/sh
+# Stands in for curl in rata-test-hn-curl-retrieve-plumbing: no network.
+# Prints the file $RATA_FAKE_CURL_BODY, then the --write-out status line
+# ($RATA_FAKE_CURL_STATUS), then exits with $RATA_FAKE_CURL_EXIT.  The
+# arguments it was given go to $RATA_FAKE_CURL_ARGS, one per line.
+[ -n "$RATA_FAKE_CURL_ARGS" ] && printf '%s\n' "$@" > "$RATA_FAKE_CURL_ARGS"
+if [ "${RATA_FAKE_CURL_EXIT:-0}" != 0 ]; then
+    echo "curl: (${RATA_FAKE_CURL_EXIT}) fake failure" >&2
+    exit "$RATA_FAKE_CURL_EXIT"
+fi
+cat "$RATA_FAKE_CURL_BODY"
+printf '\n%s' "${RATA_FAKE_CURL_STATUS:-200 text/html; charset=utf-8}"

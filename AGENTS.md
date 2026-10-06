@@ -220,7 +220,7 @@ init-dev → init-lang → init-rust → init-go → init-python → init-cpp �
 init-cmake → init-terraform → init-just → init-docker → init-markdown →
 init-yaml → init-ansible → init-jupyter → init-helm → init-pkgbuild →
 init-casual → init-sql → init-k8s → init-gamedev → init-snippets →
-init-llm → init-claude-loop → init-khoj → init-irc → init-elfeed → init-mail → init-jira →
+init-llm → init-claude-loop → init-khoj → init-irc → init-elfeed → init-elfeed-hn → init-mail → init-jira →
 init-persp → init-agent-center → init-org → init-blog → init-dialogic →
 init-present → init-dashboard
 ```
@@ -347,6 +347,31 @@ init-present → init-dashboard
   render — tabulated-list has no fold of its own), `c` new shell in the row's project,
   `K` interrupt, `g r` refresh, `q` close. Tests: `rata-test-agent-center-*` in
   `tests/run-tests.el`, all on synthetic event alists — nothing starts an agent.
+- `init-elfeed-hn.el` — Hacker News inside elfeed's own entry buffer (D-023, plan
+  `plans/hackernews-reader.md`). Owns no package. One function on `elfeed-show-update-hook`
+  (added in `with-eval-after-load 'elfeed-show`, because elfeed's `defvar` of that hook
+  carries its own two functions and an earlier `add-hook` would drop them) replaces an HN
+  entry's useless content — the word "Comments", or hnrss's URL list — with three sections:
+  the story, a readable copy of the article (`eww-readable-dom`) or the post text, and the
+  whole thread from the Algolia API in one request. An entry is HN only if its content has
+  the shape an HN feed writes or its link is an item URL (`rata-elfeed-hn-item-id`, pure),
+  so a blog post linking a discussion is left alone, and every non-HN entry is
+  byte-identical. Four things are load-bearing. **`rata-elfeed-hn--retrieve` is the only
+  network call**, through curl when it is on PATH (url.el does not fall back from an
+  unrouted IPv6 address, so articles timed out — FAIL-0024), always answers from a timer with a result plist, never a signal; the
+  harness overrides it to fail, and tests use `rata-test-hn--with-net` with fixtures under
+  `tests/fixtures/hn/`. **Replies are guarded** (`rata-elfeed-hn--guard`): drawn only if the
+  buffer still shows the same thing under the same `rata-elfeed-hn--generation`, which every
+  redraw bumps. **Sections are found by the `rata-elfeed-hn-section` text property** and
+  replaced whole, so the article and the thread draw in whichever order they arrive.
+  **Comment text goes through `shr` only** — never Org, never `read`. Keys live in
+  `rata-elfeed-hn-thread-mode`, a minor mode the drawing switches on and off (the entry
+  buffer is reused for every entry): `za zc zo zM zR` fold replies (invisibility overlays
+  computed from `rata-elfeed-hn-depth`), `zj zk zu` move by depth, `, c` refetch, `, o`
+  article, `, O` thread in the browser, `, y` permalink; elfeed's `]]` `[[` `TAB` are left
+  alone. `browse-url` routes item URLs to a `*HN <id>*` buffer (`rata-elfeed-hn-open-item`,
+  also `SPC a r h`). Threads over `rata-elfeed-hn-fold-threshold` open folded. Tests:
+  `rata-test-hn-*`, through the real `elfeed-show-entry` over an in-memory `elfeed-db`.
 - `init-mail.el` — email under `SPC a e`: mu4e reading a Maildir that `mbsync` fills from
   Proton Mail Bridge, `smtpmail` sending through Bridge's SMTP port (D-021). Three things
   are structural. **mu4e is not an elpaca package**: its elisp is version-locked to the `mu`

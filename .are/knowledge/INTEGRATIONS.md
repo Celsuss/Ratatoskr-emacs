@@ -29,6 +29,7 @@ credentials and a homelab.
 | reveal.js CDN | `cdn.jsdelivr.net/npm/reveal.js@4.6.1` | `init-present.el` | none | `rata-reveal-install-local` clones a local copy instead |
 | reveal.js repo | `github.com/hakimel/reveal.js.git` | `init-present.el` | none | on-demand clone |
 | RSS/Atom feeds | 94 URLs | `init-elfeed.el` + `feeds.org` | none | auto-refreshed every 30 min. Feed *tags* are a contract: `rata-elfeed-views` filters on them and elfeed-org needs the root `:elfeed:` tag. Guarded by `rata-test-elfeed-*`. Tags are stamped onto an entry at *fetch* time, so a `feeds.org` tag edit is **not** retroactive — `rata-elfeed-retag` (`SPC a r t`, also on `elfeed-search-mode-hook`) backfills the existing db. See FAIL-0011 / L-026. A human-facing cheat sheet for these keys and views lives *outside* this repo at `~/workspace/second-brain/org-roam/emacs-elfeed.org`; it mirrors `rata-elfeed-views` by hand and second-brain is off-limits autonomously (`SAFETY_RULES.md`), so it drifts until the operator asks for an update |
+| Hacker News (Algolia API) and article sites | `https://hn.algolia.com/api/v1/items/<id>`; the linked article's own URL | `init-elfeed-hn.el` (D-023) | none | one request per thread, on opening an HN entry in elfeed (`rata-elfeed-hn-auto`) or `SPC a r h`; the article fetch contacts whatever site the story links to, capped at 2 MB and HTML only, off with `rata-elfeed-hn-fetch-article`. `rata-elfeed-hn--retrieve` is the only network call, through `curl` when on PATH (url.el otherwise — it stalls on AAAA hosts when IPv6 is unrouted, FAIL-0024); `tests/run-tests.el` overrides it to fail, and the tests answer from `tests/fixtures/hn/`. Live behaviour is NOT TESTED by any gate |
 | tree-sitter grammar repos | 10 GitHub repos | `init-lang.el` | none | `just install-grammars` **downloads and compiles C** |
 | Maven Central | via Leiningen | `init-sql.el` | none | resolves `snowflake-jdbc` 3.28.0 into `~/.m2` on first connect |
 | elpaca package sources | 132 declared, 197 built (incl. transitive) | `init-pkg.el` / every module | none | see §3 |
@@ -108,7 +109,7 @@ statement about what *should* be present. **`just check-deps` is the only statem
 this host** — it resolves each binary and prints the path, which is what would have caught
 FAIL-0014 in one command:
 
-- **Core:** `git`, `ripgrep`, `fd`, `enchant` (jinx spellcheck), `shfmt`, `editorconfig`.
+- **Core:** `git`, `curl` (elfeed's feed fetching and `init-elfeed-hn.el`; listed in `check-deps` only — FAIL-0024), `ripgrep`, `fd`, `enchant` (jinx spellcheck), `shfmt`, `editorconfig`.
   Debian ships `fd-find` as the binary `fdfind` and `python3-pytest` as `pytest-3`;
   `install-deps-debian` symlinks both into `~/.local/bin` under the names Emacs calls,
   because a package installed under a name nothing calls is a missing dependency

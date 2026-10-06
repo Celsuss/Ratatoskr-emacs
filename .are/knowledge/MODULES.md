@@ -47,6 +47,7 @@ that can actually go wrong in an Emacs configuration are:
 | lisp/init-llm.el | integrations,operator-data,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-irc.el | integrations,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-elfeed.el | integrations,network | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
+| lisp/init-elfeed-hn.el | integrations,network | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-jira.el | integrations,network,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-mail.el | integrations,network,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | mbsyncrc.example | integrations,template | LOW | relevant | knowledge/INTEGRATIONS.md |

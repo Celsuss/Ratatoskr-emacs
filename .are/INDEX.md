@@ -18,7 +18,7 @@ A personal GNU Emacs configuration, written entirely in Emacs Lisp, loaded from
 | Question | Answer | Source |
 |---|---|---|
 | Language | Emacs Lisp (+ bash for tooling) | repo contents |
-| Size | 41 modules under `lisp/`, ~10.2k lines of Elisp | `wc -l lisp/*.el init.el early-init.el` |
+| Size | 43 modules under `lisp/`, ~11.9k lines of Elisp (2026-10-06) | `wc -l lisp/*.el init.el early-init.el` |
 | Package manager | `elpaca`, bootstrapped in `init.el`; `package.el` disabled in `early-init.el` | `init.el`, `early-init.el` |
 | Task runner | `just` (`justfile`) | `justfile` |
 | Tests | ERT (`tests/run-tests.el`), bespoke e2e harness (`tests/claude-loop-e2e.el`) | `tests/` |

@@ -1508,3 +1508,40 @@ suite in the same change and drive a full run through it; whatever it trips over
 either a contract obligation to document (as here) or an implementation detail leaking
 through the seam (move it behind). Related: the backend docstring now states the
 `:session-id` obligation.
+
+## L-056 — A verification step that can install can wait on the internet; compiling must not install
+
+**Date:** 2026-10-06. `just compile` byte-compiles each module in bare `--batch`, where
+package.el is live, and `use-package` honours `:ensure t` *at compile time*. So every gate
+above `fast` quietly depended on `elpa.gnu.org`: slow on 2026-09-30 (FAIL-0023, filed with
+the mechanism unknown), a hang on 2026-10-06 when the host was down, and all along an
+unnoticed `./elpa/` full of package.el installs that nothing loads. The symptom looked like
+gpg or stdin because the last line printed was the keyring import; the line after it,
+`Contacting host: elpa.gnu.org:443`, only appears when the compile is run alone. Apply: a
+check proves something about the repository only if it needs nothing outside it — when a
+gate is slow, run the slow step by itself and read *all* its output before guessing.
+`use-package-ensure-function` is `ignore` in the recipe, and the audit's
+`compile-installs-nothing` check holds it there. Related: FAIL-0023, FAIL-0022, L-050.
+
+## L-057 — Let-binding a package's variable before the package loads binds it lexically
+
+**Date:** 2026-10-06. A test in `lexical-binding: t` wrapped `rata-elfeed-hn-open-item` in
+`(let ((shr-use-fonts nil)) ...)`. shr had not loaded yet, so the variable was not special,
+the `let` was lexical, and when the code inside loaded shr its `defcustom` signalled
+"Defining as dynamic an already lexical var" — caught by the module's own callback guard
+and turned into a `message`, so the test failed on a missing request, far from the cause.
+Every earlier test passed only because elfeed had already loaded shr. The module had the
+same trap latent for `shr-width`, `shr-base` and `browse-url-handlers`. Apply: before
+let-binding another package's variable, either `require` the package or declare the
+variable special at top level (`(eval-when-compile (defvar shr-width))` in this repo, which
+lint accepts); a binding that works only because of load order breaks when the order does.
+
+## L-058 — Fixture-backed network code is untested at the transport; probe the live path against several hosts before calling it done
+
+**Date:** 2026-10-06. `init-elfeed-hn.el` passed 28 tests and `are-verify full`, and every
+article still timed out on first use (FAIL-0024): all tests answered from fixtures behind the
+one network function, which is the right rule for `tests/`, and the single live request made
+went to a host that happened to be reachable. Apply: when a feature adds a network fetch, the
+session runs a throwaway live probe outside `tests/` against a handful of *different* hosts
+(different CDNs, IPv4-only and dual-stack, an error status, a non-HTML reply) and compares it
+with `curl`. A difference is a transport finding no fixture can produce. Related: FAIL-0017.
