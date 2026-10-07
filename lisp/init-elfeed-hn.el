@@ -30,8 +30,8 @@
 (declare-function elfeed-entry-link "elfeed-db" (entry))
 (declare-function elfeed-show-refresh "elfeed-show" (&rest _))
 (declare-function elfeed-entry-title "elfeed-db" (entry))
-(declare-function shr-parse-base "shr" (url))
 (declare-function shr-insert-document "shr" (dom))
+(declare-function shr-replace-image "shr" (data start end &optional flags))
 (declare-function eww-readable-dom "eww" (dom))
 (declare-function dom-texts "dom" (node &optional separator))
 (declare-function url-host "url-parse" (cl-x))
@@ -115,16 +115,25 @@ MAX-BYTES nil means no cap."
                     (1+ url-http-end-of-headers) (point-max))))))))
     (error (list :error (error-message-string err)))))
 
+(defun rata-elfeed-hn--text-type-p (type)
+  "Non-nil when the MIME TYPE is text to decode, not bytes to keep."
+  (string-match-p "\\`text/\\|json\\|xml\\|javascript" type))
+
 (defun rata-elfeed-hn--ok-result (ctype bytes)
   "Return the success plist for raw BYTES of Content-Type CTYPE.
-BYTES are decoded with the charset CTYPE names, UTF-8 when it names none
-Emacs knows."
-  (let* ((charset (and (string-match "charset=\\([^; ]+\\)" ctype)
+Text is decoded with the charset CTYPE names, UTF-8 when it names none
+Emacs knows.  Anything else -- an image -- is kept as the bytes it is,
+except an SVG, which is XML but must reach `create-image' undecoded."
+  (let* ((type (downcase (string-trim (car (split-string ctype ";")))))
+         (charset (and (string-match "charset=\\([^; ]+\\)" ctype)
                        (intern-soft (downcase (match-string 1 ctype)))))
          (coding (if (and charset (coding-system-p charset)) charset 'utf-8)))
     (list :ok t
-          :type (downcase (string-trim (car (split-string ctype ";"))))
-          :body (decode-coding-string bytes coding))))
+          :type type
+          :body (if (and (rata-elfeed-hn--text-type-p type)
+                         (not (string-prefix-p "image/" type)))
+                    (decode-coding-string bytes coding)
+                  bytes))))
 
 (defun rata-elfeed-hn--error-reason (err)
   "Return a short reason string for url.el error ERR."
@@ -182,12 +191,16 @@ its error text.  A body over MAX-BYTES (nil: no cap) is an error."
   "Fetch URL with curl PROGRAM; call FINISH with the result plist.
 Return the process."
   (let* ((out (generate-new-buffer " *rata-elfeed-hn-curl*"))
-         (err (generate-new-buffer " *rata-elfeed-hn-curl-err*")))
+         (err (generate-new-buffer " *rata-elfeed-hn-curl-err*"))
+         ;; An explicit pipe, so its own "Process ... finished" line is not
+         ;; written into the error text.
+         (err-pipe (make-pipe-process :name "rata-elfeed-hn-curl-err" :buffer err
+                                      :noquery t :sentinel #'ignore)))
     (with-current-buffer out (set-buffer-multibyte nil))
     (make-process
      :name "rata-elfeed-hn-curl"
      :buffer out
-     :stderr err
+     :stderr err-pipe
      :coding 'binary
      :connection-type 'pipe
      :noquery t
@@ -447,15 +460,79 @@ contents."
     (insert html)
     (libxml-parse-html-region (point-min) (point-max))))
 
+(defcustom rata-elfeed-hn-max-images 40
+  "Most images fetched for one article; the rest keep their placeholder."
+  :type 'integer)
+
+(defcustom rata-elfeed-hn-image-max-bytes (* 5 1024 1024)
+  "Largest image fetched, in bytes."
+  :type 'integer)
+
+(defconst rata-elfeed-hn--image-parallel 6
+  "Images fetched at once.")
+
 (defun rata-elfeed-hn--insert-dom (dom width &optional base)
   "Insert DOM at point, rendered by `shr' to WIDTH columns.
-BASE is the URL relative links resolve against."
+BASE is the URL relative links and images resolve against.
+
+shr fetches images itself, with `url-queue-retrieve' -- url.el, which
+stalls on an unrouted IPv6 address exactly as articles did (FAIL-0024),
+and gives up after `url-queue-timeout'.  So while shr renders, its
+requests are recorded instead of sent, and fetched afterwards through
+`rata-elfeed-hn--retrieve'; each arrival goes back to shr's own
+`shr-replace-image', so placeholders, sizing and image keys stay shr's."
   (require 'shr)
   (let ((shr-width width)
         (shr-max-width nil)
-        (shr-base (and base (shr-parse-base base))))
-    (shr-insert-document dom)
-    (unless (bolp) (insert "\n"))))
+        (requests nil))
+    (cl-letf (((symbol-function 'url-queue-retrieve)
+               (lambda (url _callback cbargs &rest _)
+                 (push (cons url cbargs) requests))))
+      ;; `shr-insert-document' binds `shr-base' to nil and takes the base
+      ;; only from a <base> element, so binding it around the call does
+      ;; nothing: relative images and links stayed relative.
+      (shr-insert-document (if base `(base ((href . ,base)) ,dom) dom)))
+    (unless (bolp) (insert "\n"))
+    (when requests
+      (rata-elfeed-hn--fetch-images (nreverse requests)))))
+
+(defun rata-elfeed-hn--place-image (result buffer start end flags)
+  "Put the image in RESULT between START and END of BUFFER, shr's placeholder.
+A failed fetch leaves the placeholder; so does a placeholder whose text
+has since been deleted."
+  (when (and (plist-get result :ok)
+             (markerp start) (markerp end)
+             (eq (marker-buffer start) buffer)
+             (< start end))
+    (let ((type (plist-get result :type)))
+      (shr-replace-image (if (string-prefix-p "image/" type)
+                             (list (plist-get result :body) (intern type))
+                           (plist-get result :body))
+                         start end flags))))
+
+(defun rata-elfeed-hn--fetch-images (requests)
+  "Fetch shr's image REQUESTS, a few at a time, into the current buffer.
+REQUESTS are (URL BUFFER START END FLAGS), as shr handed them to
+`url-queue-retrieve'.  At most `rata-elfeed-hn-max-images' are fetched.
+Each arrival is guarded like any other reply, so leaving the entry
+stops the queue rather than filling a buffer that has moved on."
+  (let* ((queue (seq-take requests rata-elfeed-hn-max-images))
+         (buffer (current-buffer))
+         next)
+    (setq next
+          (lambda ()
+            (when-let* ((request (pop queue)))
+              (rata-elfeed-hn--retrieve
+               (car request) rata-elfeed-hn-image-max-bytes
+               (rata-elfeed-hn--guard
+                buffer
+                (lambda (result)
+                  (unwind-protect
+                      (pcase-let ((`(,_ ,start ,end ,flags) (cdr request)))
+                        (rata-elfeed-hn--place-image result buffer start end flags))
+                    (funcall next))))))))
+    (dotimes (_ rata-elfeed-hn--image-parallel)
+      (funcall next))))
 
 (defun rata-elfeed-hn--insert-html (html width)
   "Insert HTML at point, rendered by `shr' to WIDTH columns.

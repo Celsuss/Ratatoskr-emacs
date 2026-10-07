@@ -358,7 +358,8 @@ init-present → init-dashboard
   so a blog post linking a discussion is left alone, and every non-HN entry is
   byte-identical. Four things are load-bearing. **`rata-elfeed-hn--retrieve` is the only
   network call**, through curl when it is on PATH (url.el does not fall back from an
-  unrouted IPv6 address, so articles timed out — FAIL-0024), always answers from a timer with a result plist, never a signal; the
+  unrouted IPv6 address, so articles timed out — FAIL-0024; shr's own image fetches are
+  recorded during rendering and sent through it too), always answers from a timer with a result plist, never a signal; the
   harness overrides it to fail, and tests use `rata-test-hn--with-net` with fixtures under
   `tests/fixtures/hn/`. **Replies are guarded** (`rata-elfeed-hn--guard`): drawn only if the
   buffer still shows the same thing under the same `rata-elfeed-hn--generation`, which every

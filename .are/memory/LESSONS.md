@@ -1545,3 +1545,13 @@ went to a host that happened to be reachable. Apply: when a feature adds a netwo
 session runs a throwaway live probe outside `tests/` against a handful of *different* hosts
 (different CDNs, IPv4-only and dual-stack, an error status, a non-HTML reply) and compares it
 with `curl`. A difference is a transport finding no fixture can produce. Related: FAIL-0017.
+
+## L-059 — `shr-insert-document` ignores a bound `shr-base`; give it a `<base>` element
+
+**Date:** 2026-10-06. `init-elfeed-hn.el` rendered articles inside
+`(let ((shr-base (shr-parse-base url))) (shr-insert-document dom))`, and every relative image
+and link stayed relative. `shr-insert-document` binds `shr-base` to nil itself and sets it
+only from a `<base href>` element as it walks the DOM (`shr-tag-base`). Apply: render as
+`(shr-insert-document `(base ((href . ,url)) ,dom))` — which is what elfeed does — and test
+the resolved URL, since nothing about the rendered text shows the link is wrong. Related:
+FAIL-0024, L-057 (another shr variable that looked bound and was not).

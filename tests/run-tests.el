@@ -2940,6 +2940,93 @@ site that publishes an AAAA record timed out."
                                   (buffer-list))))
       (delete-file args-file))))
 
+(ert-deftest rata-test-hn-ok-result-keeps-image-bytes ()
+  "Text is decoded; an image, SVG included, is kept as the bytes it is."
+  (let ((png (unibyte-string #x89 ?P ?N ?G #x0d #x0a #x1a #x0a #xff #xd8)))
+    (should (equal (plist-get (rata-elfeed-hn--ok-result "image/png" png) :body) png))
+    (should-not (multibyte-string-p (plist-get (rata-elfeed-hn--ok-result "image/png" png) :body))))
+  (let ((svg (encode-coding-string "<svg>é</svg>" 'utf-8)))
+    (should (equal (plist-get (rata-elfeed-hn--ok-result "image/svg+xml" svg) :body) svg)))
+  (should (equal (plist-get (rata-elfeed-hn--ok-result "text/html; charset=utf-8"
+                                                       (encode-coding-string "é" 'utf-8))
+                            :body)
+                 "é")))
+
+(defmacro rata-test-hn--with-image-article (images &rest body)
+  "Show the edge thread with an article holding two images, replies IMAGES.
+IMAGES is an alist of image URL to fake result.  Inside BODY,
+`placed' lists the (DATA TYPE ALT) shr was asked to insert, newest first;
+batch Emacs cannot display an image, so shr's inserter is stubbed."
+  (declare (indent 1))
+  `(rata-test-hn--with-elfeed
+     (rata-test-hn--with-net
+         (append (rata-test-hn--story-routes
+                  (rata-test-hn--ok (rata-test-hn--fixture "article-images.html") "text/html"))
+                 ,images)
+       (let* ((placed nil)
+              (shr-put-image-function
+               (lambda (spec alt &optional _flags)
+                 (push (list (car spec) (cadr spec) alt) placed)
+                 (insert "[IMG]"))))
+         (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+           ,@body)))))
+
+(defconst rata-test-hn--png (unibyte-string #x89 ?P ?N ?G #x0d #x0a #x1a #x0a))
+
+(ert-deftest rata-test-hn-article-images-arrive-through-retrieve ()
+  "Article images are fetched by this module, not by shr through url.el.
+shr's own fetch goes through `url-queue-retrieve', which stalls on an
+unrouted IPv6 address like every url.el request (FAIL-0024).  A relative
+src resolves against the article: `shr-insert-document' ignores a bound
+`shr-base' and reads only a <base> element."
+  (rata-test-hn--with-image-article
+      (list (cons "https://example.com/img/one.png" (rata-test-hn--ok rata-test-hn--png "image/png"))
+            (cons "https://cdn.example.net/two.png" (rata-test-hn--ok rata-test-hn--png "image/png")))
+    (cl-letf (((symbol-function 'url-queue-retrieve)
+               (lambda (url &rest _) (error "shr fetched %s itself" url))))
+      (rata-test-hn--flush))
+    (should (member "https://example.com/img/one.png" rata-test-hn--requests))
+    (should (member "https://cdn.example.net/two.png" rata-test-hn--requests))
+    (should (equal (alist-get "https://example.com/img/one.png" rata-test-hn--caps nil nil #'equal)
+                   rata-elfeed-hn-image-max-bytes))
+    (should (equal (sort (mapcar #'caddr placed) #'string<)
+                   '("the new build graph" "the old build graph")))
+    (should (cl-every (lambda (p) (and (equal (car p) rata-test-hn--png) (eq (cadr p) 'image/png)))
+                      placed))
+    (let ((article (rata-test-hn--section-text 'article)))
+      (should (= 2 (how-many "\\[IMG\\]" (car (rata-elfeed-hn--section-bounds 'article))
+                             (cdr (rata-elfeed-hn--section-bounds 'article)))))
+      (should (string-match-p "three properties" (replace-regexp-in-string "\n" " " article))))
+    ;; The relative link resolves too.
+    ;; `text-property-any' compares with `eq', so scan with `equal'.
+    (should (cl-loop for pos from (point-min) below (point-max)
+                     thereis (equal (get-text-property pos 'shr-url)
+                                    "https://example.com/posts/part-two")))))
+
+(ert-deftest rata-test-hn-article-images-degrade-and-stop ()
+  "A failed image keeps its placeholder; at most `rata-elfeed-hn-max-images'
+are fetched; and leaving the entry stops the queue."
+  (let ((rata-elfeed-hn-max-images 1))
+    (rata-test-hn--with-image-article
+        (list (cons "https://example.com/img/one.png" (list :error "HTTP 404")))
+      (rata-test-hn--flush)
+      (should (equal (cl-count-if (lambda (u) (string-match-p "\\.png\\'" u)) rata-test-hn--requests) 1))
+      (should-not placed)
+      (should (string-match-p "three properties"
+                              (replace-regexp-in-string "\n" " " (rata-test-hn--section-text 'article))))))
+  (rata-test-hn--with-image-article
+      (list (cons "https://example.com/img/one.png" (rata-test-hn--ok rata-test-hn--png "image/png"))
+            (cons "https://cdn.example.net/two.png" (rata-test-hn--ok rata-test-hn--png "image/png")))
+    ;; Answer the article and thread only, then leave before the images.
+    (let ((first (reverse rata-test-hn--pending)))
+      (setq rata-test-hn--pending nil)
+      (pcase-dolist (`(,url ,cb) first)
+        (funcall cb (cdr (assoc url rata-test-hn--routes))))
+      (rata-test-hn--drain))
+    (rata-test-hn--show (rata-test-hn--blog-entry))
+    (rata-test-hn--flush)
+    (should-not placed)))
+
 ;;; ============================================================
 ;;; Test — dialogic formatting (lisp/init-dialogic.el)
 ;;; ============================================================

@@ -200,6 +200,11 @@ Differences from the design above, each for a reason found while building:
   `url-retrieve`; on first use every article timed out, because this network hands out an
   IPv6 address it does not route and url.el, unlike curl, does not fall back to IPv4
   (FAIL-0024). Comments were unaffected only because hn.algolia.com has no AAAA record.
+- **Article images** are fetched by the module, not by shr: shr's `url-queue-retrieve` is
+  url.el and stalled the same way (FAIL-0024 recurrence). At most
+  `rata-elfeed-hn-max-images` (40) per article, six at a time, each under 5 MB
+  (`rata-elfeed-hn-image-max-bytes`). The DOM is rendered under a `<base>` element so
+  relative images and links resolve (L-059).
 - **Found on the way:** `just compile` installed packages over the network at compile time
   and hung while elpa.gnu.org was down — FAIL-0023 closed, L-056, audit check
   `compile-installs-nothing`. A `let` of a not-yet-loaded package's variable is lexical —
