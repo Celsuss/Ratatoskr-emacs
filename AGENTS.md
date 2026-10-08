@@ -221,7 +221,7 @@ init-cmake → init-terraform → init-just → init-docker → init-markdown �
 init-yaml → init-ansible → init-jupyter → init-helm → init-pkgbuild →
 init-casual → init-sql → init-k8s → init-gamedev → init-snippets →
 init-llm → init-claude-loop → init-khoj → init-irc → init-elfeed → init-elfeed-hn → init-mail → init-jira →
-init-persp → init-agent-center → init-org → init-blog → init-dialogic →
+init-persp → init-agent-center → init-agent-worktree → init-org → init-blog → init-dialogic →
 init-present → init-dashboard
 ```
 
@@ -355,6 +355,27 @@ init-present → init-dashboard
   the activity renders at most once per `rata-agent-center-activity-interval`, never
   per chunk. Tests: `rata-test-agent-center-*` in
   `tests/run-tests.el`, all on synthetic event alists — nothing starts an agent.
+- `init-agent-worktree.el` — one git worktree per agent task (B6 in
+  `plans/ai-agent-powerhouse.md`). `SPC a i c w` / `C` in `*Agents*` cuts `agent/<slug>`
+  from the branch checked out where you are, adds a worktree at
+  `<main checkout>/.agent-shell/worktrees/<slug>`, switches to a persp layout named
+  after the branch (so the panel files the shell there) and starts `agent-shell-new-shell`
+  in it. Upstream's `agent-shell-new-worktree-shell` takes no arguments (random name,
+  directory prompt, branch cut from HEAD), so the `git worktree add` is ours, run
+  through `process-file` with an argument list. Three things are load-bearing. **The
+  base is recorded in the repo config** as `branch.<b>.rataAgentBase`: it is what
+  "merged" means at finish time after a restart, and its presence is the only thing
+  that makes a worktree finishable — the main checkout and hand-made worktrees are
+  refused. **Finish refuses rather than asks** while anything would be lost
+  (`git status --porcelain` non-empty, an unsaved file buffer, `merge-base
+  --is-ancestor` failing), then asks once, and branch deletion (`git branch -d`, never
+  `-D`, never `worktree remove --force`) is a second question. **Transcripts are copied
+  out first:** agent-shell writes them inside the worktree, where `.agent-shell/` is
+  ignored (via the shared `info/exclude`, which this module ensures), so `git worktree
+  remove` would delete them silently (L-061). The panel's group heading shows `repo ⎇
+  branch` through `rata-agent-center-project-label-functions`, computed once at
+  registration. Tests: `rata-test-agent-worktree-*`, against throwaway repositories
+  with `GIT_CONFIG_GLOBAL=/dev/null`; the shell start is stubbed.
 - `init-elfeed-hn.el` — Hacker News inside elfeed's own entry buffer (D-023, plan
   `plans/hackernews-reader.md`). Owns no package. One function on `elfeed-show-update-hook`
   (added in `with-eval-after-load 'elfeed-show`, because elfeed's `defvar` of that hook

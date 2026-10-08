@@ -1566,3 +1566,16 @@ chunks armed 4 timers instead of 1. `rata-test-agent-center-activity-render-thro
 caught it by counting `run-with-timer` calls, not by reading the code. Apply: when a
 debounce compares deadlines, compare with a tolerance (`rata-agent-center--arm-render`
 uses 50 ms), and test a debounce by counting the timers it creates under a burst.
+
+## L-061 — An ignored directory inside a worktree is deleted by `git worktree remove` without a word
+
+**Date:** 2026-10-08. B6 (`init-agent-worktree.el`). `git worktree remove` refuses a
+worktree with modified or *untracked* files, so it reads as safe — but *ignored* files go
+with it. agent-shell writes its transcripts to `<cwd>/.agent-shell/transcripts/`, the cwd
+of a worktree shell is the worktree, and `.agent-shell/` is ignored through
+`$GIT_COMMON_DIR/info/exclude`, which every worktree shares. So "clean, merged, remove"
+would have erased the only record of each session, the thing B9 is built on.
+`rata-agent-worktree--keep-transcripts` copies them to the main checkout first, and
+`rata-test-agent-worktree-finish-removes-merged` asserts the copy. Apply: before removing
+a worktree (or any directory git calls clean), list what `git status --ignored` would
+show there and decide what of it is data.

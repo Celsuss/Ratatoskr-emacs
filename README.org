@@ -346,9 +346,31 @@ open across layout switches and =SPC w m= until you close it with =q=.
 | =K=         | Interrupt the row's shell (asks first)                  |
 | =g r=       | Refresh                                                 |
 | =q=         | Close the panel                                         |
+| =C=         | New agent in its own git worktree (see below)           |
+| =X=         | Finish the row's worktree (see below)                   |
 
 The mode line shows the same counts (=⚠2 ✓1 ●3=) while the panel is closed;
 click it to open the panel.
+
+*** One worktree per task
+
+=SPC a i c w= (=C= in the panel) asks for a task, turns it into a branch
+(=agent/<slug>=, editable), and creates a git worktree for it at
+=<repo>/.agent-shell/worktrees/<slug>=, branched from the branch you are on. The
+agent starts there in a new layout named after the branch, so parallel agents never
+share a checkout. The panel shows such a group as =repo ⎇ agent/<slug>=.
+
+=SPC a i c W= (=X= in the panel) finishes one: it refuses while the worktree has
+uncommitted or untracked files, an unsaved buffer, or a branch not yet merged into
+the branch it came from. Otherwise it asks once, kills the worktree's shells and
+buffers, closes its layout, copies agent-shell's transcripts into the main
+checkout's =.agent-shell/transcripts/=, and runs =git worktree remove=. Deleting
+the branch is a second question (=git branch -d=).
+
+| Key           | Action                                   |
+|---------------+------------------------------------------|
+| =SPC a i c w= | New agent in its own worktree and layout |
+| =SPC a i c W= | Finish an agent worktree                 |
 
 ** Claude Code Task Loop
 

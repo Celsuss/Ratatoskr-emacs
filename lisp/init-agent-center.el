@@ -109,7 +109,7 @@ idle status leaves them alone.  A nil STATUS changes nothing."
 
 (defvar rata-agent-center--registry (make-hash-table :test #'eq)
   "Shell buffer -> entry plist.
-Keys: :buffer :layout :project :agent :title :state :since
+Keys: :buffer :layout :project :project-label :agent :title :state :since
 :last-stop-reason :cost :error :token :activity :activity-source
 :activity-tool.  :since is the `float-time' the current state was
 entered; :token is the agent-shell subscription.  :activity is what the
@@ -132,10 +132,11 @@ does not."
     (puthash buffer entry rata-agent-center--registry)))
 
 (cl-defun rata-agent-center--add-entry
-    (buffer &key layout project agent title (state 'starting) token)
+    (buffer &key layout project project-label agent title (state 'starting) token)
   "Create BUFFER's registry entry and return it.  Nothing is subscribed."
   (puthash buffer
-           (list :buffer buffer :layout layout :project project :agent agent
+           (list :buffer buffer :layout layout :project project
+                 :project-label project-label :agent agent
                  :title title :state state :since (float-time)
                  :last-stop-reason nil :cost nil :error nil :token token
                  :activity nil :activity-source nil :activity-tool nil)
@@ -183,6 +184,21 @@ holds it, else the current one."
      (if-let* ((pr (ignore-errors (project-current nil dir))))
          (project-root pr)
        dir))))
+
+(defvar rata-agent-center-project-label-functions nil
+  "Functions of a directory that may name its project for the panel.
+The first non-nil string is the shell's :project-label, shown in its
+group heading in place of the project root.  init-agent-worktree.el
+adds one, so a worktree reads `repo ⎇ branch' rather than a long path.
+Called once, when the shell is registered, never per render.")
+
+(defun rata-agent-center--project-label (dir)
+  "DIR's label from `rata-agent-center-project-label-functions', or nil.
+A failing function is skipped: a label is not worth losing the row."
+  (when dir
+    (ignore-errors
+      (run-hook-with-args-until-success 'rata-agent-center-project-label-functions
+                                        dir))))
 
 (defun rata-agent-center--shell-p (buffer)
   "Non-nil when BUFFER is a live agent-shell buffer."
@@ -363,6 +379,8 @@ mode hook after an adoption, cannot subscribe twice."
        :layout (rata-agent-center--layout-for buffer how)
        :project (rata-agent-center--project
                  (buffer-local-value 'default-directory buffer))
+       :project-label (rata-agent-center--project-label
+                       (buffer-local-value 'default-directory buffer))
        :agent (ignore-errors (map-nested-elt state '(:agent-config :buffer-name)))
        :title (ignore-errors (map-nested-elt state '(:session :title)))
        ;; A new shell is handshaking; an adopted one is whatever status says.
@@ -494,11 +512,14 @@ Kept here rather than in the buffer, because every render reprints it.")
 FOLDED adds how many rows are hidden.  The heading carries its layout and
 its single project, if it has one, for commands run on the heading line."
   (let ((projects (delete-dups (delq nil (mapcar (lambda (e) (plist-get e :project))
-                                                 entries)))))
+                                                 entries))))
+        (labels (delete-dups (mapcar (lambda (e) (or (plist-get e :project-label)
+                                                     (plist-get e :project)))
+                                     entries))))
     (propertize (concat (format "%s — %s" (or layout "(no layout)")
                                 (pcase (length projects)
                                   (0 "?")
-                                  (1 (car projects))
+                                  (1 (or (car labels) (car projects)))
                                   (n (format "%d projects" n))))
                         (if folded (format "  [%d hidden]" (length entries)) ""))
                 'face 'rata-agent-center-group-heading

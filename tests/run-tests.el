@@ -230,6 +230,8 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC J j" . jira-issues)
     ("SPC a i o" . rata-agent-center-toggle)
     ("SPC a i n" . rata-agent-center-next-attention)
+    ("SPC a i c w" . rata-agent-worktree-new)
+    ("SPC a i c W" . rata-agent-worktree-finish)
     ("SPC J l" . rata-jira-org-link-heading)
     ("SPC o b d d" . rata-dialogic-insert-block)
     ("SPC o b e" . org-hugo-export-wim-to-md)
@@ -4723,6 +4725,243 @@ Each binding is (VAR LAYOUT STATE SINCE); the buffers are killed after."
                 (rata-agent-center--refresh-buffer)
                 (should (= (length (funcall lines)) 6))))
           (kill-buffer panel))))))
+
+;;; --- init-agent-worktree: one worktree per task (B6, plans/ai-agent-powerhouse.md) ---
+;; Every git call runs against a throwaway repository under `temporary-file-directory'
+;; with the user's git config shut out; nothing starts an agent.
+
+(ert-deftest rata-test-agent-worktree-branch-name ()
+  "A task name becomes `agent/<slug>': lower case, dashes, bounded, Jira keys kept."
+  (should (equal (rata-agent-worktree-branch-name "Fix Jira sprint grouping!")
+                 "agent/fix-jira-sprint-grouping"))
+  (should (equal (rata-agent-worktree-branch-name "  ABC-123: Fix the  parser ")
+                 "agent/abc-123-fix-the-parser"))
+  (should (equal (rata-agent-worktree-branch-name "fix_the/parser..again")
+                 "agent/fix-the-parser-again"))
+  ;; Bounded, and never ends on a dash after the cut.
+  (let ((name (rata-agent-worktree-branch-name (make-string 80 ?a))))
+    (should (<= (length name) (+ (length "agent/") rata-agent-worktree-slug-max)))
+    (should-not (string-suffix-p "-" name)))
+  (let ((name (rata-agent-worktree-branch-name
+               "a b c d e f g h i j k l m n o p q r s t u v w x y z a b c")))
+    (should (<= (length name) (+ (length "agent/") rata-agent-worktree-slug-max)))
+    (should-not (string-suffix-p "-" name)))
+  (should-error (rata-agent-worktree-branch-name "!!! ") :type 'user-error))
+
+(ert-deftest rata-test-agent-worktree-parse-list ()
+  "`git worktree list --porcelain' becomes (PATH . BRANCH) pairs, main first."
+  (should (equal (rata-agent-worktree--parse-list
+                  (concat "worktree /src/repo\nHEAD 1111\nbranch refs/heads/dev\n\n"
+                          "worktree /src/repo/.agent-shell/worktrees/fix-x\nHEAD 2222\n"
+                          "branch refs/heads/agent/fix-x\n\n"
+                          "worktree /src/other\nHEAD 3333\ndetached\n\n"))
+                 '(("/src/repo" . "dev")
+                   ("/src/repo/.agent-shell/worktrees/fix-x" . "agent/fix-x")
+                   ("/src/other"))))
+  (should-not (rata-agent-worktree--parse-list "")))
+
+(ert-deftest rata-test-agent-worktree-path ()
+  "A branch's worktree sits under the main checkout's .agent-shell/worktrees/."
+  (should (equal (rata-agent-worktree--path "/src/repo/" "agent/fix-x")
+                 "/src/repo/.agent-shell/worktrees/fix-x"))
+  (should (equal (rata-agent-worktree--path "/src/repo" "other/name")
+                 "/src/repo/.agent-shell/worktrees/other-name")))
+
+(defmacro rata-test-agent-worktree--with-repo (&rest body)
+  "Run BODY in a fresh git repository with one commit on `main'.
+`repo' is bound to its root (a directory name).  Git sees no user or
+system config, so a hook or signing setting cannot leak in.  The
+repository, every worktree under it and any layout named agent/* are
+removed afterwards."
+  (declare (indent 0))
+  `(let* ((repo (file-name-as-directory
+                 (file-truename (make-temp-file "rata-wt-" t))))
+          (process-environment
+           (append (list "GIT_CONFIG_GLOBAL=/dev/null" "GIT_CONFIG_NOSYSTEM=1"
+                         "GIT_AUTHOR_NAME=t" "GIT_AUTHOR_EMAIL=t@t"
+                         "GIT_COMMITTER_NAME=t" "GIT_COMMITTER_EMAIL=t@t")
+                   process-environment))
+          (orig-layout (and (bound-and-true-p persp-mode)
+                            (safe-persp-name (get-current-persp))))
+          (default-directory repo))
+     (unwind-protect
+         (progn
+           (rata-test-agent-worktree--git repo "init" "-q" "-b" "main")
+           (write-region "x\n" nil (expand-file-name "f.txt" repo))
+           (rata-test-agent-worktree--git repo "add" "f.txt")
+           (rata-test-agent-worktree--git repo "commit" "-q" "-m" "init")
+           ,@body)
+       (when orig-layout
+         (unless (equal (safe-persp-name (get-current-persp)) orig-layout)
+           (persp-switch orig-layout))
+         (dolist (name (persp-names))
+           (when (string-prefix-p "agent/" name) (persp-remove-by-name name))))
+       (dolist (buf (buffer-list))
+         (when (string-prefix-p repo (buffer-local-value 'default-directory buf))
+           (let (kill-buffer-query-functions) (kill-buffer buf))))
+       (delete-directory repo t))))
+
+(defun rata-test-agent-worktree--git (dir &rest args)
+  "Run git ARGS in DIR; return its trimmed output, failing the test on error."
+  (with-temp-buffer
+    (let ((default-directory dir))
+      (unless (zerop (apply #'process-file "git" nil t nil args))
+        (ert-fail (format "git %S failed: %s" args (buffer-string))))
+      (string-trim (buffer-string)))))
+
+(defmacro rata-test-agent-worktree--answering (answers &rest body)
+  "Run BODY with `y-or-n-p' answering from the list ANSWERS, in order.
+Binds `questions' to the prompts asked.  An unexpected extra question fails."
+  (declare (indent 1))
+  `(let ((answers ,answers) (questions nil) (started nil))
+     (ignore started)
+     (cl-letf (((symbol-function 'y-or-n-p)
+                (lambda (prompt)
+                  (push prompt questions)
+                  (if answers (pop answers)
+                    (ert-fail (format "Unexpected question: %s" prompt)))))
+               ((symbol-function 'agent-shell-new-shell)
+                (lambda (&rest _) (interactive) (push default-directory started))))
+       ,@body)))
+
+(ert-deftest rata-test-agent-worktree-create ()
+  "A new worktree: branch from the current branch, base recorded, layout, shell."
+  (rata-test-agent-worktree--with-repo
+    (rata-test-agent-worktree--answering nil
+      (let ((wt (rata-agent-worktree-create repo "agent/fix-x")))
+        (should (equal wt (concat repo ".agent-shell/worktrees/fix-x")))
+        (should (file-exists-p (expand-file-name "f.txt" wt)))
+        (should (equal (rata-test-agent-worktree--git wt "symbolic-ref" "--short" "HEAD")
+                       "agent/fix-x"))
+        (should (equal (rata-agent-worktree--base repo "agent/fix-x") "main"))
+        ;; The main checkout does not see the worktree as untracked files.
+        (should (equal (rata-test-agent-worktree--git repo "status" "--porcelain") ""))
+        ;; The shell starts inside the worktree ...
+        (should (equal started (list (file-name-as-directory wt))))
+        ;; ... in a layout named after the branch, which is now current.
+        (when (bound-and-true-p persp-mode)
+          (should (equal (safe-persp-name (get-current-persp)) "agent/fix-x")))
+        ;; The same branch twice is refused before git is asked.
+        (should-error (rata-agent-worktree-create repo "agent/fix-x") :type 'user-error)))))
+
+(ert-deftest rata-test-agent-worktree-create-refuses-detached-head ()
+  "No branch to come back to means no base; refuse rather than guess."
+  (rata-test-agent-worktree--with-repo
+    (rata-test-agent-worktree--git repo "checkout" "-q" "--detach")
+    (rata-test-agent-worktree--answering nil
+      (should-error (rata-agent-worktree-create repo "agent/x") :type 'user-error)
+      (should-not started))))
+
+(ert-deftest rata-test-agent-worktree-finish-refuses-dirty-and-unmerged ()
+  "Finish refuses, without asking, while there is work that removal would lose."
+  (rata-test-agent-worktree--with-repo
+    (rata-test-agent-worktree--answering nil
+      (let ((wt (rata-agent-worktree-create repo "agent/fix-x")))
+        ;; Untracked file.
+        (write-region "y\n" nil (expand-file-name "new.txt" wt))
+        (should-error (rata-agent-worktree-finish-at wt) :type 'user-error)
+        ;; Committed, so clean -- but not merged into main.
+        (rata-test-agent-worktree--git wt "add" "new.txt")
+        (rata-test-agent-worktree--git wt "commit" "-q" "-m" "work")
+        (should-error (rata-agent-worktree-finish-at wt) :type 'user-error)
+        ;; An unsaved buffer on a file in the worktree also blocks it.
+        (rata-test-agent-worktree--git repo "merge" "-q" "--ff-only" "agent/fix-x")
+        (with-current-buffer (find-file-noselect (expand-file-name "f.txt" wt))
+          (insert "unsaved")
+          (should-error (rata-agent-worktree-finish-at wt) :type 'user-error)
+          (set-buffer-modified-p nil))
+        (should-not questions)
+        (should (file-directory-p wt))))))
+
+(ert-deftest rata-test-agent-worktree-finish-removes-merged ()
+  "Clean and merged: one question, then shells, layout and worktree go; transcripts
+are kept in the main checkout; the branch goes only on a second yes."
+  (rata-test-agent-worktree--with-repo
+    (rata-test-agent-worktree--answering nil
+      (let* ((wt (rata-agent-worktree-create repo "agent/fix-x"))
+             (shell (generate-new-buffer " *rata-wt-shell*"))
+             (transcript (expand-file-name ".agent-shell/transcripts/t1.md" wt)))
+        (with-current-buffer shell (setq default-directory (file-name-as-directory wt)))
+        (make-directory (file-name-directory transcript) t)
+        (write-region "transcript\n" nil transcript)
+        (write-region "y\n" nil (expand-file-name "new.txt" wt))
+        (rata-test-agent-worktree--git wt "add" "new.txt")
+        (rata-test-agent-worktree--git wt "commit" "-q" "-m" "work")
+        (rata-test-agent-worktree--git repo "merge" "-q" "--ff-only" "agent/fix-x")
+        ;; Declining the first question changes nothing.
+        (setq answers (list nil))
+        (rata-agent-worktree-finish-at wt)
+        (should (file-directory-p wt))
+        (should (buffer-live-p shell))
+        ;; Yes to removal, no to deleting the branch.
+        (setq answers (list t nil) questions nil)
+        (rata-agent-worktree-finish-at wt)
+        (should (= (length questions) 2))
+        (should-not (file-exists-p wt))
+        (should-not (buffer-live-p shell))
+        (should (equal (with-temp-buffer
+                         (insert-file-contents
+                          (expand-file-name ".agent-shell/transcripts/t1.md" repo))
+                         (buffer-string))
+                       "transcript\n"))
+        (when (bound-and-true-p persp-mode)
+          (should-not (member "agent/fix-x" (persp-names))))
+        (should (equal (rata-test-agent-worktree--git repo "branch" "--list" "agent/fix-x")
+                       "agent/fix-x"))))))
+
+(ert-deftest rata-test-agent-worktree-finish-deletes-branch-on-second-yes ()
+  "A second yes deletes the merged branch and its recorded base."
+  (rata-test-agent-worktree--with-repo
+    (rata-test-agent-worktree--answering (list t t)
+      (let ((wt (rata-agent-worktree-create repo "agent/fix-x")))
+        (rata-agent-worktree-finish-at wt)
+        (should-not (file-exists-p wt))
+        (should (equal (rata-test-agent-worktree--git repo "branch" "--list" "agent/fix-x")
+                       ""))))))
+
+(ert-deftest rata-test-agent-worktree-finish-only-own-worktrees ()
+  "Finish refuses the main checkout and worktrees it did not create."
+  (rata-test-agent-worktree--with-repo
+    (rata-test-agent-worktree--answering nil
+      (should-error (rata-agent-worktree-finish-at repo) :type 'user-error)
+      (let ((other (concat repo "../" (file-name-nondirectory
+                                       (directory-file-name repo)) "-other")))
+        (unwind-protect
+            (progn
+              (rata-test-agent-worktree--git repo "worktree" "add" "-q" "-b" "mine" other)
+              (should-error (rata-agent-worktree-finish-at other) :type 'user-error)
+              (should (file-directory-p other)))
+          (delete-directory other t)))
+      (should-not questions))))
+
+(ert-deftest rata-test-agent-worktree-panel-label ()
+  "A shell in an agent worktree is labelled `repo ⎇ branch' in the panel."
+  (rata-test-agent-worktree--with-repo
+    (rata-test-agent-worktree--answering nil
+      (let ((wt (rata-agent-worktree-create repo "agent/fix-x")))
+        (should (equal (rata-agent-worktree-project-label wt)
+                       (format "%s ⎇ agent/fix-x"
+                               (abbreviate-file-name (directory-file-name repo)))))
+        (should-not (rata-agent-worktree-project-label repo))
+        (should (memq #'rata-agent-worktree-project-label
+                      rata-agent-center-project-label-functions))
+        ;; The heading uses the label rather than the long worktree path.
+        (should (string-match-p
+                 "agent/fix-x — .* ⎇ agent/fix-x"
+                 (rata-agent-center--group-heading
+                  "agent/fix-x"
+                  (list (list :project (abbreviate-file-name (file-name-as-directory wt))
+                              :project-label (rata-agent-worktree-project-label wt))))))))))
+
+(ert-deftest rata-test-agent-worktree-panel-keys ()
+  "`C' and `X' in the panel start and finish a worktree."
+  (let ((buf (get-buffer-create "*rata-test-agents-wt*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (rata-agent-center-mode)
+          (should (eq (key-binding (kbd "C")) 'rata-agent-worktree-new))
+          (should (eq (key-binding (kbd "X")) 'rata-agent-worktree-finish)))
+      (kill-buffer buf))))
 
 ;;; ============================================================
 ;;; Run all tests
