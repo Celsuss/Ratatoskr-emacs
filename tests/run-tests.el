@@ -3973,6 +3973,8 @@ the difference between a mailbox and a duplicated one."
          (renders 0))
      (ignore renders)
      (cl-letf (((symbol-function 'rata-agent-center--schedule-render)
+                (lambda () (cl-incf renders)))
+               ((symbol-function 'rata-agent-center--schedule-activity-render)
                 (lambda () (cl-incf renders))))
        ,@body)))
 
@@ -4547,6 +4549,180 @@ Each binding is (VAR LAYOUT STATE SINCE); the buffers are killed after."
   "The module is loaded by init and listens for new shells."
   (should (featurep 'init-agent-center))
   (should (memq #'rata-agent-center--on-mode-hook agent-shell-mode-hook)))
+
+;;; --- init-agent-center: activity line (A2, plans/ai-agent-powerhouse.md) ---
+
+(ert-deftest rata-test-agent-center-tool-activity-strings ()
+  "A tool call reads as `Label: detail', from its title, command and kind."
+  ;; Claude's ACP adapter titles a Bash call with the command in backticks.
+  (should (equal (rata-agent-center--tool-activity
+                  '((:kind . "execute") (:title . "`just test`") (:command . "just test")))
+                 "Bash: just test"))
+  (should (equal (rata-agent-center--tool-activity
+                  '((:kind . "edit") (:title . "Edit `/s/x/lisp/init-org.el`")))
+                 "Edit: /s/x/lisp/init-org.el"))
+  ;; The verb in the title wins over the kind: a Write is kind `edit'.
+  (should (equal (rata-agent-center--tool-activity
+                  '((:kind . "edit") (:title . "Write /s/x/new.el")))
+                 "Write: /s/x/new.el"))
+  ;; A title that does not start with a verb gets the kind as its label.
+  (should (equal (rata-agent-center--tool-activity
+                  '((:kind . "search") (:title . "grep \"defun\" lisp")))
+                 "Search: grep \"defun\" lisp"))
+  (should-not (rata-agent-center--tool-activity nil))
+  (should-not (rata-agent-center--tool-activity '((:kind . "read")))))
+
+(ert-deftest rata-test-agent-center-activity-follows-events ()
+  "Tool calls set the activity; message chunks only while no tool is in flight."
+  (rata-test-agent-center--with-registry
+    (with-temp-buffer
+      (let* ((buf (current-buffer))
+             (ev #'rata-test-agent-center--ev)
+             (handler (progn (rata-agent-center--add-entry buf :state 'ready)
+                             (rata-agent-center--make-handler buf)))
+             (activity (lambda () (plist-get (rata-agent-center--entry buf) :activity)))
+             (tool (lambda (id status)
+                     (funcall ev 'tool-call-update :tool-call-id id
+                              :tool-call `((:kind . "execute") (:title . "`just test`")
+                                           (:command . "just test") (:status . ,status))))))
+        (funcall handler (funcall ev 'input-submitted :prompt "fix it"))
+        (should-not (funcall activity))
+        (funcall handler (funcall ev 'agent-message-chunk :text-chunk "I'll look"))
+        (funcall handler (funcall ev 'agent-message-chunk :text-chunk " at the parser.\nThen"))
+        (should (equal (funcall activity) "I'll look at the parser.\nThen"))
+        (funcall handler (funcall tool "t1" "in_progress"))
+        (should (equal (funcall activity) "Bash: just test"))
+        ;; While the tool runs, its line is not overwritten by chatter.
+        (funcall handler (funcall ev 'agent-message-chunk :text-chunk "Running tests"))
+        (should (equal (funcall activity) "Bash: just test"))
+        ;; Finished, it stays until something newer arrives...
+        (funcall handler (funcall tool "t1" "completed"))
+        (should (equal (funcall activity) "Bash: just test"))
+        ;; ...and the next message starts afresh rather than appending.
+        (funcall handler (funcall ev 'agent-message-chunk :text-chunk "Tests pass."))
+        (should (equal (funcall activity) "Tests pass."))
+        ;; A non-text chunk (an image) changes nothing.
+        (funcall handler (funcall ev 'agent-message-chunk :text-chunk nil))
+        (should (equal (funcall activity) "Tests pass."))
+        ;; A long stream is capped, not kept whole.
+        (dotimes (_ 100)
+          (funcall handler (funcall ev 'agent-message-chunk :text-chunk "0123456789")))
+        (should (<= (length (funcall activity)) rata-agent-center--activity-max))
+        ;; A new prompt clears what the last turn was doing.
+        (funcall handler (funcall ev 'input-submitted :prompt "next"))
+        (should-not (funcall activity))))))
+
+(ert-deftest rata-test-agent-center-activity-line-format ()
+  "The line is the first non-blank line, squeezed, project-relative and cut to width."
+  (let ((line (lambda (state activity &optional width project)
+                (rata-agent-center--activity-line
+                 (list :state state :activity activity :project project)
+                 (or width 60)))))
+    (should (equal (funcall line 'working "\n  First   line \nsecond") "First line"))
+    (should (equal (funcall line 'needs-input "Bash: rm -r build") "Bash: rm -r build"))
+    ;; Unread output is worth a line; so is a failure.
+    (should (equal (funcall line 'done "All done.") "All done."))
+    (should (equal (funcall line 'error "Bash: just test") "Bash: just test"))
+    ;; Paths under the shell's project lose the project prefix.
+    (should (equal (funcall line 'working
+                            (concat "Edit: " (expand-file-name "~/src/x/") "lisp/init-org.el")
+                            60 "~/src/x/")
+                   "Edit: lisp/init-org.el"))
+    (let ((cut (funcall line 'working "Bash: just test-everything-forever" 12)))
+      (should (<= (string-width cut) 12))
+      (should (string-suffix-p "…" cut)))
+    ;; Nothing to say: seen and idle, no activity, or only whitespace.
+    (should-not (funcall line 'ready "Tests pass."))
+    (should-not (funcall line 'working nil))
+    (should-not (funcall line 'working " \n\t "))
+    (should-not (funcall line 'working "text" 2))))
+
+(ert-deftest rata-test-agent-center-activity-render-throttled ()
+  "A burst of 50 chunks arms one render per interval; a state change is not held back."
+  (let ((rata-agent-center--registry (make-hash-table :test #'eq))
+        (rata-agent-center--render-timer nil)
+        (rata-agent-center--render-due nil)
+        (rata-agent-center--last-render (float-time))
+        (rata-agent-center-activity-interval 1.0)
+        (rata-agent-center-show-activity t)
+        (delays nil))
+    (with-temp-buffer
+      (let* ((buf (current-buffer))
+             (handler (progn (rata-agent-center--add-entry buf :state 'working)
+                             (rata-agent-center--make-handler buf)))
+             (chunks (lambda ()
+                       (dotimes (i 50)
+                         (funcall handler (rata-test-agent-center--ev
+                                           'agent-message-chunk
+                                           :text-chunk (format "c%d " i)))))))
+        (cl-letf (((symbol-function 'rata-agent-center--panel-windows) (lambda (&rest _) '(t)))
+                  ((symbol-function 'run-with-timer)
+                   (lambda (delay &rest _) (push delay delays) (timer-create))))
+          ;; Just rendered: the burst waits out the interval, in one timer.
+          (funcall chunks)
+          (should (= (length delays) 1))
+          (should (>= (car delays) 0.8))
+          ;; A permission request in the middle is shown at the normal debounce.
+          (funcall handler (rata-test-agent-center--ev 'permission-request :request-id 1))
+          (should (= (length delays) 2))
+          (should (< (car delays) 0.5))
+          ;; The timer fired long after the last render: the next burst is prompt.
+          (setq rata-agent-center--render-timer nil
+                rata-agent-center--render-due nil
+                rata-agent-center--last-render (- (float-time) 10)
+                delays nil)
+          (funcall chunks)
+          (should (equal (length delays) 1))
+          (should (< (car delays) 0.5))
+          ;; Turned off, activity schedules nothing at all.
+          (setq rata-agent-center--render-timer nil rata-agent-center--render-due nil
+                delays nil rata-agent-center-show-activity nil)
+          (funcall chunks)
+          (should-not delays))))))
+
+(ert-deftest rata-test-agent-center-render-activity-line ()
+  "The activity prints dim under its row, belongs to that row, and ]] skips it."
+  (let ((rata-agent-center-show-activity t))
+    (rata-test-agent-center--with-fixture ((w1 "work" needs-input 1) (w2 "work" ready 2)
+                                           (h1 "home" working 1) (h2 "home" done 2))
+      (rata-agent-center--put w1 :activity "Bash: rm -r build")
+      (rata-agent-center--put w2 :activity "Seen already.")
+      (rata-agent-center--put h1 :activity "Edit: lisp/init-org.el")
+      (let ((panel (rata-agent-center--refresh-buffer))
+            (lines (lambda () (split-string (buffer-substring-no-properties
+                                             (point-min) (point-max))
+                                            "\n" t))))
+        (unwind-protect
+            (with-current-buffer panel
+              (let ((ls (funcall lines)))
+                (should (= (length ls) 8))
+                (should (string-match-p "input .*w1" (nth 1 ls)))
+                (should (string-match-p "\\`  +↳ Bash: rm -r build\\'" (nth 2 ls)))
+                ;; `ready' has nothing to report, whatever it last did.
+                (should (string-match-p "ready .*w2" (nth 3 ls)))
+                ;; Within a group `done' sorts before `working'.
+                (should (string-match-p "done .*h2" (nth 5 ls)))
+                (should (string-match-p "work .*h1" (nth 6 ls)))
+                (should (string-match-p "↳ Edit: lisp/init-org.el" (nth 7 ls))))
+              ;; The activity line is part of its row: RET, o and K act on it.
+              (goto-char (point-min))
+              (forward-line 2)
+              (should (eq (tabulated-list-get-id) w1))
+              (should (eq (get-text-property (+ (point) 5) 'face)
+                          'rata-agent-center-activity))
+              ;; ]] goes row to row, never onto a row's own activity line.
+              (goto-char (point-min))
+              (rata-agent-center-next-attention-row)
+              (should (= (line-number-at-pos) 2))
+              (rata-agent-center-next-attention-row)
+              (should (eq (tabulated-list-get-id) h2))
+              (rata-agent-center-previous-attention-row)
+              (should (= (line-number-at-pos) 2))
+              ;; Switched off, the rows are single lines again.
+              (let ((rata-agent-center-show-activity nil))
+                (rata-agent-center--refresh-buffer)
+                (should (= (length (funcall lines)) 6))))
+          (kill-buffer panel))))))
 
 ;;; ============================================================
 ;;; Run all tests

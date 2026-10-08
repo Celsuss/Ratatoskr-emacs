@@ -345,7 +345,15 @@ init-present → init-dashboard
   `evil-define-key*`): `RET` go (layout, then shell), `o` show, `]]`/`[[` next/previous
   row that needs you, `TAB`/`za` fold a layout (a folded-layouts set re-applied on every
   render — tabulated-list has no fold of its own), `c` new shell in the row's project,
-  `K` interrupt, `g r` refresh, `q` close. Tests: `rata-test-agent-center-*` in
+  `K` interrupt, `g r` refresh, `q` close. **A dim activity line under a row** (A2,
+  `rata-agent-center-show-activity`) shows the latest tool call or the start of the
+  latest agent message. It is a second printed line, not a column, via
+  `tabulated-list-printer`: that is only safe because the panel has no sort key, so
+  `tabulated-list-print` never takes its one-line-per-entry incremental path. The line
+  carries the row's `tabulated-list-id`, so row commands work on it, and `]]`/`[[`
+  skip it by its `rata-agent-center-activity` property. An event that changes only
+  the activity renders at most once per `rata-agent-center-activity-interval`, never
+  per chunk. Tests: `rata-test-agent-center-*` in
   `tests/run-tests.el`, all on synthetic event alists — nothing starts an agent.
 - `init-elfeed-hn.el` — Hacker News inside elfeed's own entry buffer (D-023, plan
   `plans/hackernews-reader.md`). Owns no package. One function on `elfeed-show-update-hook`

@@ -110,8 +110,10 @@ idle status leaves them alone.  A nil STATUS changes nothing."
 (defvar rata-agent-center--registry (make-hash-table :test #'eq)
   "Shell buffer -> entry plist.
 Keys: :buffer :layout :project :agent :title :state :since
-:last-stop-reason :cost :error :token.  :since is the `float-time' the
-current state was entered; :token is the agent-shell subscription.")
+:last-stop-reason :cost :error :token :activity :activity-source
+:activity-tool.  :since is the `float-time' the current state was
+entered; :token is the agent-shell subscription.  :activity is what the
+shell is doing now (see `rata-agent-center--next-activity').")
 
 (defun rata-agent-center--entry (buffer)
   "Return BUFFER's registry entry, or nil."
@@ -135,7 +137,8 @@ does not."
   (puthash buffer
            (list :buffer buffer :layout layout :project project :agent agent
                  :title title :state state :since (float-time)
-                 :last-stop-reason nil :cost nil :error nil :token token)
+                 :last-stop-reason nil :cost nil :error nil :token token
+                 :activity nil :activity-source nil :activity-tool nil)
            rata-agent-center--registry))
 
 (defun rata-agent-center--sweep ()
@@ -199,8 +202,98 @@ holds it, else the current one."
        (ignore-errors (agent-shell-status :shell-buffer buffer))))
 
 ;;; ------------------------------------------------------------
+;;; Activity: what a shell is doing right now (pure)
+;;; ------------------------------------------------------------
+
+(defconst rata-agent-center--activity-max 240
+  "Most characters of streamed message text kept as an entry's :activity.
+Only the first line is ever shown, so the rest of a long reply is dropped.")
+
+(defconst rata-agent-center--tool-kind-labels
+  '(("execute" . "Bash") ("edit" . "Edit") ("read" . "Read") ("search" . "Search")
+    ("fetch" . "Fetch") ("delete" . "Delete") ("move" . "Move") ("think" . "Think"))
+  "ACP tool-call kind -> label, for a title that does not start with a verb.
+`execute' is `Bash' after Claude's tool name, as in init-claude-loop-acp.el.")
+
+(defun rata-agent-center--tool-activity (tool-call)
+  "TOOL-CALL, an agent-shell tool-call alist, as `Label: detail', or nil.
+Claude's ACP adapter titles most calls `Verb target' (`Read /x', `Edit
+`/x`') and a Bash call as the command in backticks, so a leading
+capitalised word is the label, and otherwise the kind is."
+  (let* ((kind (map-elt tool-call :kind))
+         (command (map-elt tool-call :command))
+         (title (string-trim (string-replace "`" "" (or (map-elt tool-call :title) ""))))
+         (kind-label (or (cdr (assoc kind rata-agent-center--tool-kind-labels))
+                         (and (stringp kind) (not (string-empty-p kind))
+                              (capitalize kind)))))
+    (cond
+     ((and (equal kind "execute") (stringp command) (not (string-empty-p command)))
+      (format "%s: %s" kind-label command))
+     ((string-empty-p title) nil)
+     ((let ((case-fold-search nil))
+        (string-match "\\`\\([A-Z][A-Za-z]*\\) +\\(.+\\)" title))
+      (format "%s: %s" (match-string 1 title) (match-string 2 title)))
+     (kind-label (format "%s: %s" kind-label title))
+     (t title))))
+
+(defun rata-agent-center--next-activity (entry event)
+  "Activity properties for ENTRY after EVENT, as a plist to `--put', or nil.
+A tool call names the activity, and is in flight until it reports
+`completed' or `failed'.  Streamed message text replaces it only while no
+tool is in flight: the start of a message replaces what was there, later
+chunks of the same message append, up to `rata-agent-center--activity-max'.
+A new prompt clears it.  Every other event leaves it alone."
+  (let ((data (map-elt event :data)))
+    (pcase (map-elt event :event)
+      ('input-submitted '(:activity nil :activity-source nil :activity-tool nil))
+      ('tool-call-update
+       (let* ((call (map-elt data :tool-call))
+              (id (map-elt data :tool-call-id))
+              (finished (member (map-elt call :status) '("completed" "failed")))
+              (text (rata-agent-center--tool-activity call)))
+         (list :activity (or text (plist-get entry :activity))
+               :activity-source 'tool
+               :activity-tool (cond ((not finished) id)
+                                    ((equal id (plist-get entry :activity-tool)) nil)
+                                    (t (plist-get entry :activity-tool))))))
+      ('agent-message-chunk
+       (let ((chunk (map-elt data :text-chunk)))
+         (when (and (stringp chunk) (not (plist-get entry :activity-tool)))
+           (let ((text (if (eq (plist-get entry :activity-source) 'message)
+                           (concat (plist-get entry :activity) chunk)
+                         chunk)))
+             (list :activity (if (> (length text) rata-agent-center--activity-max)
+                                 (substring text 0 rata-agent-center--activity-max)
+                               text)
+                   :activity-source 'message))))))))
+
+(defun rata-agent-center--activity-line (entry width)
+  "The dim line shown under ENTRY's row, at most WIDTH columns, or nil.
+The first non-blank line of its :activity, whitespace squeezed, with the
+shell's project root cut from paths.  nil for a `ready' shell (idle and
+seen, so last turn's activity is old news), and when there is nothing to
+say or no room to say it."
+  (let ((activity (plist-get entry :activity))
+        (project (plist-get entry :project)))
+    (when (and (stringp activity)
+               (not (eq (plist-get entry :state) 'ready))
+               (> width 3))
+      (let ((line (seq-find (lambda (l) (not (string-blank-p l)))
+                            (split-string activity "\n"))))
+        (when line
+          (setq line (string-trim (replace-regexp-in-string "[ \t]+" " " line)))
+          (when project
+            (dolist (root (list (file-name-as-directory (expand-file-name project))
+                                (file-name-as-directory project)))
+              (setq line (string-replace root "" line))))
+          (truncate-string-to-width line width nil nil "…"))))))
+
+;;; ------------------------------------------------------------
 ;;; Events
 ;;; ------------------------------------------------------------
+
+(defconst rata-agent-center--activity-events '(tool-call-update agent-message-chunk)
+  "Events that update the activity line and, usually, nothing else.")
 
 (defun rata-agent-center--handle-event (buffer event)
   "Record EVENT, an agent-shell event alist, on BUFFER's entry."
@@ -213,6 +306,8 @@ holds it, else the current one."
          buffer :state (rata-agent-center--next-state
                         (plist-get entry :state) event
                         (rata-agent-center--visible-p buffer)))
+        (when-let* ((activity (rata-agent-center--next-activity entry event)))
+          (apply #'rata-agent-center--put buffer activity))
         (pcase kind
           ('session-title-changed
            (rata-agent-center--put buffer :title (map-elt data :title)))
@@ -232,16 +327,22 @@ holds it, else the current one."
 (defun rata-agent-center--make-handler (buffer)
   "Return the agent-shell `:on-event' callback for BUFFER.
 It calls `rata-agent-center--handle-event' by name, so a reloaded
-module takes effect in shells subscribed before the reload."
+module takes effect in shells subscribed before the reload.
+An event that changed only the activity line asks for the slower
+activity render, so a streaming reply does not reprint five times a second."
   (lambda (event)
-    (condition-case err
-        (rata-agent-center--handle-event buffer event)
-      (error
-       (rata-agent-center--put buffer :state 'error
-                               :error (format "agent-center: %s on %s"
-                                              (error-message-string err)
-                                              (map-elt event :event)))))
-    (rata-agent-center--schedule-render)))
+    (let ((before (plist-get (rata-agent-center--entry buffer) :state)))
+      (condition-case err
+          (rata-agent-center--handle-event buffer event)
+        (error
+         (rata-agent-center--put buffer :state 'error
+                                 :error (format "agent-center: %s on %s"
+                                                (error-message-string err)
+                                                (map-elt event :event)))))
+      (if (and (memq (map-elt event :event) rata-agent-center--activity-events)
+               (eq before (plist-get (rata-agent-center--entry buffer) :state)))
+          (rata-agent-center--schedule-activity-render)
+        (rata-agent-center--schedule-render)))))
 
 (defun rata-agent-center--subscribe (buffer)
   "Subscribe to every event in BUFFER and return the token, or nil."
@@ -306,6 +407,17 @@ tests can stub it -- Emacs 31's `featurep' ignores a `let' of `features'."
   "Width in columns of the *Agents* panel (height, on top or bottom)."
   :type 'integer)
 
+(defcustom rata-agent-center-show-activity t
+  "Non-nil to show what each shell is doing on a dim line under its row.
+The latest tool call, else the start of the latest agent message."
+  :type 'boolean)
+
+(defcustom rata-agent-center-activity-interval 1.0
+  "Least seconds between two renders caused only by activity-line changes.
+A streaming reply sends a chunk many times a second; state changes are
+not held back by this."
+  :type 'number)
+
 ;; gruvbox, in the style of `rata-persp-active-layout' in init-persp.el.
 (defface rata-agent-center-needs-input '((t :foreground "#fe8019" :weight bold))
   "Badge of a shell waiting on a permission answer (gruvbox orange).")
@@ -322,6 +434,8 @@ tests can stub it -- Emacs 31's `featurep' ignores a `let' of `features'."
 Not grey: grey reads as disabled and is hard to see on the dark background.")
 (defface rata-agent-center-group-heading '((t :inherit bold))
   "Layout heading in the *Agents* panel.")
+(defface rata-agent-center-activity '((t :inherit shadow :slant italic))
+  "The activity line under a row: dim, since it is detail, not status.")
 
 (defconst rata-agent-center--badges
   '((needs-input "⚠" "input") (error "✗" "error") (done "✓" "done")
@@ -439,12 +553,37 @@ heading only."
     (setq tabulated-list-groups groups
           tabulated-list-entries (apply #'append (mapcar #'cdr groups)))))
 
+(defconst rata-agent-center--activity-prefix "   ↳ "
+  "Indent and marker of the activity line, under the row's State column.")
+
+(defun rata-agent-center--print-entry (id cols)
+  "The `tabulated-list-printer': the row, then its activity line if any.
+The activity line carries the row's `tabulated-list-id', so every command
+that acts on a row acts on it too, and `rata-agent-center-activity' so
+row-to-row motion can step over it.  Correct only because the panel has
+no sort key: `tabulated-list-print' then reprints in full, never through
+its one-line-per-entry incremental update."
+  (tabulated-list-print-entry id cols)
+  (when-let* ((rata-agent-center-show-activity)
+              (entry (rata-agent-center--entry id))
+              (win-width (if-let* ((win (get-buffer-window (current-buffer) t)))
+                             (window-width win)
+                           rata-agent-center-width))
+              (line (rata-agent-center--activity-line
+                     entry (- win-width (string-width rata-agent-center--activity-prefix) 1))))
+    (insert (propertize (concat rata-agent-center--activity-prefix line "\n")
+                        'face 'rata-agent-center-activity
+                        'tabulated-list-id id
+                        'tabulated-list-entry cols
+                        'rata-agent-center-activity t))))
+
 (define-derived-mode rata-agent-center-mode tabulated-list-mode "Agents"
   "Every live agent-shell session, grouped by persp layout."
   (setq tabulated-list-format
         `[("State" 7 nil) ("Agent" 6 nil) ("Title" ,rata-agent-center--title-width nil) ("Age" 4 nil) ("Last" 0 nil)]
         tabulated-list-padding 1
-        tabulated-list-sort-key nil)
+        tabulated-list-sort-key nil
+        tabulated-list-printer #'rata-agent-center--print-entry)
   (add-hook 'tabulated-list-revert-hook #'rata-agent-center--fill nil t)
   (tabulated-list-init-header))
 
@@ -473,22 +612,56 @@ heading only."
   (when-let* ((buf (get-buffer rata-agent-center-buffer-name)))
     (get-buffer-window-list buf nil (or frame t))))
 
+(defvar rata-agent-center--render-due nil
+  "`float-time' at which the armed render timer fires, or nil.")
+
+(defvar rata-agent-center--last-render 0
+  "`float-time' of the last render, for `rata-agent-center-activity-interval'.")
+
+(defconst rata-agent-center--render-delay 0.2
+  "Debounce, in seconds, between an event and the render it asks for.")
+
 (defun rata-agent-center--render ()
   "Reprint *Agents* if it is shown anywhere; otherwise just sweep.
 Either way the mode-line segment is redrawn, since it is always shown."
-  (setq rata-agent-center--render-timer nil)
+  (setq rata-agent-center--render-timer nil
+        rata-agent-center--render-due nil
+        rata-agent-center--last-render (float-time))
   (if (rata-agent-center--panel-windows)
       (rata-agent-center--refresh-buffer)
     (rata-agent-center--sweep))
   (force-mode-line-update t))
 
+(defun rata-agent-center--arm-render (delay)
+  "Make sure a render happens within DELAY seconds, with one timer.
+An armed timer due sooner already covers it; one due later is replaced.
+The 50 ms slack keeps a burst of activity, whose deadline is recomputed
+from a fresh clock each time, from re-arming over float rounding."
+  (let ((due (+ (float-time) delay)))
+    (unless (and (timerp rata-agent-center--render-timer)
+                 rata-agent-center--render-due
+                 (<= rata-agent-center--render-due (+ due 0.05)))
+      (when (timerp rata-agent-center--render-timer)
+        (cancel-timer rata-agent-center--render-timer))
+      (setq rata-agent-center--render-due due
+            rata-agent-center--render-timer
+            (run-with-timer delay nil #'rata-agent-center--render)))))
+
 (defun rata-agent-center--schedule-render ()
-  "Arm one short timer to render, unless one is already armed.
+  "Arm one short timer to render, unless one is already armed sooner.
 Event callbacks call this instead of rendering: they run inside
 agent-shell's event dispatch, where rendering does not belong."
-  (unless (timerp rata-agent-center--render-timer)
-    (setq rata-agent-center--render-timer
-          (run-with-timer 0.2 nil #'rata-agent-center--render))))
+  (rata-agent-center--arm-render rata-agent-center--render-delay))
+
+(defun rata-agent-center--schedule-activity-render ()
+  "Ask for a render after an activity-only change, at most once per interval.
+Nothing at all when activity lines are off or the panel is not shown:
+the mode line does not show activity."
+  (when (and rata-agent-center-show-activity (rata-agent-center--panel-windows))
+    (rata-agent-center--arm-render
+     (max rata-agent-center--render-delay
+          (- rata-agent-center-activity-interval
+             (- (float-time) rata-agent-center--last-render))))))
 
 (defun rata-agent-center--age-tick ()
   "Refresh the Age column; stop ticking once the panel is gone."
@@ -660,8 +833,10 @@ Most urgent state first; within a state, the one waiting longest."
     (rata-agent-center--mark-visited (plist-get entry :buffer))))
 
 (defun rata-agent-center--attention-row-p ()
-  "Non-nil when this line is a row whose shell needs you."
-  (when-let* ((shell (tabulated-list-get-id))
+  "Non-nil when this line is a row whose shell needs you.
+Never on an activity line, which belongs to the row above it."
+  (when-let* (((not (get-text-property (point) 'rata-agent-center-activity)))
+              (shell (tabulated-list-get-id))
               (entry (rata-agent-center--entry shell)))
     (memq (plist-get entry :state) rata-agent-center--attention-states)))
 
@@ -862,7 +1037,8 @@ doom-modeline shows `global-mode-string' in its `misc-info' segment.")
   (clrhash rata-agent-center--registry)
   (when (timerp rata-agent-center--render-timer)
     (cancel-timer rata-agent-center--render-timer))
-  (setq rata-agent-center--render-timer nil))
+  (setq rata-agent-center--render-timer nil
+        rata-agent-center--render-due nil))
 
 ;; The hook needs nothing loaded; adoption needs `agent-shell-buffers', so it
 ;; runs again once agent-shell arrives (and at once after `SPC q r').

@@ -1555,3 +1555,14 @@ only from a `<base href>` element as it walks the DOM (`shr-tag-base`). Apply: r
 `(shr-insert-document `(base ((href . ,url)) ,dom))` — which is what elfeed does — and test
 the resolved URL, since nothing about the rendered text shows the link is wrong. Related:
 FAIL-0024, L-057 (another shr variable that looked bound and was not).
+
+## L-060 — A deadline recomputed from a fresh clock never compares equal; give "already armed" a slack
+
+**Date:** 2026-10-08. A2's activity throttle (`init-agent-center.el`) arms a render at
+`last-render + interval` and keeps an armed timer unless the new deadline is earlier. Each
+chunk recomputes that deadline as `now + (interval - (now - last))`, which is the same
+instant on paper, but float rounding makes it a hair earlier about every tenth call, so 50
+chunks armed 4 timers instead of 1. `rata-test-agent-center-activity-render-throttled`
+caught it by counting `run-with-timer` calls, not by reading the code. Apply: when a
+debounce compares deadlines, compare with a tolerance (`rata-agent-center--arm-render`
+uses 50 ms), and test a debounce by counting the timers it creates under a burst.
