@@ -94,6 +94,12 @@
 ;; Ollama needs no key.  A malformed entry is a startup warning naming the
 ;; fault, and `rata-test-llm-provider-problems-name-the-entry' fails on it.
 
+;; --- Agent prompt library (lisp/init-agent-prompts.el) ---
+;; Optional: a directory of extra prompt files (*.md) for this machine only --
+;; prompts that name work systems, say.  A prompt here overrides a repository
+;; prompt (prompts/) of the same name.
+;; (setq rata-agent-prompt-extra-directory "~/CHANGE-ME/agent-prompts/")
+
 ;; --- Khoj (lisp/init-khoj.el) ---
 ;; Only if your homelab host differs from the committed default.  Set the
 ;; `rata-' variable, not `khoj-server-url' itself: the module hands that one to

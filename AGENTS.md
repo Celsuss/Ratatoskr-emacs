@@ -221,7 +221,7 @@ init-cmake → init-terraform → init-just → init-docker → init-markdown �
 init-yaml → init-ansible → init-jupyter → init-helm → init-pkgbuild →
 init-casual → init-sql → init-k8s → init-gamedev → init-snippets →
 init-llm → init-claude-loop → init-khoj → init-irc → init-elfeed → init-elfeed-hn → init-mail → init-jira →
-init-persp → init-agent-center → init-agent-worktree → init-org → init-blog → init-dialogic →
+init-persp → init-agent-center → init-agent-worktree → init-agent-prompts → init-org → init-blog → init-dialogic →
 init-present → init-dashboard
 ```
 
@@ -376,6 +376,21 @@ init-present → init-dashboard
   branch` through `rata-agent-center-project-label-functions`, computed once at
   registration. Tests: `rata-test-agent-worktree-*`, against throwaway repositories
   with `GIT_CONFIG_GLOBAL=/dev/null`; the shell start is stubbed.
+- `init-agent-prompts.el` — a prompt library for agent-shell (C12 in
+  `plans/ai-agent-powerhouse.md`). `SPC a i c P` picks a prompt from `prompts/*.md`
+  (versioned) or `rata-agent-prompt-extra-directory` (per machine, set in `local.el`,
+  wins on a name clash), fills `{{region}} {{file}} {{diff}} {{error}} {{project}}`
+  from the buffer you came from, and **inserts without submitting** into the
+  project's shell (`C-u` picks one; a busy shell gets it through its prompt queue).
+  Owns no package and never requires agent-shell at load. Two things are
+  load-bearing. **Expansion is one pure pass** (`rata-agent-prompt-expand`, a
+  `replace-regexp-in-string` with LITERAL), so a `{{…}}` or `\1` inside your own
+  region is never re-expanded. **A gap stays visible:** a placeholder with no value,
+  or an unknown one, is left as written and named in the echo area
+  (`rata-agent-prompt-unfilled`), never replaced by empty text;
+  `rata-test-agent-prompt-shipped-prompts-are-valid` fails on a shipped prompt that
+  names an unknown placeholder or lacks its `<!-- description -->` line. Tests:
+  `rata-test-agent-prompt-*`, with agent-shell stubbed; nothing starts an agent.
 - `init-elfeed-hn.el` — Hacker News inside elfeed's own entry buffer (D-023, plan
   `plans/hackernews-reader.md`). Owns no package. One function on `elfeed-show-update-hook`
   (added in `with-eval-after-load 'elfeed-show`, because elfeed's `defvar` of that hook

@@ -58,6 +58,7 @@ that can actually go wrong in an Emacs configuration are:
 | lisp/init-persp.el | ui,state | MEDIUM | relevant | knowledge/ARCHITECTURE.md |
 | lisp/init-agent-center.el | ui,state | MEDIUM | relevant | knowledge/ARCHITECTURE.md |
 | lisp/init-agent-worktree.el | ui,state,subprocess | MEDIUM | relevant | knowledge/ARCHITECTURE.md |
+| lisp/init-agent-prompts.el | ui,subprocess | MEDIUM | relevant | knowledge/ARCHITECTURE.md |
 | lisp/init-gamedev.el | languages,subprocess | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-k8s.el | integrations | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-mcp.el | integrations,unloaded | LOW | fast | knowledge/ARCHITECTURE.md |
@@ -95,6 +96,7 @@ that can actually go wrong in an Emacs configuration are:
 | plans/* | docs,plans | LOW | fast | SYSTEM.md |
 | SPEC.md | docs,historical | LOW | fast | memory/DECISIONS.md |
 | snippets/* | editing | LOW | fast | knowledge/MODULES.md |
+| prompts/* | editing,prompts | LOW | relevant | knowledge/MODULES.md |
 | feeds.org | integrations,network | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | local.el.example | packaging,secrets | MEDIUM | fast | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | .gitignore | packaging | MEDIUM | fast | knowledge/SECRETS_AND_SENSITIVE_DATA.md |

@@ -232,6 +232,7 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC a i n" . rata-agent-center-next-attention)
     ("SPC a i c w" . rata-agent-worktree-new)
     ("SPC a i c W" . rata-agent-worktree-finish)
+    ("SPC a i c P" . rata-agent-prompt)
     ("SPC J l" . rata-jira-org-link-heading)
     ("SPC o b d d" . rata-dialogic-insert-block)
     ("SPC o b e" . org-hugo-export-wim-to-md)
@@ -4962,6 +4963,177 @@ are kept in the main checkout; the branch goes only on a second yes."
           (should (eq (key-binding (kbd "C")) 'rata-agent-worktree-new))
           (should (eq (key-binding (kbd "X")) 'rata-agent-worktree-finish)))
       (kill-buffer buf))))
+
+;;; ============================================================
+;;; Agent prompt library (C12, lisp/init-agent-prompts.el)
+;;; ============================================================
+
+(ert-deftest rata-test-agent-prompt-expand-fills-present-context ()
+  "Every placeholder with a value in the context is replaced."
+  (should (equal "Review @a.el in demo:\n```diff\n+x\n```"
+                 (rata-agent-prompt-expand
+                  "Review {{file}} in {{project}}:\n{{diff}}"
+                  '((file . "@a.el") (project . "demo")
+                    (diff . "```diff\n+x\n```"))))))
+
+(ert-deftest rata-test-agent-prompt-expand-leaves-gaps-visible ()
+  "A known placeholder without a value and an unknown one both stay as
+written, and both are reported -- nothing is dropped silently."
+  (let ((tpl "Fix {{error}} near {{region}}; see {{nonsense}}.")
+        (ctx '((region . "R") (error . nil) (diff . ""))))
+    (should (equal "Fix {{error}} near R; see {{nonsense}}."
+                   (rata-agent-prompt-expand tpl ctx)))
+    (should (equal '("error" "nonsense") (rata-agent-prompt-unfilled tpl ctx)))
+    ;; An empty string counts as missing, like nil.
+    (should (equal "{{diff}}" (rata-agent-prompt-expand "{{diff}}" ctx)))
+    (should (equal '("diff") (rata-agent-prompt-unfilled "{{diff}} {{diff}}" ctx)))))
+
+(ert-deftest rata-test-agent-prompt-expand-is-one-pass ()
+  "Text substituted from the buffer is not scanned again: a `{{file}}'
+inside your region stays literal, and `\\1' is not a back-reference."
+  (should (equal "code: x = \"{{file}}\" \\1 -- @f"
+                 (rata-agent-prompt-expand
+                  "code: {{region}} -- {{file}}"
+                  '((region . "x = \"{{file}}\" \\1") (file . "@f"))))))
+
+(ert-deftest rata-test-agent-prompt-parse-description ()
+  "A leading HTML comment is the description and is not sent."
+  (should (equal '("Review the diff" . "Look at {{diff}}.")
+                 (rata-agent-prompt-parse "<!-- Review the diff -->\n\nLook at {{diff}}.\n")))
+  (should (equal '(nil . "Just a body.")
+                 (rata-agent-prompt-parse "Just a body.\n"))))
+
+(ert-deftest rata-test-agent-prompt-files-extra-directory-wins ()
+  "A per-machine prompt overrides a repository prompt of the same name;
+a missing extra directory is not an error."
+  (let* ((repo (make-temp-file "rata-prompts-repo-" t))
+         (extra (make-temp-file "rata-prompts-extra-" t)))
+    (unwind-protect
+        (progn
+          (write-region "a" nil (expand-file-name "shared.md" repo))
+          (write-region "b" nil (expand-file-name "only-repo.md" repo))
+          (write-region "c" nil (expand-file-name "shared.md" extra))
+          (write-region "x" nil (expand-file-name "notes.txt" extra))
+          (let ((rata-agent-prompt-directory repo)
+                (rata-agent-prompt-extra-directory extra))
+            (let ((files (rata-agent-prompt-files)))
+              (should (equal '("only-repo" "shared") (sort (mapcar #'car files) #'string<)))
+              (should (equal (expand-file-name "shared.md" extra)
+                             (cdr (assoc "shared" files))))))
+          (let ((rata-agent-prompt-directory repo)
+                (rata-agent-prompt-extra-directory (expand-file-name "nope" extra)))
+            (should (= 2 (length (rata-agent-prompt-files))))))
+      (delete-directory repo t)
+      (delete-directory extra t))))
+
+(ert-deftest rata-test-agent-prompt-shipped-prompts-are-valid ()
+  "Every prompt in the repository has a description and uses only known
+placeholders, so a typo cannot reach a shell as a literal `{{difff}}'."
+  (let ((files (directory-files rata-agent-prompt-directory t "\\.md\\'")))
+    (should files)
+    (dolist (file files)
+      (let* ((parsed (rata-agent-prompt-parse
+                      (with-temp-buffer (insert-file-contents file) (buffer-string))))
+             (full (mapcar (lambda (p) (cons (intern p) "v")) rata-agent-prompt-placeholders)))
+        (should (car parsed))
+        (should (equal (list file nil)
+                       (list file (rata-agent-prompt-unfilled (cdr parsed) full))))))))
+
+(ert-deftest rata-test-agent-prompt-collect-from-file-buffer ()
+  "Context collected from a visited file in a git repository.
+A second changed file must stay out of {{diff}}: the diff is the visited
+file's, so reading `buffer-file-name' from inside a temp buffer (where it
+is nil, and the diff silently widens to the project) fails here."
+  (rata-test-agent-worktree--with-repo
+    (write-region "g\n" nil (expand-file-name "g.txt" repo))
+    (rata-test-agent-worktree--git repo "add" "g.txt")
+    (rata-test-agent-worktree--git repo "commit" "-qm" "g")
+    (write-region "g2\n" nil (expand-file-name "g.txt" repo))
+    (write-region "x\ny\n" nil (expand-file-name "f.txt" repo))
+    (let ((buf (find-file-noselect (expand-file-name "f.txt" repo))))
+      (with-current-buffer buf
+        (let ((transient-mark-mode t))
+          (goto-char (point-min))
+          (set-mark (point))
+          (forward-line 1)
+          (activate-mark)
+          (let ((ctx (rata-agent-prompt--collect)))
+            (should (equal "@f.txt" (alist-get 'file ctx)))
+            (should (equal (file-name-nondirectory (directory-file-name repo))
+                           (alist-get 'project ctx)))
+            (should (string-match-p "\\`f.txt:1-1\n```.*\nx\n```\\'" (alist-get 'region ctx)))
+            (should (string-match-p "^\\+y$" (alist-get 'diff ctx)))
+            (should (string-prefix-p "```diff\n" (alist-get 'diff ctx)))
+            (should-not (string-match-p "g2" (alist-get 'diff ctx)))
+            (should-not (alist-get 'error ctx)))
+          ;; No region, no diff: both missing rather than empty text.
+          (deactivate-mark)
+          (rata-test-agent-worktree--git repo "commit" "-qm" "y" "--" "f.txt")
+          (let ((ctx (rata-agent-prompt--collect)))
+            (should-not (alist-get 'region ctx))
+            (should-not (alist-get 'diff ctx))))))))
+
+(ert-deftest rata-test-agent-prompt-diff-is-capped ()
+  "A diff longer than the cap is cut, and says so."
+  (let ((rata-agent-prompt-diff-max-chars 10))
+    (should (equal "```diff\n0123456789\n[... diff truncated at 10 characters]\n```"
+                   (rata-agent-prompt--fence-diff "0123456789abcdef")))))
+
+(defmacro rata-test-agent-prompt--with-stubs (busy &rest body)
+  "Run BODY with one prompt `t1' and agent-shell stubbed.
+`inserted' and `queued' collect what reached the stubs."
+  (declare (indent 1))
+  `(let* ((dir (make-temp-file "rata-prompts-" t))
+          (shell (generate-new-buffer " *rata-test-shell*"))
+          (rata-agent-prompt-directory dir)
+          (rata-agent-prompt-extra-directory nil)
+          inserted queued)
+     (unwind-protect
+         (progn
+           (write-region "<!-- d -->\nHello {{project}} {{region}}" nil
+                         (expand-file-name "t1.md" dir))
+           (cl-letf (((symbol-function 'agent-shell-shell-buffer)
+                      (lambda (&rest _) shell))
+                     ((symbol-function 'agent-shell-insert)
+                      (lambda (&rest args) (push args inserted)))
+                     ((symbol-function 'shell-maker-busy) (lambda () ,busy))
+                     ((symbol-function 'agent-shell--prompt-queue-read)
+                      (lambda (&rest args) (plist-get args :initial)))
+                     ((symbol-function 'agent-shell-prompt-queue)
+                      (lambda (prompt) (push (cons (current-buffer) prompt) queued)))
+                     ((symbol-function 'rata-agent-prompt--collect)
+                      (lambda () '((project . "demo")))))
+             ,@body))
+       (kill-buffer shell)
+       (delete-directory dir t))))
+
+(ert-deftest rata-test-agent-prompt-inserts-without-submitting ()
+  "The expanded prompt is inserted into the shell and never submitted."
+  (rata-test-agent-prompt--with-stubs nil
+    (rata-agent-prompt "t1")
+    (should (= 1 (length inserted)))
+    (let ((args (car inserted)))
+      (should (equal "Hello demo {{region}}" (plist-get args :text)))
+      (should (eq shell (plist-get args :shell-buffer)))
+      (should-not (plist-get args :submit)))
+    (should-not queued)))
+
+(ert-deftest rata-test-agent-prompt-busy-shell-queues ()
+  "A busy shell gets the prompt through its queue, editable first."
+  (rata-test-agent-prompt--with-stubs t
+    (rata-agent-prompt "t1")
+    (should-not inserted)
+    (should (equal (list (cons shell "Hello demo {{region}}")) queued))))
+
+(ert-deftest rata-test-agent-prompt-loads-without-agent-shell ()
+  "The module loads with agent-shell absent, and does not load it (L-052)."
+  (let* ((emacs (expand-file-name invocation-name invocation-directory))
+         (lisp (expand-file-name "lisp" user-emacs-directory))
+         (status (call-process
+                  emacs nil nil nil "-Q" "--batch" "-L" lisp
+                  "--eval" "(require 'init-agent-prompts)"
+                  "--eval" "(kill-emacs (if (featurep 'agent-shell) 2 0))")))
+    (should (eq status 0))))
 
 ;;; ============================================================
 ;;; Run all tests

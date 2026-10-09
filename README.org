@@ -372,6 +372,31 @@ the branch is a second question (=git branch -d=).
 | =SPC a i c w= | New agent in its own worktree and layout |
 | =SPC a i c W= | Finish an agent worktree                 |
 
+*** Prompt library
+
+=SPC a i c P= picks a saved prompt (=prompts/*.md= in this repository, plus
+=rata-agent-prompt-extra-directory= per machine, which wins on a name clash),
+fills its placeholders from the buffer you are in, and *inserts* it into the
+project's agent shell without sending it, so you can edit it first. =C-u= picks
+the shell. A busy shell gets it through its prompt queue instead.
+
+| Placeholder   | Filled with                                              |
+|---------------+----------------------------------------------------------|
+| ={{region}}=  | the active region, fenced, with =file:line-line=         |
+| ={{file}}=    | the file as an =@path= mention                           |
+| ={{diff}}=    | =git diff HEAD= of the file (of the project without one) |
+| ={{error}}=   | flymake / flycheck diagnostics on the current line       |
+| ={{project}}= | the project's name                                       |
+
+A placeholder that cannot be filled stays in the text as written and is named in
+the echo area. A prompt file is Markdown; an optional first line
+=<!-- description -->= is shown in the picker and not sent. =M-x
+rata-agent-prompt-new= and =rata-agent-prompt-edit= create and open them.
+
+| Key            | Action                                   |
+|----------------+------------------------------------------|
+| =SPC a i c P=  | Insert a library prompt into the shell   |
+
 ** Claude Code Task Loop
 
 Work a checklist file top to bottom with Claude Code, one task per run.

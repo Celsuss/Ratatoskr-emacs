@@ -1579,3 +1579,15 @@ would have erased the only record of each session, the thing B9 is built on.
 `rata-test-agent-worktree-finish-removes-merged` asserts the copy. Apply: before removing
 a worktree (or any directory git calls clean), list what `git status --ignored` would
 show there and decide what of it is data.
+
+## L-062 — A buffer-local read inside `with-temp-buffer` is the temp buffer's, and a test may not notice
+
+**Date:** 2026-10-08. C12 (`init-agent-prompts.el`). `rata-agent-prompt--diff` first bound
+`(file (and buffer-file-name …))` inside the `with-temp-buffer` that collects git output.
+There `buffer-file-name` is nil, so `{{diff}}` silently widened from the visited file to the
+whole project. The first test missed it: the visited file was the only change in the repo,
+so both diffs were identical. `rata-test-agent-prompt-collect-from-file-buffer` now
+changes a second file and asserts it is absent, and was checked against the buggy version.
+Apply: read `buffer-file-name`, `default-directory`, `major-mode` and other buffer-locals
+*before* entering `with-temp-buffer`; and when a fallback exists (file → project), give
+the test a fixture where the two answers differ.
