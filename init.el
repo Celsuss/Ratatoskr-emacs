@@ -142,10 +142,14 @@ normally for a full backtrace.  Otherwise, catch and log them to
 (rata-load-module 'init-khoj)
 (rata-load-module 'init-irc)
 (rata-load-module 'init-elfeed)
+(rata-load-module 'init-elfeed-hn)
 (rata-load-module 'init-mail)      ; mu4e over Proton Mail Bridge
 (rata-load-module 'init-jira)
 ;; (rata-load-module 'init-mcp)      ; experimental — uncomment when stable
 (rata-load-module 'init-persp)
+(rata-load-module 'init-agent-center) ; agent-shell overview across layouts
+(rata-load-module 'init-agent-worktree) ; one git worktree + layout per agent task
+(rata-load-module 'init-agent-prompts) ; prompt library inserted into agent shells
 (rata-load-module 'init-org)
 (rata-load-module 'init-blog)      ; org-roam -> hugo blog export
 (rata-load-module 'init-dialogic)  ; dialogic formatting for blog posts

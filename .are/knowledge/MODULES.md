@@ -44,9 +44,10 @@ that can actually go wrong in an Emacs configuration are:
 | lisp/init-present.el | notes,operator-data | MEDIUM | relevant | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | lisp/init-dialogic.el | notes,operator-data | MEDIUM | relevant | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | lisp/init-khoj.el | integrations,operator-data | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
-| lisp/init-llm.el | integrations,operator-data | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
+| lisp/init-llm.el | integrations,operator-data,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-irc.el | integrations,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-elfeed.el | integrations,network | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
+| lisp/init-elfeed-hn.el | integrations,network | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-jira.el | integrations,network,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-mail.el | integrations,network,secrets | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | mbsyncrc.example | integrations,template | LOW | relevant | knowledge/INTEGRATIONS.md |
@@ -55,6 +56,9 @@ that can actually go wrong in an Emacs configuration are:
 | lisp/init-ui.el | ui | MEDIUM | relevant | knowledge/ARCHITECTURE.md |
 | lisp/init-dashboard.el | ui | MEDIUM | relevant | knowledge/ENVIRONMENTS.md |
 | lisp/init-persp.el | ui,state | MEDIUM | relevant | knowledge/ARCHITECTURE.md |
+| lisp/init-agent-center.el | ui,state | MEDIUM | relevant | knowledge/ARCHITECTURE.md |
+| lisp/init-agent-worktree.el | ui,state,subprocess | MEDIUM | relevant | knowledge/ARCHITECTURE.md |
+| lisp/init-agent-prompts.el | ui,subprocess | MEDIUM | relevant | knowledge/ARCHITECTURE.md |
 | lisp/init-gamedev.el | languages,subprocess | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-k8s.el | integrations | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | lisp/init-mcp.el | integrations,unloaded | LOW | fast | knowledge/ARCHITECTURE.md |
@@ -89,8 +93,10 @@ that can actually go wrong in an Emacs configuration are:
 | CLAUDE.md | docs,conventions | MEDIUM | fast | SYSTEM.md |
 | README.org | docs | LOW | fast | knowledge/ENVIRONMENTS.md |
 | docs/* | docs,are | LOW | fast | SYSTEM.md |
+| plans/* | docs,plans | LOW | fast | SYSTEM.md |
 | SPEC.md | docs,historical | LOW | fast | memory/DECISIONS.md |
 | snippets/* | editing | LOW | fast | knowledge/MODULES.md |
+| prompts/* | editing,prompts | LOW | relevant | knowledge/MODULES.md |
 | feeds.org | integrations,network | MEDIUM | relevant | knowledge/INTEGRATIONS.md |
 | local.el.example | packaging,secrets | MEDIUM | fast | knowledge/SECRETS_AND_SENSITIVE_DATA.md |
 | .gitignore | packaging | MEDIUM | fast | knowledge/SECRETS_AND_SENSITIVE_DATA.md |

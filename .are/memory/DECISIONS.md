@@ -610,3 +610,94 @@ noise every five minutes; it is checked in `rata-mail-update` only).
 Related: D-012 (what belongs in `local.el`), L-011 / FAIL-0009 (why the keys are at top
 level and bind wrappers), FAIL-0014 (a dependency installed under a name nothing calls).
 
+
+## D-022 — LLM endpoints and models are one per-machine list; the tracked default is localhost Ollama
+
+**2026-09-14.**
+
+At home the models are local Ollama; at work they sit behind a LiteLLM proxy whose hostname
+is corporate identity. `init-llm.el` had each of gptel, ellama and aidermacs configured by
+hand with its own hostname and model list, so a second machine meant editing three
+`use-package` bodies in a tracked file.
+
+Decided: one variable, `rata-llm-providers`, a list of plists (`:name`, `:protocol` `ollama`
+| `openai`, `:url`, `:models`, optional `:embedding-model` and `:auth-host`), set in
+`local.el` (D-012). Pure functions derive each tool's shape from an entry — gptel's
+constructor call, the `llm` struct ellama wants, aider's `ollama_chat/` or `openai/` model
+name and its environment — and each is tested against a fixture of both protocols.
+
+1. *The tracked default is Ollama on `localhost:11434` with the models the config already
+   used.* This departs from the Jira / mail / Snowflake pattern (nil in git, `user-error`
+   until `local.el` exists), deliberately: those defaults *are* identity, this one is not,
+   and a nil default would leave three packages erroring in three different voices for a
+   machine that only ever wanted local Ollama. `rata-test-llm-tracked-default-is-localhost-only`
+   reads the file on disk and fails on any other host, so the exception cannot widen.
+2. *`openai`, not `litellm`, as the protocol name.* LiteLLM, vLLM, OpenRouter and the like
+   all speak the same chat-completions shape; naming the protocol after one vendor would
+   invite a second one later.
+3. *Keys are never in `local.el`.* An `openai` entry is keyed on its URL host in
+   `~/.authinfo.gpg` (override with `:auth-host`; explicit nil means keyless). gptel and
+   llm both accept a function for the key and call it at request time, so nothing at load
+   and nothing in `tests/` touches the file. aider gets its key from
+   `aidermacs-before-run-backend-hook`, which upstream runs inside a `let` of
+   `process-environment` for exactly this purpose, so the key reaches the aider child and
+   no other process Emacs spawns — not `setenv` at load, which would hand it to every
+   child. The key is a *parameter* of `rata-llm-aider-environment` so the function is
+   pure.
+4. *All entries reach gptel and ellama, the first reaches aider.* Both have a native
+   switcher (`gptel-menu`, `ellama-provider-select`); aider takes one model. A run-time
+   "switch everything" command was not built — the stated need is per machine, not per
+   hour.
+5. *A malformed entry is a `display-warning` at load, not an error.* The leader keys must
+   still exist, and `just batch-strict` fails on warnings, so a typo in `local.el` fails
+   verification rather than surfacing as a `wrong-type-argument` inside gptel later.
+
+Rejected: an environment-variable design (`OPENAI_API_BASE` read at startup) — Emacs
+started from a desktop launcher does not see a shell's exports reliably, and the
+per-machine file already exists; per-tool override variables — three more names for one
+fact, and the first design question would be which wins.
+
+Related: D-012 (what belongs in `local.el`), L-011 / L-039 (why the aider hook and model
+are set outside `:config`), FAIL-0016.
+
+## D-023 — Hacker News comments extend elfeed's entry buffer; no HN package, no second reader
+
+**2026-10-06.** Plan and history: `plans/hackernews-reader.md`.
+
+An HN entry in elfeed has no content worth reading — the news.ycombinator.com feed stores
+the word "Comments", hnrss a list of URLs. `thanhvg/emacs-hnreader` was rejected by the
+operator as poorly maintained, and a standalone reader (own story list, own fetching) was
+dropped once it was clear elfeed already is the story list.
+
+Decided: `lisp/init-elfeed-hn.el` adds one function to `elfeed-show-update-hook`. For an
+entry whose content has the shape an HN feed writes (or whose link is an item URL), it
+replaces elfeed's content with the story (title, domain, points, author, age, count), a
+readable copy of the linked article (eww's reader view, `eww-readable-dom`) or the post's
+own text, and the whole comment tree from the Algolia HN API — one request per thread.
+Built-ins plus curl: `json-parse-string`, `shr`, and `curl` for fetching (as elfeed does for feeds), with `url-retrieve` as the fallback — curl because url.el stalls on an unrouted IPv6 address (FAIL-0024). Every other entry is
+byte-identical to before.
+
+1. *Algolia, not Firebase.* One request for any size of thread against one per comment.
+2. *One network function* (`rata-elfeed-hn--retrieve`); the test harness overrides it to fail
+   loudly, as it does for jira.el (FAIL-0021).
+3. *Replies are results, delivered from a timer, guarded by a generation counter* — the
+   claude-loop's discipline at reader size: `n`/`p`/`g` before a reply arrives make it a
+   no-op, a failure is a line in the buffer naming the reason.
+4. *Keys live in a minor mode* (`rata-elfeed-hn-thread-mode`), switched on by the drawing
+   itself, rather than in `elfeed-show-mode-map`: the entry buffer is reused for every
+   entry, and the same keys serve the `*HN <id>*` buffer that item links open in. Evil's
+   fold vocabulary (`za zc zo zM zR`, `zj zk zu`) plus `, c` `, o` `, O` `, y`; elfeed's
+   `]]` `[[` `TAB` untouched (tested).
+5. *Article fetching is on by default and contacts the article's site*, the same as opening
+   it in a browser; `rata-elfeed-hn-fetch-article` turns it off. Only HTML under 2 MB with at
+   least 200 characters of readable text is shown; anything else degrades to the link line
+   with the reason.
+
+Rejected: an HN package (maintenance); a second reader (duplicates elfeed); elfeed's own
+`:fetch-link` feed option (fetches the entry's `:link`, which for an Ask HN entry is the
+item page, has no size or type check, and appends below the content rather than replacing
+it); org-mode rendering of comments (comment text would be read as Org — it goes through
+`shr` and is inert).
+
+Not tested and not testable from `tests/`: the live Algolia API and real article sites —
+the fixtures are one captured reply and hand-built ones.

@@ -1,33 +1,254 @@
 ;;; -*- lexical-binding: t; -*-
 ;;; init-llm.el --- LLM integrations (gptel, ellama, aidermacs, agent-shell)
 
-;; --- gptel (Ollama local) ---
+(require 'url-parse)
+
+;; --- Where the models live: one provider list, three consumers (D-022) ---
+;;
+;; gptel, ellama and aidermacs each have their own notion of a backend, and
+;; each used to be configured by hand with a hostname and a model list of its
+;; own.  That works for one machine and fails for two: at home the models are
+;; local Ollama; at work they sit behind a LiteLLM proxy whose hostname is
+;; corporate identity and may not reach the public remote.
+;;
+;; So the endpoint and the models are data -- `rata-llm-providers', set per
+;; machine in the gitignored `local.el' (D-012) -- and the three tools derive
+;; their own configuration from it through the pure functions below.  The
+;; tracked default is Ollama on localhost with the models this config has
+;; always used, so a machine with no `local.el' entry behaves as before.  API
+;; keys are never in either file: an `openai' provider reads its key from
+;; ~/.authinfo.gpg through `rata-auth-get', at request time, never at load.
+
+(defcustom rata-llm-providers
+  '((:name "Ollama"
+     :protocol ollama
+     :url "http://localhost:11434"
+     :models ("qwen3.5-coder:9b-32k" "mistral:latest")
+     :embedding-model "nomic-embed-text"))
+  "LLM providers that gptel, ellama and aidermacs are configured from.
+Each entry is a plist:
+
+  :name             String.  gptel's backend name, ellama's provider name.
+  :protocol         `ollama' for Ollama's native API, or `openai' for any
+                    OpenAI-compatible chat-completions server (LiteLLM,
+                    vLLM, OpenRouter, ...).
+  :url              Base URL.  For `ollama': scheme://host:port, no path.
+                    For `openai': everything up to but excluding
+                    /chat/completions -- what OPENAI_API_BASE would be,
+                    e.g. \"https://litellm.example.com/v1\".
+  :models           Non-empty list of model-name strings.  The first is
+                    the default for all three tools; gptel and ellama
+                    offer the rest for switching.
+  :embedding-model  Optional string; ellama's embedding model.
+  :auth-host        The `machine' in ~/.authinfo.gpg whose password is the
+                    API key.  Defaults to the URL's host for `openai' and
+                    to nil (no key) for `ollama'.  Set it to nil explicitly
+                    for a keyless OpenAI-compatible server.
+
+The first entry is the default everywhere: gptel registers every entry
+and starts on the first (`gptel-menu' switches), ellama puts them all in
+`ellama-providers' and starts on the first, aidermacs takes one model and
+uses the first.
+
+Set this in `local.el' (D-012); `local.el.example' carries a LiteLLM
+entry to copy.  The tracked default is Ollama on localhost, which is not
+identity, so an unconfigured machine keeps working."
+  :type '(repeat plist)
+  :group 'rata)
+
+(defconst rata-llm-protocols '(ollama openai)
+  "Values `rata-llm-providers' accepts for :protocol.")
+
+(defun rata-llm-provider-problems (providers)
+  "Return a list of strings describing what is wrong with PROVIDERS, or nil.
+Pure.  Run once at load so a typo in `local.el' is a warning naming the
+entry, rather than a `wrong-type-argument' from inside gptel later."
+  (if (not (listp providers))
+      (list "rata-llm-providers is not a list")
+    (let ((index 0) problems)
+      (dolist (provider providers)
+        (let ((label (format "entry %d (%s)" index
+                             (or (and (listp provider) (plist-get provider :name))
+                                 "unnamed"))))
+          (if (not (and (listp provider) (stringp (plist-get provider :name))))
+              (push (format "%s: not a plist with a string :name" label) problems)
+            (unless (memq (plist-get provider :protocol) rata-llm-protocols)
+              (push (format "%s: :protocol must be one of %s" label rata-llm-protocols)
+                    problems))
+            (let* ((url (plist-get provider :url))
+                   (parsed (and (stringp url) (url-generic-parse-url url))))
+              (unless (and parsed (url-type parsed) (url-host parsed)
+                           (not (string-empty-p (url-host parsed))))
+                (push (format "%s: :url must be a URL with a scheme and a host" label)
+                      problems)))
+            (let ((models (plist-get provider :models)))
+              (unless (and (consp models) (cl-every #'stringp models))
+                (push (format "%s: :models must be a non-empty list of strings" label)
+                      problems)))))
+        (setq index (1+ index)))
+      (nreverse problems))))
+
+(defun rata-llm-default-provider ()
+  "The provider all three tools start on: the first in `rata-llm-providers'."
+  (car rata-llm-providers))
+
+(defun rata-llm--url (provider)
+  "PROVIDER's :url parsed, with any trailing slash dropped first."
+  (url-generic-parse-url (string-remove-suffix "/" (plist-get provider :url))))
+
+(defun rata-llm--host-with-port (url)
+  "\"host\" or \"host:port\" for gptel -- the port only when URL spelled one."
+  (if (url-portspec url)
+      (format "%s:%d" (url-host url) (url-portspec url))
+    (url-host url)))
+
+(defun rata-llm-auth-host (provider)
+  "The auth-source `machine' holding PROVIDER's API key, or nil for no key.
+An explicit :auth-host wins, even nil; otherwise an `openai' provider is
+keyed on its URL host and an `ollama' one is not keyed."
+  (cond ((plist-member provider :auth-host) (plist-get provider :auth-host))
+        ((eq (plist-get provider :protocol) 'openai)
+         (url-host (rata-llm--url provider)))
+        (t nil)))
+
+(defun rata-llm--key-function (provider)
+  "A closure reading PROVIDER's key from auth-source, or nil when it has none.
+gptel and llm both accept a function here and call it at request time,
+which is what keeps ~/.authinfo.gpg out of startup and out of `tests/'."
+  (when-let* ((host (rata-llm-auth-host provider)))
+    (lambda () (rata-auth-get host))))
+
+;; gptel
+
+(defun rata-llm-gptel-backend-spec (provider)
+  "Return (CONSTRUCTOR NAME . KEYWORD-ARGS) that registers PROVIDER with gptel.
+Pure; the caller does (apply (car spec) (cdr spec)) once gptel is loaded.
+Model names are bare tags for both protocols: gptel speaks each API
+directly, so no aider-style `ollama_chat/' routing prefix belongs here."
+  (let* ((url (rata-llm--url provider))
+         (path (url-filename url))
+         (common (list :host (rata-llm--host-with-port url)
+                       :protocol (url-type url)
+                       :models (mapcar #'intern (plist-get provider :models))
+                       :stream t)))
+    (pcase (plist-get provider :protocol)
+      ('ollama `(gptel-make-ollama ,(plist-get provider :name)
+                 ,@common :endpoint ,(concat path "/api/chat")))
+      ('openai `(gptel-make-openai ,(plist-get provider :name)
+                 ,@common :endpoint ,(concat path "/chat/completions")
+                 :key ,(rata-llm--key-function provider))))))
+
+(defun rata-llm-gptel-default-model (provider)
+  "PROVIDER's first model as the symbol `gptel-model' wants."
+  (intern (car (plist-get provider :models))))
+
+;; ellama (through the llm library)
+
+(defun rata-llm-ellama-provider-spec (provider)
+  "Return (CONSTRUCTOR . KEYWORD-ARGS) building PROVIDER's llm struct.
+Pure; the caller applies it once `llm-ollama' and `llm-openai' are loaded.
+An `ollama' URL's path is not carried over: `llm-ollama' has scheme, host
+and port and nothing else."
+  (let* ((url (rata-llm--url provider))
+         (common (list :chat-model (car (plist-get provider :models)))))
+    (when-let* ((embedding (plist-get provider :embedding-model)))
+      (setq common (append common (list :embedding-model embedding))))
+    (pcase (plist-get provider :protocol)
+      ('ollama `(make-llm-ollama :scheme ,(url-type url) :host ,(url-host url)
+                                 :port ,(url-port url) ,@common))
+      ('openai `(make-llm-openai-compatible
+                 :url ,(concat (url-recreate-url url) "/")
+                 :key ,(rata-llm--key-function provider) ,@common)))))
+
+;; aidermacs
+
+(defun rata-llm-aider-model (provider)
+  "aider's name for PROVIDER's default model.
+aider routes through litellm, which needs a provider prefix: `ollama_chat/'
+for Ollama's chat API, `openai/' for anything OpenAI-compatible."
+  (format "%s/%s"
+          (pcase (plist-get provider :protocol)
+            ('ollama "ollama_chat")
+            ('openai "openai"))
+          (car (plist-get provider :models))))
+
+(defun rata-llm-aider-environment (provider key)
+  "Environment entries (\"VAR=value\") aider needs to reach PROVIDER.
+KEY is the API key string or nil.  It is a parameter rather than looked up
+here so this stays pure and no test ever touches auth-source."
+  (let ((base (url-recreate-url (rata-llm--url provider))))
+    (pcase (plist-get provider :protocol)
+      ('ollama (list (concat "OLLAMA_API_BASE=" base)))
+      ('openai (delq nil (list (concat "OPENAI_API_BASE=" base)
+                               (and key (concat "OPENAI_API_KEY=" key))))))))
+
+(defun rata-llm-aider-set-environment ()
+  "Put the default provider's endpoint and key into aider's environment.
+Runs from `aidermacs-before-run-backend-hook', which aidermacs calls inside
+a `let' of `process-environment' made for exactly this
+\(aidermacs-backends.el:91) -- so the key reaches the aider child and no
+other process Emacs spawns.  The key is read from auth-source here, at
+spawn time, never at load."
+  (when-let* ((provider (rata-llm-default-provider)))
+    (let ((host (rata-llm-auth-host provider)))
+      (dolist (entry (rata-llm-aider-environment
+                      provider (and host (rata-auth-get host))))
+        (push entry process-environment)))))
+
+;; Validate once, loudly, at load.  `display-warning' rather than `user-error'
+;; so the leader keys below still exist and `just batch-strict' turns a
+;; malformed `local.el' entry into a failing verification.
+(let ((problems (rata-llm-provider-problems rata-llm-providers)))
+  (when problems
+    (display-warning
+     'init-llm
+     (format "rata-llm-providers is malformed, see local.el.example: %s"
+             (string-join problems "; ")))))
+
+;; --- gptel ---
 (use-package gptel
   :after general
   :config
-  (gptel-make-ollama "Ollama"
-    :host "localhost:11434"
-    ;; Bare Ollama tags -- gptel talks to Ollama's API directly, so no
-    ;; `ollama_chat/' litellm routing prefix (that is only correct for aider).
-    :models '("qwen3.5-coder:9b-32k" "mistral:latest")
-    :stream t)
+  (let ((backends (mapcar (lambda (provider)
+                            (let ((spec (rata-llm-gptel-backend-spec provider)))
+                              (apply (car spec) (cdr spec))))
+                          rata-llm-providers)))
+    (when backends
+      (setq gptel-backend (car backends)
+            gptel-model (rata-llm-gptel-default-model (rata-llm-default-provider)))))
   (setq gptel-default-mode 'org-mode))
 
-;; --- ellama (Ollama local) ---
+;; --- ellama ---
 (use-package ellama
   :after general
   :commands (ellama-chat ellama-ask-about ellama-enhance-code)
   :config
   (require 'llm-ollama)
-  (setq ellama-provider
-        (make-llm-ollama :chat-model "mistral:latest" :embedding-model "nomic-embed-text")))
+  (require 'llm-openai)
+  (let ((providers (mapcar (lambda (provider)
+                             (let ((spec (rata-llm-ellama-provider-spec provider)))
+                               (cons (plist-get provider :name)
+                                     (apply (car spec) (cdr spec)))))
+                           rata-llm-providers)))
+    (setq ellama-providers providers)
+    (when providers
+      (setq ellama-provider (cdar providers)))))
 
-;; --- aidermacs (Ollama local) ---
+;; --- aidermacs ---
+;; The model is a `defcustom' aidermacs reads at spawn.  :custom records the
+;; value under use-package's theme and Custom applies it when the `defcustom'
+;; runs -- i.e. the variable is void until `aidermacs' loads and correct from
+;; then on, which is before anything can spawn aider (the ACP adapter pins
+;; below work the same way).  The hook is added at top level (L-011 / L-039):
+;; it is aidermacs that runs it, and `add-hook' on a not-yet-defined hook
+;; variable is fine -- the later `defcustom' keeps an existing value.
 (use-package aidermacs
   :after general
   :commands (aidermacs-transient-menu aidermacs-open)
-  :config
-  (setq aidermacs-default-model "ollama_chat/qwen3.5-coder:9b-32k"))
+  :custom
+  (aidermacs-default-model (rata-llm-aider-model (rata-llm-default-provider))))
+
+(add-hook 'aidermacs-before-run-backend-hook #'rata-llm-aider-set-environment)
 
 ;; --- agent-shell (Claude Code and Pi, both over ACP) ---
 ;; Neither agent is spawned directly: agent-shell speaks ACP, and each CLI is

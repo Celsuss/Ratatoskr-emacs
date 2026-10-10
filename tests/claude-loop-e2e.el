@@ -544,6 +544,152 @@ if [ $n -le 1 ]; then echo 'FAILED: test_thing'; exit 1; fi; echo 'all good'"
 (setenv "FAKE_MODE" "ok")
 
 ;;; ------------------------------------------------------------------
+;;; 15. A plan written as Phase headings runs without a checklist
+;;; ------------------------------------------------------------------
+
+;; A pre-skipped phase is how an operator keeps one out of a run; it must be
+;; neither attempted nor touched.  Each phase's prompt carries its own
+;; section and not the next one's.
+(setenv "FAKE_MODE" "ok")
+(setenv "FAKE_PROMPT_FILE" rata-e2e--prompt)
+(ignore-errors (delete-file rata-e2e--prompt))
+(let* ((file (rata-e2e--tasks
+              (concat "# Plan\n\n## 0. Findings\nnot a task\n\n"
+                      "## Phase 0 — Scaffold\nmake pyproject\n\n"
+                      "## Phase 1 — Client [skipped]\nblocked on creds\n\n"
+                      "## Phase 2 — Logs\nredact secrets\n### Verification\n"
+                      "pytest green\n")))
+       (status (rata-e2e--run file)))
+  (rata-e2e--check "phases: finished" status 'finished)
+  (rata-e2e--check "phases: open headings marked done, skipped one untouched"
+                   (rata-e2e--contents file)
+                   (concat "# Plan\n\n## 0. Findings\nnot a task\n\n"
+                           "## Phase 0 — Scaffold [done]\nmake pyproject\n\n"
+                           "## Phase 1 — Client [skipped]\nblocked on creds\n\n"
+                           "## Phase 2 — Logs [done]\nredact secrets\n"
+                           "### Verification\npytest green\n"))
+  (rata-e2e--check "phases: exactly two tasks run"
+                   (rata-claude-loop--get :index) 2)
+  (let ((prompt (with-temp-buffer
+                  (insert-file-contents rata-e2e--prompt)
+                  (buffer-string))))
+    (rata-e2e--check "phases: last prompt names its phase and carries its section"
+                     (and (string-match-p "Phase 2 — Logs" prompt)
+                          (string-match-p "redact secrets" prompt)
+                          (string-match-p "pytest green" prompt)
+                          t)
+                     t)
+    (rata-e2e--check "phases: no other phase's section leaked in"
+                     (string-match-p "make pyproject\\|blocked on creds" prompt)
+                     nil)))
+(setenv "FAKE_PROMPT_FILE" nil)
+
+;; A Task heading inside a Phase's section is that Phase's detail: one run,
+;; one marker, and the inner heading is left exactly as written.
+(let* ((file (rata-e2e--tasks
+              "## Phase 1 — Client\n### Task 1.1 — probe\nping it\n"))
+       (status (rata-e2e--run file)))
+  (rata-e2e--check "phases: nested heading finishes" status 'finished)
+  (rata-e2e--check "phases: nested heading not run on its own"
+                   (rata-claude-loop--get :index) 1)
+  (rata-e2e--check "phases: only the outer heading marked"
+                   (rata-e2e--contents file)
+                   "## Phase 1 — Client [done]\n### Task 1.1 — probe\nping it\n"))
+
+;; A failed phase under `skip' is closed with the skipped marker, so the run
+;; moves on instead of handing the same heading back forever.
+(setenv "FAKE_MODE" "blocked")
+(setq rata-claude-loop-on-task-failure 'skip)
+(let* ((file (rata-e2e--tasks "## Phase 0 — A\n## Task 1 — B\n"))
+       (status (rata-e2e--run file)))
+  (rata-e2e--check "phases: skip policy finishes" status 'finished)
+  (rata-e2e--check "phases: failed headings marked skipped"
+                   (rata-e2e--contents file)
+                   "## Phase 0 — A [skipped]\n## Task 1 — B [skipped]\n"))
+(setq rata-claude-loop-on-task-failure 'halt)
+(setenv "FAKE_MODE" "ok")
+
+;;; ------------------------------------------------------------------
+;;; 16. The backend seam: a run driven by an in-process fake backend
+;;; ------------------------------------------------------------------
+
+;; Nothing below spawns a process.  The fake implements the contract in
+;; `rata-claude-loop--backends' and nothing else, so a run that finishes
+;; here proves the contract is enough to drive the real state machine --
+;; which is what a second backend relies on.  The run's backend is read
+;; once at start: the configured value is pointed at a backend that does
+;; not exist as soon as the run begins, and the run must not notice.
+(defvar rata-e2e--fake-script nil
+  "Plists (:record RECORD :report VERDICT), one per attempt, in order.")
+(defvar rata-e2e--fake-calls nil "Backend calls seen, newest first.")
+(defvar rata-e2e--fake-record nil "The record the current attempt reports.")
+
+(defun rata-e2e--fake-begin (op &rest args)
+  "Begin a fake attempt for OP with ARGS: complete it asynchronously."
+  (push (cons op args) rata-e2e--fake-calls)
+  (rata-claude-loop--attempt-begin)
+  ;; The contract: a session id as soon as one is known, or no retry.
+  (unless (rata-claude-loop--get :session-id)
+    (rata-claude-loop--put :session-id "fake-session"))
+  (let ((step (pop rata-e2e--fake-script))
+        (epoch (rata-claude-loop--get :epoch)))
+    (setq rata-e2e--fake-record (plist-get step :record))
+    ;; Like a sentinel: record, then schedule; never act in the callback.
+    (run-at-time 0 nil
+                 (lambda ()
+                   (when (rata-claude-loop--epoch-current-p epoch)
+                     (rata-claude-loop--put :report (plist-get step :report))
+                     (rata-claude-loop--later
+                      (lambda () (rata-claude-loop--after-claude nil))))))))
+
+(defun rata-e2e--fake-ok (&optional denials)
+  "Return a fake attempt step that succeeded, with DENIALS if any."
+  (list :record (list :result-p t :subtype "success" :exit-code nil
+                      :denials denials)
+        :report 'done))
+
+(setf (alist-get 'fake rata-claude-loop--backends)
+      (list :check #'ignore
+            :start (lambda (&rest args) (apply #'rata-e2e--fake-begin :start args))
+            :retry (lambda (&rest args) (apply #'rata-e2e--fake-begin :retry args))
+            :attempt (lambda (_code) rata-e2e--fake-record)
+            :live-p #'ignore
+            :stop #'ignore
+            :kill #'ignore))
+
+(setq rata-claude-loop-max-attempts 2
+      rata-e2e--fake-calls nil
+      rata-e2e--fake-script
+      (list (rata-e2e--fake-ok '(((tool_name . "Bash")
+                                  (tool_input . ((command . "just test"))))))
+            (rata-e2e--fake-ok)
+            (rata-e2e--fake-ok)))
+(let* ((file (rata-e2e--tasks "- [ ] one\n- [ ] two\n"))
+       (rata-claude-loop-backend 'fake))
+  (rata-claude-loop--begin file (file-name-directory file) nil)
+  (setq rata-claude-loop-backend 'no-such-backend)
+  (rata-claude-loop--advance)
+  (let ((status (rata-e2e--wait)))
+    (rata-e2e--check "backend: fake run finishes" status 'finished)
+    (rata-e2e--check "backend: both boxes ticked" (rata-e2e--contents file)
+                     "- [X] one\n- [X] two\n")
+    (rata-e2e--check "backend: the run kept the backend it started with"
+                     (rata-claude-loop--get :backend) 'fake)
+    (rata-e2e--check "backend: start, retry, start"
+                     (mapcar #'car (reverse rata-e2e--fake-calls))
+                     '(:start :retry :start))
+    (rata-e2e--check "backend: the denied Bash in a record became the retry reason"
+                     (and (string-match-p "Bash"
+                                          (nth 1 (cadr (reverse rata-e2e--fake-calls))))
+                          t)
+                     t)
+    (rata-e2e--check "backend: the retry suggests the pattern from the record"
+                     (rata-e2e--saw "Bash(just:\\*)") t)
+    (rata-e2e--check "backend: script fully consumed" rata-e2e--fake-script nil)))
+(setq rata-claude-loop-backend 'cli)
+(setf (alist-get 'fake rata-claude-loop--backends nil t) nil)
+
+;;; ------------------------------------------------------------------
 
 (delete-directory rata-e2e--dir t)
 (message "\n==== claude-loop e2e: %s ===="

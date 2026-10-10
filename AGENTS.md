@@ -194,6 +194,11 @@ checkout needs. A new machine is `cp local.el.example local.el` plus filling in 
   `local.el.example` in the same commit.** `scripts/are-audit.sh` (`local-example-in-sync`)
   fails if a variable named in the template still carries a real value in the tracked
   sources, and if the template names a `rata-` variable nothing defines.
+- **A value the template names must not be the target of a use-package `:custom` clause.**
+  `:custom` expands to `custom-theme-set-variables`, which runs when the *package* loads,
+  after `local.el`, and overwrites a plain `setq` without a word. Route it through a
+  `rata-` variable the clause reads from (`rata-khoj-server-url` is the worked example);
+  the `local-example-in-sync` audit fails on the direct form (L-051).
 - Tokens and passwords do **not** go here. They live in `~/.authinfo.gpg`, read lazily
   through `rata-auth-get` (`lisp/init-system.el:50`) so that startup never blocks on GPG.
 - `lisp/init-sql.el` is the worked example: its six Snowflake parameters are `nil` in git and
@@ -215,8 +220,8 @@ init-dev → init-lang → init-rust → init-go → init-python → init-cpp �
 init-cmake → init-terraform → init-just → init-docker → init-markdown →
 init-yaml → init-ansible → init-jupyter → init-helm → init-pkgbuild →
 init-casual → init-sql → init-k8s → init-gamedev → init-snippets →
-init-llm → init-claude-loop → init-khoj → init-irc → init-elfeed → init-mail → init-jira →
-init-persp → init-org → init-blog → init-dialogic →
+init-llm → init-claude-loop → init-khoj → init-irc → init-elfeed → init-elfeed-hn → init-mail → init-jira →
+init-persp → init-agent-center → init-agent-worktree → init-agent-prompts → init-org → init-blog → init-dialogic →
 init-present → init-dashboard
 ```
 
@@ -229,12 +234,50 @@ init-present → init-dashboard
 - `init-dev.el` — lsp-mode, apheleia (formatting), flycheck, magit, projectile, vterm, diff-hl
 - `init-lang.el` — cross-cutting language infrastructure: tree-sitter (treesit-auto + grammar sources), dap-mode core, combobulate. Per-language config lives in dedicated `init-<lang>.el` files that load after this one.
 - `init-<lang>.el` — one file per language: `init-rust`, `init-go`, `init-python`, `init-cpp`, `init-cmake`, `init-terraform`, `init-just`, `init-docker`, `init-markdown`, `init-yaml`, `init-ansible`, `init-jupyter`, `init-helm`, `init-pkgbuild`. Each contains the `use-package` forms, mode-local keybindings, and helper functions for that one language.
+- `init-llm.el` — gptel, ellama, aidermacs and agent-shell under `SPC a i`. **The three
+  model tools are configured from one list, `rata-llm-providers`** (D-022): each entry is a
+  plist with a `:name`, a `:protocol` (`ollama`, or `openai` for any OpenAI-compatible
+  chat-completions server such as LiteLLM), a base `:url`, a `:models` list whose first
+  entry is the default, and optionally an `:embedding-model` and an `:auth-host`. Pure
+  functions (`rata-llm-gptel-backend-spec`, `rata-llm-ellama-provider-spec`,
+  `rata-llm-aider-model`, `rata-llm-aider-environment`) derive each tool's own shape from
+  the same entry, and are tested against a fixture of each protocol. The tracked default
+  is Ollama on localhost, which is not identity, so it stays in git; a work proxy is set
+  in `local.el` (the template is in `local.el.example`). **No key is in either file:** an
+  `openai` entry reads it from `~/.authinfo.gpg` via `rata-auth-get`, through a closure
+  gptel and llm call at request time, and for aider from
+  `aidermacs-before-run-backend-hook`, which upstream runs inside a `let` of
+  `process-environment` so the key reaches the aider child and nothing else. gptel and
+  ellama register every entry (switch with `gptel-menu` / `ellama-provider-select`);
+  aider takes the first. A malformed entry is a `display-warning` at load naming the
+  entry and the fault, which `just batch-strict` fails on. The agent-shell half (ACP
+  adapters, the GUI Enter fold fix) is unaffected by the provider list.
 - `init-claude-loop.el` — drives the `claude` CLI through a `- [ ]` checklist file, one headless `claude -p` process per task. Pure Elisp (no external package): `make-process` + a filter that decodes `--output-format stream-json` events into the `*claude-loop*` buffer. The only module in the config with real async-process plumbing, and the only one with its own state machine, so it has conventions of its own:
   - **Control flow is a trampoline, not a callback chain.** Sentinels and timers only record an outcome and call `rata-claude-loop--later`; every transition then runs from a zero-delay timer at top level. Errors signalled inside a sentinel are demoted to a `*Messages*` line, and marking a checkbox calls `save-buffer` and `org-todo` (arbitrary hook code) — neither belongs in a process callback. `rata-claude-loop--guard` turns any error into a visible halt.
   - **Staleness is handled by `:epoch`**, an integer bumped on every spawn and every stop. Callbacks and timers capture the epoch they were created under and no-op on mismatch; one check covers the child, the stderr pipe, the timeout timer, the grace-period kill and the pending step timer. `:outcome` is write-once per attempt so a timeout's verdict survives the kill it causes.
   - **Success is decided from the `result` event, never the exit code alone** (`rata-claude-loop--classify`). `claude -p` exits 0 for a task that gave up and for one whose edits were all silently denied. `:pending` must be flushed at EOF — the CLI does not newline-terminate its last line, and that line carries the result event.
   - **Failures retry by resuming the session** (`--resume` with the captured `session_id`), bounded by `rata-claude-loop-max-attempts`. `--resume` inherits no configuration, so `rata-claude-loop--common-args` exists to re-pass every flag.
+  - **How an attempt reaches Claude is a backend** (`rata-claude-loop-backend`, default
+    `cli`; the table is `rata-claude-loop--backends`). A backend implements `:check
+    :start :retry :attempt :live-p :stop :kill` and nothing else; the state machine,
+    marking, verify, budgets and journal are shared. It reports an attempt as a
+    normalised record (`rata-claude-loop--cli-attempt` documents the keys), and
+    `rata-claude-loop--classify-attempt` reads only that, never a backend's wire format.
+    Every attempt starts with `rata-claude-loop--attempt-begin` (epoch bump, verdicts
+    cleared), and a backend must record `:session-id` or the attempt cannot be retried.
+    The run captures its backend in `:backend` at start. e2e §16 drives a full run
+    through an in-process fake backend, which is the proof the contract suffices.
+    Plan for an agent-shell (ACP) backend: `plans/claude-loop-agent-shell.md`.
   - **Checkboxes are matched by text, not line number**, and an ambiguous match halts rather than ticking the wrong box.
+  - **A plan written as `## Phase N` / `## Task N` headings runs as-is.** In a non-Org
+    file with *no* checklist item at all (open or ticked — checkboxes win, so a phase is
+    never sent with its sub-boxes and then made to run them again), any Markdown heading
+    matching `rata-claude-loop-heading-regexp` is a task, its detail is its section down
+    to the next heading of the same level, and it is closed by appending ` [done]` or
+    ` [skipped]`. Pre-marking a phase `[skipped]` by hand keeps it out of a run. Fenced
+    code is skipped, and so is a matching heading inside another task heading's section
+    (`### Task 1.1` under `## Phase 1` is Phase 1's detail, not a second run). Every scan goes through `rata-claude-loop--open-tasks`, so the first
+    task, the open count behind the progress guard and the ambiguity check cannot disagree.
   - Its output buffer derives from `special-mode`, which is in none of evil's state lists — so buffer-local keys go through `evil-define-key*` (the function form; `evil-define-key` is a macro and would compile to a broken function call), not plain `define-key`.
   - **A failed task does not have to end the run.** `rata-claude-loop-on-task-failure`
     is `halt` (default, right when you are watching), `skip` (mark the box `[-]`, record
@@ -277,6 +320,103 @@ init-present → init-dashboard
     retries being told to fix a break it inherited. The baseline's output is deliberately
     discarded rather than kept as retry feedback.
   - Tests: pure functions in `tests/run-tests.el`; the state machine in `tests/claude-loop-e2e.el` via `just test-claude-loop`, against a stub CLI with no API calls.
+- `init-agent-center.el` — the `*Agents*` panel (`SPC a i o`): every live agent-shell
+  session across all persp layouts, grouped by layout, with a state per shell —
+  `needs-input` (permission question open), `error`, `done` (turn finished while you were
+  not looking), `working`, `starting`, `ready` — most urgent first. `SPC a i n` jumps
+  straight to the shell that most needs you; `global-mode-string` carries `⚠2 ✓1 ●3`
+  counts so the panel need not be open (no desktop notifications, operator decision).
+  Plan and design: `plans/ai-control-center.md`. Owns no package, like `init-claude-loop.el`.
+  Four things are load-bearing. **One pure function owns every transition**
+  (`rata-agent-center--next-state`), driven by agent-shell's event stream through
+  `agent-shell-subscribe-to` on `agent-shell-mode-hook`; `agent-shell-status` is the truth
+  it is reconciled against at render time (`rata-agent-center--reconcile`). **Callbacks
+  only record and schedule** (a 0.2 s debounced render, a no-op while the panel is hidden)
+  — the claude-loop trampoline discipline — and a handler error lands on the entry as
+  `error`, because agent-shell demotes a subscriber error to a `message`. **The panel is a
+  side window that persp must never save:** persp stores each layout's window state,
+  side windows included, and restores it on switch (L-053), so the panel deletes itself
+  in `persp-before-deactivate-functions` (which runs before persp saves) and re-displays
+  in `persp-activated-functions` while pinned; `q` unpins. No shackle rule for
+  `*Agents*` (`rata-test-agent-center-no-shackle-rule`). **agent-shell is never
+  required**: adoption of already-open shells waits on
+  `rata-agent-center--agent-shell-loaded-p` (`featurep`, because `agent-shell-buffers`
+  is an autoload and `fboundp` would load it — L-052). Panel keys (normal state, via
+  `evil-define-key*`): `RET` go (layout, then shell), `o` show, `]]`/`[[` next/previous
+  row that needs you, `TAB`/`za` fold a layout (a folded-layouts set re-applied on every
+  render — tabulated-list has no fold of its own), `c` new shell in the row's project,
+  `K` interrupt, `g r` refresh, `q` close. **A dim activity line under a row** (A2,
+  `rata-agent-center-show-activity`) shows the latest tool call or the start of the
+  latest agent message. It is a second printed line, not a column, via
+  `tabulated-list-printer`: that is only safe because the panel has no sort key, so
+  `tabulated-list-print` never takes its one-line-per-entry incremental path. The line
+  carries the row's `tabulated-list-id`, so row commands work on it, and `]]`/`[[`
+  skip it by its `rata-agent-center-activity` property. An event that changes only
+  the activity renders at most once per `rata-agent-center-activity-interval`, never
+  per chunk. Tests: `rata-test-agent-center-*` in
+  `tests/run-tests.el`, all on synthetic event alists — nothing starts an agent.
+- `init-agent-worktree.el` — one git worktree per agent task (B6 in
+  `plans/ai-agent-powerhouse.md`). `SPC a i c w` / `C` in `*Agents*` cuts `agent/<slug>`
+  from the branch checked out where you are, adds a worktree at
+  `<main checkout>/.agent-shell/worktrees/<slug>`, switches to a persp layout named
+  after the branch (so the panel files the shell there) and starts `agent-shell-new-shell`
+  in it. Upstream's `agent-shell-new-worktree-shell` takes no arguments (random name,
+  directory prompt, branch cut from HEAD), so the `git worktree add` is ours, run
+  through `process-file` with an argument list. Three things are load-bearing. **The
+  base is recorded in the repo config** as `branch.<b>.rataAgentBase`: it is what
+  "merged" means at finish time after a restart, and its presence is the only thing
+  that makes a worktree finishable — the main checkout and hand-made worktrees are
+  refused. **Finish refuses rather than asks** while anything would be lost
+  (`git status --porcelain` non-empty, an unsaved file buffer, `merge-base
+  --is-ancestor` failing), then asks once, and branch deletion (`git branch -d`, never
+  `-D`, never `worktree remove --force`) is a second question. **Transcripts are copied
+  out first:** agent-shell writes them inside the worktree, where `.agent-shell/` is
+  ignored (via the shared `info/exclude`, which this module ensures), so `git worktree
+  remove` would delete them silently (L-061). The panel's group heading shows `repo ⎇
+  branch` through `rata-agent-center-project-label-functions`, computed once at
+  registration. Tests: `rata-test-agent-worktree-*`, against throwaway repositories
+  with `GIT_CONFIG_GLOBAL=/dev/null`; the shell start is stubbed.
+- `init-agent-prompts.el` — a prompt library for agent-shell (C12 in
+  `plans/ai-agent-powerhouse.md`). `SPC a i c P` picks a prompt from `prompts/*.md`
+  (versioned) or `rata-agent-prompt-extra-directory` (per machine, set in `local.el`,
+  wins on a name clash), fills `{{region}} {{file}} {{diff}} {{error}} {{project}}`
+  from the buffer you came from, and **inserts without submitting** into the
+  project's shell (`C-u` picks one; a busy shell gets it through its prompt queue).
+  Owns no package and never requires agent-shell at load. Two things are
+  load-bearing. **Expansion is one pure pass** (`rata-agent-prompt-expand`, a
+  `replace-regexp-in-string` with LITERAL), so a `{{…}}` or `\1` inside your own
+  region is never re-expanded. **A gap stays visible:** a placeholder with no value,
+  or an unknown one, is left as written and named in the echo area
+  (`rata-agent-prompt-unfilled`), never replaced by empty text;
+  `rata-test-agent-prompt-shipped-prompts-are-valid` fails on a shipped prompt that
+  names an unknown placeholder or lacks its `<!-- description -->` line. Tests:
+  `rata-test-agent-prompt-*`, with agent-shell stubbed; nothing starts an agent.
+- `init-elfeed-hn.el` — Hacker News inside elfeed's own entry buffer (D-023, plan
+  `plans/hackernews-reader.md`). Owns no package. One function on `elfeed-show-update-hook`
+  (added in `with-eval-after-load 'elfeed-show`, because elfeed's `defvar` of that hook
+  carries its own two functions and an earlier `add-hook` would drop them) replaces an HN
+  entry's useless content — the word "Comments", or hnrss's URL list — with three sections:
+  the story, a readable copy of the article (`eww-readable-dom`) or the post text, and the
+  whole thread from the Algolia API in one request. An entry is HN only if its content has
+  the shape an HN feed writes or its link is an item URL (`rata-elfeed-hn-item-id`, pure),
+  so a blog post linking a discussion is left alone, and every non-HN entry is
+  byte-identical. Four things are load-bearing. **`rata-elfeed-hn--retrieve` is the only
+  network call**, through curl when it is on PATH (url.el does not fall back from an
+  unrouted IPv6 address, so articles timed out — FAIL-0024; shr's own image fetches are
+  recorded during rendering and sent through it too), always answers from a timer with a result plist, never a signal; the
+  harness overrides it to fail, and tests use `rata-test-hn--with-net` with fixtures under
+  `tests/fixtures/hn/`. **Replies are guarded** (`rata-elfeed-hn--guard`): drawn only if the
+  buffer still shows the same thing under the same `rata-elfeed-hn--generation`, which every
+  redraw bumps. **Sections are found by the `rata-elfeed-hn-section` text property** and
+  replaced whole, so the article and the thread draw in whichever order they arrive.
+  **Comment text goes through `shr` only** — never Org, never `read`. Keys live in
+  `rata-elfeed-hn-thread-mode`, a minor mode the drawing switches on and off (the entry
+  buffer is reused for every entry): `za zc zo zM zR` fold replies (invisibility overlays
+  computed from `rata-elfeed-hn-depth`), `zj zk zu` move by depth, `, c` refetch, `, o`
+  article, `, O` thread in the browser, `, y` permalink; elfeed's `]]` `[[` `TAB` are left
+  alone. `browse-url` routes item URLs to a `*HN <id>*` buffer (`rata-elfeed-hn-open-item`,
+  also `SPC a r h`). Threads over `rata-elfeed-hn-fold-threshold` open folded. Tests:
+  `rata-test-hn-*`, through the real `elfeed-show-entry` over an in-memory `elfeed-db`.
 - `init-mail.el` — email under `SPC a e`: mu4e reading a Maildir that `mbsync` fills from
   Proton Mail Bridge, `smtpmail` sending through Bridge's SMTP port (D-021). Three things
   are structural. **mu4e is not an elpaca package**: its elisp is version-locked to the `mu`

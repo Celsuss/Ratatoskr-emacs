@@ -44,6 +44,24 @@
                          fn verb endpoint))
                 '((name . rata-test-no-network)))))
 
+;; The same fence for stdin.  In batch every minibuffer read -- `y-or-n-p',
+;; `yes-or-no-p', `read-string', `read-passwd', `completing-read' -- reads
+;; standard input: EOF when it is /dev/null, a silent hang when it is a socket
+;; or a TTY.  `(require 'aidermacs)' did exactly that: its vterm backend
+;; requires vterm, and vterm asks "Compile vterm-module? (y or n)" at load, so
+;; the suite sat at test 83 of 109 until killed (FAIL-0022).  Three readers
+;; are fenced, not one: `read-string' and `yes-or-no-p' are C primitives that
+;; reach the minibuffer reader inside C, where advice on `read-from-minibuffer'
+;; is invisible -- `y-or-n-p' goes through `read-string' in batch, `yes-or-no-p'
+;; through neither.  Probed: all five prompts above signal this error.  A test
+;; that needs an answer stubs the reader with `cl-letf'.
+(dolist (reader '(read-from-minibuffer read-string yes-or-no-p))
+  (advice-add reader :override
+              (lambda (prompt &rest _)
+                (error "rata-test: something prompted on stdin (%S); stub it in the test"
+                       prompt))
+              '((name . rata-test-no-stdin))))
+
 ;;; ============================================================
 ;;; Keybinding extraction helpers
 ;;; ============================================================
@@ -210,6 +228,11 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC f f" . find-file)
     ("SPC j d" . xref-find-definitions)
     ("SPC J j" . jira-issues)
+    ("SPC a i o" . rata-agent-center-toggle)
+    ("SPC a i n" . rata-agent-center-next-attention)
+    ("SPC a i c w" . rata-agent-worktree-new)
+    ("SPC a i c W" . rata-agent-worktree-finish)
+    ("SPC a i c P" . rata-agent-prompt)
     ("SPC J l" . rata-jira-org-link-heading)
     ("SPC o b d d" . rata-dialogic-insert-block)
     ("SPC o b e" . org-hugo-export-wim-to-md)
@@ -227,7 +250,8 @@ so deferred packages (loaded via :commands) pass correctly."
     ;; explains what is missing instead of the key being dead).
     ("SPC a e e" . rata-mail)
     ("SPC a e u" . rata-mail-update)
-    ("SPC a e d" . rata-mail-doctor))
+    ("SPC a e d" . rata-mail-doctor)
+    ("SPC a r h" . rata-elfeed-hn-open-item))
   "Leader keys that must resolve immediately after init, with their commands.
 Not exhaustive — a contract for the keys most likely to be broken by the
 failure mode in .are/memory/failures/FAIL-0009.md.  Extend it when a
@@ -555,6 +579,86 @@ default keyword set has none, so the fallback is DONE plus a tag."
     (should (string-match-p "DONE" (buffer-string)))
     (should (string-match-p ":skipped:" (buffer-string)))))
 
+(ert-deftest rata-test-claude-loop-scan-phase-headings ()
+  "A plan's Phase/Task headings are tasks; closed, fenced and look-alikes are not."
+  (with-temp-buffer
+    (insert "# Plan\n"                                 ; 1
+            "## 0. Target\n"                           ; 2 not a task
+            "## Tasks\n"                               ; 3 `Tasks' is not `Task'
+            "## Phase 0 — Scaffold [done]\n"           ; 4 closed
+            "## Phase 1 — Client\n"                    ; 5 open
+            "```sh\n# Task: not a heading\n```\n"      ; 6-8 fenced
+            "### Task 1.1 — probe  \n"                 ; 9 inside Phase 1: detail
+            "## phase lowercase\n"                     ; 10 case-sensitive
+            "## Phase 7 — Deferred [skipped]\n"        ; 11 closed
+            "### Task 7.1 — orphan\n"                  ; 12 inside closed Phase 7
+            "## Phases\n"                              ; 13 not a task
+            "### Phase 8 — Nested  \n")                ; 14 open, any level
+    (should (equal (rata-claude-loop--open-tasks)
+                   '((5 . "Phase 1 — Client") (14 . "Phase 8 — Nested"))))
+    (should (equal (rata-claude-loop--scan-buffer) '(5 . "Phase 1 — Client")))
+    (should (= (rata-claude-loop--count-in-buffer) 2))))
+
+(ert-deftest rata-test-claude-loop-nested-heading-runs-once ()
+  "A Task heading under a Phase is the Phase's detail, never a second task.
+Otherwise its work is sent once inside the Phase's prompt and again on its
+own -- and a findings subsection such as `#### Phase 0 findings' becomes
+work to do."
+  (with-temp-buffer
+    (insert "## Phase 1 — Client\n"
+            "### Task 1.1 — probe\n"
+            "#### Phase 1 findings\n"
+            "## Phase 2 — Logs\n")
+    (should (equal (rata-claude-loop--open-tasks)
+                   '((1 . "Phase 1 — Client") (4 . "Phase 2 — Logs"))))
+    (should (string-match-p "Task 1.1" (rata-claude-loop--body-at 1)))
+    ;; Closing the outer heading does not promote the inner one.
+    (should (rata-claude-loop--mark-in-buffer 1 'done))
+    (should (equal (rata-claude-loop--open-tasks) '((4 . "Phase 2 — Logs"))))))
+
+(ert-deftest rata-test-claude-loop-checkboxes-win-over-headings ()
+  "Any checklist item, even a ticked one, turns heading tasks off.
+Otherwise a phase would be sent with its sub-boxes as detail, and each of
+those boxes would then run again as a task of its own."
+  (with-temp-buffer
+    (insert "## Phase 1 — Client\n- [X] done already\n")
+    (should-not (rata-claude-loop--open-tasks))
+    (erase-buffer)
+    (insert "## Phase 1 — Client\n- [ ] sub-task\n")
+    (should (equal (rata-claude-loop--open-tasks) '((2 . "sub-task")))))
+  (let ((rata-claude-loop-heading-regexp nil))
+    (with-temp-buffer
+      (insert "## Phase 1 — Client\n")
+      (should-not (rata-claude-loop--open-tasks)))))
+
+(ert-deftest rata-test-claude-loop-mark-heading ()
+  "A heading task is closed by appending a marker, which closes it for the scan."
+  (with-temp-buffer
+    (insert "## Phase 0 — A  \n## Phase 1 — B\n")
+    (should (rata-claude-loop--mark-in-buffer 1 'done))
+    (should (rata-claude-loop--mark-in-buffer 2 'skipped))
+    (should (equal (buffer-string)
+                   "## Phase 0 — A [done]\n## Phase 1 — B [skipped]\n"))
+    (should-not (rata-claude-loop--open-tasks))
+    ;; Already closed: no change, so the progress guard is never fooled.
+    (should-not (rata-claude-loop--mark-in-buffer 1 'done))
+    (should (equal (rata-claude-loop--find-task-line 1 "Phase 0 — A") nil))))
+
+(ert-deftest rata-test-claude-loop-body-heading ()
+  "A heading task's detail is its section, subsections and fences included."
+  (with-temp-buffer
+    (insert "## Phase 1 — Client\n"
+            "intro line\n"
+            "### Verification\n"
+            "run the tests\n"
+            "```sh\n# not a heading\n```\n"
+            "## Phase 2 — Logs\n"
+            "not part of phase 1\n")
+    (should (equal (rata-claude-loop--body-at 1)
+                   (concat "intro line\n### Verification\nrun the tests\n"
+                           "```sh\n# not a heading\n```")))
+    (should (equal (rata-claude-loop--body-at 8) "not part of phase 1"))))
+
 (ert-deftest rata-test-claude-loop-project-root-refuses-home ()
   "A repository marker in $HOME must not make $HOME the project root."
   (should (equal (rata-claude-loop--project-root (expand-file-name "~/tasks.md"))
@@ -666,6 +770,62 @@ carries the `result' event the loop makes every decision from."
                                            . (((tool_name . "Edit"))
                                               ((tool_name . "Bash"))))))
                                0))))))
+
+(ert-deftest rata-test-claude-loop-cli-attempt-record ()
+  "The CLI's result event and exit code become the backend-neutral record."
+  (should (equal (rata-claude-loop--cli-attempt
+                  '((subtype . "error_max_turns") (is_error . t)
+                    (permission_denials . (((tool_name . "Edit")))))
+                  1)
+                 '(:result-p t :subtype "error_max_turns" :is-error t
+                   :exit-code 1 :denials (((tool_name . "Edit"))))))
+  (should (equal (rata-claude-loop--cli-attempt nil 0)
+                 '(:result-p nil :subtype nil :is-error nil
+                   :exit-code 0 :denials nil))))
+
+(ert-deftest rata-test-claude-loop-classify-attempt-is-backend-neutral ()
+  "Classification reads the record, never a backend's wire format.
+A backend with no process reports no exit code; that must not crash the
+classifier, and a denial in the record must count exactly as one in a
+CLI result event does."
+  (let ((rata-claude-loop--state nil))
+    (should-not (rata-claude-loop--classify-attempt
+                 '(:result-p t :subtype "success" :exit-code nil)))
+    (should (eq 'no-result
+                (car (rata-claude-loop--classify-attempt
+                      '(:result-p nil :exit-code nil)))))
+    (let ((verdict (rata-claude-loop--classify-attempt
+                    '(:result-p t :subtype "success" :exit-code nil
+                      :denials (((tool_name . "Bash")
+                                 (tool_input . ((command . "just test")))))
+                      :report done))))
+      (should (eq 'unverified (car verdict)))
+      (should (string-match-p "Bash(just:\\*)" (cdr verdict))))
+    (should (eq 'blocked
+                (car (rata-claude-loop--classify-attempt
+                      '(:result-p t :subtype "success"
+                        :report blocked :report-reason "no creds")))))))
+
+(ert-deftest rata-test-claude-loop-backend-dispatch ()
+  "Calls go to the run's backend, which outranks the configured one."
+  (let* ((calls nil)
+         (rata-claude-loop--backends
+          `((one :live-p ,(lambda () (push 'one calls) 'one-live))
+            (two :live-p ,(lambda () (push 'two calls) 'two-live))))
+         (rata-claude-loop-backend 'one)
+         (rata-claude-loop--state nil))
+    (should (eq (rata-claude-loop--backend-call :live-p) 'one-live))
+    (setq rata-claude-loop--state (list :backend 'two))
+    (should (eq (rata-claude-loop--backend-call :live-p) 'two-live))
+    (should (equal calls '(two one)))
+    ;; An op a backend lacks is a bug, said as one.
+    (should-error (rata-claude-loop--backend-call :start "t" "f" nil))
+    (setq rata-claude-loop--state (list :backend 'gone))
+    (should-error (rata-claude-loop--backend-call :live-p) :type 'user-error))
+  ;; The shipped backend implements every op the contract names.
+  (let ((cli (cdr (assq 'cli rata-claude-loop--backends))))
+    (dolist (op '(:check :start :retry :attempt :live-p :stop :kill))
+      (should (functionp (plist-get cli op))))))
 
 (ert-deftest rata-test-claude-loop-denial-pattern ()
   "A denial suggests the narrowest --allowedTools pattern that would fit it."
@@ -1902,6 +2062,36 @@ Date (@), feed (=) and title (~) terms are not tags and are skipped."
         (push (substring term 1) tags)))
     tags))
 
+(ert-deftest rata-test-elfeed-toggle-unread-filter-preserves-view-terms ()
+  "The all-posts toggle must change only Elfeed's unread term."
+  (should (equal (rata-elfeed--toggle-unread-filter
+                  "@6-months-ago +unread +emacs -news")
+                 "@6-months-ago +emacs -news"))
+  (should (equal (rata-elfeed--toggle-unread-filter
+                  "@6-months-ago +emacs -news")
+                 "@6-months-ago +emacs -news +unread")))
+
+(ert-deftest rata-test-elfeed-toggle-unread-filter-command ()
+  "The interactive toggle updates Elfeed's filter and reports its state."
+  (let ((elfeed-search-filter "@6-months-ago +unread +emacs")
+        filter message)
+    (cl-letf (((symbol-function 'elfeed-search-set-filter)
+               (lambda (value) (setq filter value)))
+              ((symbol-function 'message)
+               (lambda (format-string &rest args)
+                 (setq message (apply #'format format-string args)))))
+      (rata-elfeed-toggle-unread-filter))
+    (should (equal filter "@6-months-ago +emacs"))
+    (should (equal message "Elfeed: showing all posts"))))
+
+(ert-deftest rata-test-elfeed-toggle-unread-filter-key-is-live ()
+  "`f R' must reach the unread/all-posts toggle in Elfeed search buffers."
+  (skip-unless (require 'elfeed nil t))
+  (rata-elfeed-bind-view-keys)
+  (should (eq (lookup-key (evil-get-auxiliary-keymap elfeed-search-mode-map 'normal)
+                          (kbd "f R"))
+              'rata-elfeed-toggle-unread-filter)))
+
 (ert-deftest rata-test-elfeed-root-tag-present ()
   "feeds.org must carry the tag `elfeed-org' looks for.
 `rmh-elfeed-org-tree-id' is never set in this config, so the default
@@ -2002,6 +2192,843 @@ two upstream entry points have to keep existing across package updates."
   (should (fboundp 'elfeed-db-save))
   (skip-unless (require 'elfeed-org nil t))
   (should (fboundp 'rmh-elfeed-org-process-advice)))
+
+;;; ============================================================
+;;; Test — Hacker News in elfeed (lisp/init-elfeed-hn.el)
+;;; ============================================================
+;;
+;; Nothing here reaches hn.algolia.com or an article's site: the fence below
+;; makes `rata-elfeed-hn--retrieve' -- the module's only network function --
+;; fail the calling test, and every test that needs a reply swaps in
+;; `rata-test-hn--with-net', which answers from tests/fixtures/hn/.
+
+(require 'init-elfeed-hn)
+
+(advice-add 'rata-elfeed-hn--retrieve :override
+            (lambda (url &rest _)
+              (error "rata-test: `rata-elfeed-hn--retrieve' (%s) would reach the network; stub it in the test"
+                     url))
+            '((name . rata-test-no-network)))
+
+(defun rata-test-hn--fixture (name)
+  "Return the contents of tests/fixtures/hn/NAME as a string."
+  (with-temp-buffer
+    (insert-file-contents
+     (expand-file-name (concat "tests/fixtures/hn/" name) user-emacs-directory))
+    (buffer-string)))
+
+(defun rata-test-hn--json (name)
+  "Parse fixture NAME the way `rata-elfeed-hn--fetch-json' does."
+  (json-parse-string (rata-test-hn--fixture name)
+                     :object-type 'alist :array-type 'list
+                     :null-object nil :false-object nil))
+
+(defvar rata-test-hn--pending nil
+  "Requests the fake network has received and not yet answered: (URL CALLBACK).")
+
+(defvar rata-test-hn--requests nil
+  "Every URL the fake network was asked for, oldest first.")
+
+(defvar rata-test-hn--caps nil
+  "The size cap each request was made with: an alist of URL to MAX-BYTES.")
+
+(defvar rata-test-hn--routes nil
+  "The fake network's answers: an alist of URL to result plist.")
+
+(defmacro rata-test-hn--with-net (routes &rest body)
+  "Run BODY with the network replaced by ROUTES, an alist of URL to result.
+A request is held until `rata-test-hn--flush', so a test controls when a
+reply arrives.  An unrouted URL answers (:error \"no fixture\")."
+  (declare (indent 1))
+  `(let ((rata-test-hn--pending nil)
+         (rata-test-hn--requests nil)
+         (rata-test-hn--caps nil)
+         (rata-test-hn--routes ,routes))
+     (cl-letf (((symbol-function 'rata-elfeed-hn--retrieve)
+                (lambda (url max callback)
+                  (setq rata-test-hn--requests (append rata-test-hn--requests (list url)))
+                  (push (cons url max) rata-test-hn--caps)
+                  (push (list url callback) rata-test-hn--pending))))
+       (clrhash rata-elfeed-hn--cache)
+       (clrhash rata-elfeed-hn--article-cache)
+       ,@body)))
+
+(defun rata-test-hn--drain ()
+  "Run the timers a reply is delivered from."
+  (dotimes (_ 5) (accept-process-output nil 0.01)))
+
+(defun rata-test-hn--flush ()
+  "Answer every pending request from `rata-test-hn--routes', then drain timers."
+  (while rata-test-hn--pending
+    (let ((requests (reverse rata-test-hn--pending)))
+      (setq rata-test-hn--pending nil)
+      (pcase-dolist (`(,url ,callback) requests)
+        (funcall callback (or (cdr (assoc url rata-test-hn--routes))
+                              (list :error "no fixture"))))
+      (rata-test-hn--drain))))
+
+(defun rata-test-hn--ok (body &optional type)
+  "A successful fake response carrying BODY, of content TYPE."
+  (list :ok t :type (or type "application/json") :body body))
+
+(defun rata-test-hn--api (id)
+  "The Algolia URL for item ID."
+  (concat rata-elfeed-hn-api-url (number-to-string id)))
+
+(ert-deftest rata-test-hn-item-id-from-each-feed-shape ()
+  "The item id comes out of what elfeed already stored, for both HN feeds.
+And only from the shapes those feeds write: a blog post that links to an
+HN discussion is not an HN entry, or its article would be replaced."
+  ;; news.ycombinator.com/rss: the content is the one link.
+  (should (equal (rata-elfeed-hn-item-id
+                  "<a href=\"https://news.ycombinator.com/item?id=49283063\">Comments</a>"
+                  "https://example.com/article")
+                 49283063))
+  ;; hnrss.org, as stored in elfeed-db on 2026-10-06.
+  (should (equal (rata-elfeed-hn-item-id
+                  (concat "<p>Article URL: <a href=\"https://www.nature.com/a\">https://www.nature.com/a</a></p>\n"
+                          "<p>Comments URL: <a href=\"https://news.ycombinator.com/item?id=49312008\">"
+                          "https://news.ycombinator.com/item?id=49312008</a></p>\n<p>Points: 192</p>")
+                  "https://www.nature.com/a")
+                 49312008))
+  ;; Ask HN: the link is the item itself.
+  (should (equal (rata-elfeed-hn-item-id "<p>What do you use?</p>"
+                                         "https://news.ycombinator.com/item?id=123")
+                 123))
+  ;; Not HN.
+  (should-not (rata-elfeed-hn-item-id
+               "Discussed <a href=\"https://news.ycombinator.com/item?id=5\">on HN</a>."
+               "https://blog.example.com/post"))
+  (should-not (rata-elfeed-hn-item-id nil nil))
+  (should-not (rata-elfeed-hn-item-id "" "https://news.ycombinator.com/item?id=5&p=2")))
+
+(ert-deftest rata-test-hn-parse-thread-edge-cases ()
+  "Order, depth, deleted comments and counts from a hand-built reply."
+  (let* ((thread (rata-elfeed-hn--thread-from-json (rata-test-hn--json "thread-edge.json")))
+         (top (plist-get thread :comments)))
+    (should (equal (plist-get thread :title) "Show HN: A test thread"))
+    (should (equal (plist-get thread :points) 42))
+    (should (equal (plist-get thread :url) "https://example.com/post"))
+    ;; The poll option is not a comment; order is the reply's order.
+    (should (equal (mapcar (lambda (c) (plist-get c :id)) top) '(1001 1004 1006)))
+    ;; A deleted comment with no replies is gone ...
+    (should (equal (mapcar (lambda (c) (plist-get c :id))
+                           (plist-get (nth 0 top) :children))
+                   '(1002)))
+    ;; ... one with a live reply stays, so the reply keeps its parent.
+    (should (plist-get (nth 1 top) :deleted))
+    (should (equal (plist-get (car (plist-get (nth 1 top) :children)) :author) "carol"))
+    (should (equal (plist-get (car (plist-get (nth 1 top) :children)) :depth) 1))
+    (should (equal (plist-get (nth 0 top) :depth) 0))
+    (should (equal (plist-get (nth 0 top) :replies) 1))
+    (should (equal (plist-get (nth 1 top) :replies) 1))
+    ;; alice, bob, carol, dave -- the placeholder is not a comment.
+    (should (equal (plist-get thread :count) 4))))
+
+(ert-deftest rata-test-hn-parse-real-thread ()
+  "A reply captured from the live API parses whole, in order.
+tests/fixtures/hn/item-8863.json is the Dropbox launch thread, captured
+2026-10-06: 71 comments, none deleted."
+  (let* ((json (rata-test-hn--json "item-8863.json"))
+         (thread (rata-elfeed-hn--thread-from-json json)))
+    (should (equal (plist-get thread :count) 71))
+    (should (equal (plist-get thread :author) "dhouston"))
+    (should (equal (mapcar (lambda (c) (plist-get c :id)) (plist-get thread :comments))
+                   (mapcar (lambda (c) (alist-get 'id c)) (alist-get 'children json))))))
+
+(ert-deftest rata-test-hn-fetch-json-results-not-signals ()
+  "A good reply parses; a bad body and a failed request are results."
+  (rata-test-hn--with-net
+      (list (cons (rata-test-hn--api 1000) (rata-test-hn--ok (rata-test-hn--fixture "thread-edge.json")))
+            (cons (rata-test-hn--api 1) (rata-test-hn--ok "<html>not json"))
+            (cons (rata-test-hn--api 2) (list :error "HTTP 503")))
+    (let (got)
+      (dolist (id '(1000 1 2))
+        (rata-elfeed-hn--fetch-json id (lambda (r) (push (cons id r) got))))
+      (rata-test-hn--flush)
+      (should (equal (alist-get 'title (plist-get (alist-get 1000 got) :ok))
+                     "Show HN: A test thread"))
+      (should (string-prefix-p "bad reply" (plist-get (alist-get 1 got) :error)))
+      (should (equal (alist-get 2 got) '(:error "HTTP 503"))))))
+
+(ert-deftest rata-test-hn-fetch-thread-caches-and-reports-failure ()
+  "A thread is fetched once per session unless forced; a failure is a result."
+  (rata-test-hn--with-net
+      (list (cons (rata-test-hn--api 2000) (rata-test-hn--ok (rata-test-hn--fixture "ask-2000.json"))))
+    (let (got)
+      (rata-elfeed-hn--fetch-thread 2000 nil (lambda (r) (push r got)))
+      (rata-test-hn--flush)
+      (rata-elfeed-hn--fetch-thread 2000 nil (lambda (r) (push r got)))
+      (rata-test-hn--drain)
+      (should (= (length got) 2))
+      (should (equal (plist-get (plist-get (car got) :ok) :count) 1))
+      (should (equal (length rata-test-hn--requests) 1))
+      (rata-elfeed-hn--fetch-thread 2000 t #'ignore)
+      (should (equal (length rata-test-hn--requests) 2))
+      ;; Unrouted: the request fails, and the failure arrives as a value.
+      (setq got nil)
+      (rata-elfeed-hn--fetch-thread 99 nil (lambda (r) (push r got)))
+      (rata-test-hn--flush)
+      (should (equal got '((:error "no fixture")))))))
+
+(ert-deftest rata-test-hn-guard-drops-stale-replies ()
+  "A reply for a buffer that has moved on, or died, does nothing."
+  (let ((buf (generate-new-buffer " *hn-guard*"))
+        (ran nil))
+    (unwind-protect
+        (with-current-buffer buf
+          (setq rata-elfeed-hn--key 'entry-a)
+          (let ((current (rata-elfeed-hn--guard buf (lambda (x) (push x ran))))
+                (bumped (rata-elfeed-hn--guard buf (lambda (x) (push x ran)))))
+            (funcall current 1)
+            (should (equal ran '(1)))
+            ;; `g', or `n' to another HN entry: the redraw bumps the generation.
+            (cl-incf rata-elfeed-hn--generation)
+            (funcall bumped 2)
+            (should (equal ran '(1)))
+            ;; Same generation, different entry.
+            (let ((g (rata-elfeed-hn--guard buf (lambda (x) (push x ran)))))
+              (setq rata-elfeed-hn--key 'entry-b)
+              (funcall g 3)
+              (should (equal ran '(1))))
+            ;; An error inside is a message, never a signal out of a callback.
+            (let ((g (rata-elfeed-hn--guard buf (lambda (_) (error "boom")))))
+              (should-not (condition-case nil (progn (funcall g 4) nil) (error t))))
+            (let ((g (rata-elfeed-hn--guard buf (lambda (x) (push x ran)))))
+              (kill-buffer buf)
+              (funcall g 5)
+              (should (equal ran '(1))))))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest rata-test-hn-read-response ()
+  "url.el's response buffer becomes a result: status, cap, charset."
+  (cl-flet ((response (code ctype body &optional max)
+              (with-temp-buffer
+                (set-buffer-multibyte nil)
+                (insert "HTTP/1.1 " (number-to-string code) " X\nContent-Type: " ctype "\n\n")
+                (setq-local url-http-end-of-headers (1- (point)))
+                (insert (encode-coding-string body 'utf-8))
+                (setq-local url-http-response-status code)
+                (setq-local url-http-content-type ctype)
+                (rata-elfeed-hn--read-response nil max))))
+    (should (equal (response 200 "text/html; charset=UTF-8" "<p>héllo</p>")
+                   '(:ok t :type "text/html" :body "<p>héllo</p>")))
+    (should (equal (response 404 "text/html" "gone") '(:error "HTTP 404")))
+    (should (equal (plist-get (response 200 "text/html" (make-string 3000 ?x) 2048) :error)
+                   "over 2 KB"))
+    (should (equal (rata-elfeed-hn--read-response '(:error (error http 500)) nil)
+                   '(:error "HTTP 500")))))
+
+(defconst rata-test-hn--feed-url "https://news.ycombinator.com/rss")
+
+(defmacro rata-test-hn--with-elfeed (&rest body)
+  "Run BODY with elfeed loaded over an in-memory database.
+`elfeed-db' is bound non-nil, so `elfeed-db-ensure' never loads the real
+database and nothing is written back; entries are shown with the
+mail-style renderer into the current window's buffer list, not a popup."
+  (declare (indent 0))
+  `(progn
+     (skip-unless (require 'elfeed nil t))
+     (require 'elfeed-show)
+     (require 'shr)
+     (let ((elfeed-db (list :version 4))
+           (elfeed-db-feeds (make-hash-table :test 'equal))
+           (elfeed-show-entry-switch #'set-buffer)
+           (elfeed-show-unique-buffers nil)
+           (elfeed-show-refresh-function #'elfeed-show-refresh--mail-style)
+           ;; Batch has no font metrics, so pixel filling breaks every word
+           ;; onto its own line; character filling is what the asserts read.
+           (shr-use-fonts nil))
+       (puthash rata-test-hn--feed-url
+                (elfeed-feed--create :id rata-test-hn--feed-url :url rata-test-hn--feed-url
+                                     :title "Hacker News")
+                elfeed-db-feeds)
+       (unwind-protect (progn ,@body)
+         (when (get-buffer "*elfeed-entry*")
+           (kill-buffer "*elfeed-entry*"))))))
+
+(defun rata-test-hn--entry (id title link content)
+  "An elfeed entry from the news.ycombinator.com feed, not stored anywhere."
+  (elfeed-entry--create :id (cons "news.ycombinator.com" (format "%s" id))
+                        :title title :link link :date 1700000000
+                        :content content :content-type 'html
+                        :feed-id rata-test-hn--feed-url :tags '(hn)))
+
+(defun rata-test-hn--rss-entry (id title)
+  "An entry shaped like news.ycombinator.com/rss: the content is one link."
+  (rata-test-hn--entry
+   id title "https://example.com/post"
+   (format "<a href=\"https://news.ycombinator.com/item?id=%d\">Comments</a>" id)))
+
+(defun rata-test-hn--blog-entry ()
+  "An entry from some other feed."
+  (rata-test-hn--entry "blog" "A blog post" "https://blog.example.com/post"
+                       "<p>Hello <b>world</b>, discussed <a href=\"https://news.ycombinator.com/item?id=5\">on HN</a>.</p>"))
+
+(defun rata-test-hn--show (entry)
+  "Show ENTRY through the real `elfeed-show-entry'; return its buffer."
+  (elfeed-show-entry entry)
+  (get-buffer "*elfeed-entry*"))
+
+(defun rata-test-hn--blocks ()
+  "Return (ID DEPTH GUTTER-WIDTH) per comment block in the buffer, in order."
+  (let (out (pos (point-min)))
+    (while (setq pos (text-property-not-all pos (point-max) 'rata-elfeed-hn-id nil))
+      (push (list (get-text-property pos 'rata-elfeed-hn-id)
+                  (get-text-property pos 'rata-elfeed-hn-depth)
+                  (length (get-text-property pos 'line-prefix)))
+            out)
+      (setq pos (or (next-single-property-change pos 'rata-elfeed-hn-id) (point-max))))
+    (nreverse out)))
+
+(defun rata-test-hn--block-text (id)
+  "Return comment ID's block as a string, with its properties."
+  (let* ((start (text-property-any (point-min) (point-max) 'rata-elfeed-hn-id id))
+         (end (next-single-property-change start 'rata-elfeed-hn-id nil (point-max))))
+    (buffer-substring start end)))
+
+(ert-deftest rata-test-hn-hook-keeps-elfeeds-own ()
+  "Our function joins `elfeed-show-update-hook' without displacing elfeed's.
+`add-hook' before elfeed-show loads would bind the variable first, and
+elfeed's `defvar' -- which holds its readable and fetch-link functions --
+would then never take effect."
+  (should (featurep 'init-elfeed-hn))
+  (skip-unless (require 'elfeed-show nil t))
+  (should (memq 'rata-elfeed-hn-show-update elfeed-show-update-hook))
+  (should (memq 'elfeed-show-auto-readable elfeed-show-update-hook))
+  (should (memq 'elfeed-show-auto-fetch-link elfeed-show-update-hook)))
+
+(ert-deftest rata-test-hn-entry-shows-thread ()
+  "An HN entry draws, after elfeed's own text, one block per comment."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net
+        (list (cons (rata-test-hn--api 1000)
+                    (rata-test-hn--ok (rata-test-hn--fixture "thread-edge.json"))))
+      (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+        (should (string-match-p "Comments: loading…" (buffer-string)))
+        (rata-test-hn--flush)
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          (should-not (string-match-p "loading…" text))
+          (should (string-match-p "^4 comments · 42 points$" text))
+          (should (< (string-match "^Title: Show HN" text)
+                     (string-match "^4 comments" text))))
+        ;; Live comments in order, two gutter columns per level; the deleted
+        ;; parent of carol's reply stays as a placeholder.
+        (should (equal (rata-test-hn--blocks)
+                       '((1001 0 0) (1002 1 2) (1004 0 0) (1005 1 2) (1006 0 0))))
+        (should (string-prefix-p "[deleted]" (rata-test-hn--block-text 1004)))
+        (should (string-match-p "\\`alice · .* ago · 1 reply\n"
+                                (substring-no-properties (rata-test-hn--block-text 1001))))
+        (should (string-match-p "First comment, with emphasis and a link"
+                                (substring-no-properties (rata-test-hn--block-text 1001))))))))
+
+(ert-deftest rata-test-hn-comment-html-is-inert ()
+  "Comment text is drawn as text: no Org link, no script, no Lisp."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net
+        (list (cons (rata-test-hn--api 1000)
+                    (rata-test-hn--ok (rata-test-hn--fixture "thread-edge.json"))))
+      (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+        (rata-test-hn--flush)
+        (let* ((block (rata-test-hn--block-text 1006))
+               (at (string-match (regexp-quote "[[elisp:(delete-file \"x\")]]") block)))
+          (should at)
+          (should-not (string-match-p "alert" block))
+          (should (string-match-p "(x)" block))
+          (dolist (prop '(shr-url keymap button action follow-link))
+            (should-not (get-text-property at prop block))))))))
+
+(ert-deftest rata-test-hn-non-hn-entry-untouched ()
+  "Any other entry draws exactly as it does without this module."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net nil
+      (let* ((entry (rata-test-hn--blog-entry))
+             (with (with-current-buffer (rata-test-hn--show entry) (buffer-string)))
+             (without (let ((elfeed-show-update-hook
+                             (remq 'rata-elfeed-hn-show-update elfeed-show-update-hook)))
+                        (with-current-buffer (rata-test-hn--show entry) (buffer-string)))))
+        (should (equal-including-properties with without))
+        (should-not rata-test-hn--requests)))))
+
+(ert-deftest rata-test-hn-reply-for-a-left-entry-is-dropped ()
+  "Moving on before the reply arrives leaves the new entry clean."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net
+        (list (cons (rata-test-hn--api 1000)
+                    (rata-test-hn--ok (rata-test-hn--fixture "thread-edge.json")))
+              (cons (rata-test-hn--api 2000)
+                    (rata-test-hn--ok (rata-test-hn--fixture "ask-2000.json"))))
+      ;; HN entry, then a blog entry, then the reply.
+      (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+      (with-current-buffer (rata-test-hn--show (rata-test-hn--blog-entry))
+        (rata-test-hn--flush)
+        (should-not (text-property-not-all (point-min) (point-max) 'rata-elfeed-hn-section nil))
+        (should-not (string-match-p "Comments:\\|comments ·" (buffer-string))))
+      ;; HN entry, then another HN entry: only the second thread is drawn.
+      (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+      (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 2000 "Ask HN"))
+        (rata-test-hn--flush)
+        (should (equal (rata-test-hn--blocks) '((2001 0 0))))
+        (should (= 1 (how-many "^1 comment · 7 points$" (point-min) (point-max))))))))
+
+(ert-deftest rata-test-hn-failed-fetch-says-so ()
+  "A failed fetch is a line in the buffer naming the reason and the retry key."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net
+        (list (cons (rata-test-hn--api 1000) (list :error "HTTP 503")))
+      (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+        (rata-test-hn--flush)
+        (should (string-match-p "^Comments: fetch failed (HTTP 503) — , c to retry$"
+                                (buffer-substring-no-properties (point-min) (point-max))))))))
+
+(defun rata-test-hn--text ()
+  "The current buffer's text, without properties."
+  (buffer-substring-no-properties (point-min) (point-max)))
+
+(defun rata-test-hn--section-text (name)
+  "The text of section NAME in the current buffer, or nil."
+  (when-let* ((b (rata-elfeed-hn--section-bounds name)))
+    (buffer-substring-no-properties (car b) (cdr b))))
+
+(defconst rata-test-hn--article-url "https://example.com/post")
+
+(defun rata-test-hn--story-routes (article)
+  "Routes for the edge thread, with ARTICLE as the reply for its article."
+  (list (cons (rata-test-hn--api 1000)
+              (rata-test-hn--ok (rata-test-hn--fixture "thread-edge.json")))
+        (cons rata-test-hn--article-url article)))
+
+(ert-deftest rata-test-hn-readable-text ()
+  "eww's reader view keeps an article and rejects a cookie wall."
+  (let ((dom (rata-elfeed-hn--readable-text (rata-test-hn--fixture "article.html"))))
+    (should dom)
+    (should (string-match-p "three properties we now think" (dom-texts dom))))
+  (should-not (rata-elfeed-hn--readable-text (rata-test-hn--fixture "cookie-wall.html")))
+  (should-not (rata-elfeed-hn--readable-text "")))
+
+(ert-deftest rata-test-hn-story-and-article-replace-comments-word ()
+  "A Comments-only entry shows the story and the readable article instead."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net
+        (rata-test-hn--story-routes
+         (rata-test-hn--ok (rata-test-hn--fixture "article.html") "text/html"))
+      (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+        ;; Both requests are out at once: the article does not wait for the thread.
+        (should (equal (sort (copy-sequence rata-test-hn--requests) #'string<)
+                       (sort (list (rata-test-hn--api 1000) rata-test-hn--article-url) #'string<)))
+        (should (equal (alist-get rata-test-hn--article-url rata-test-hn--caps nil nil #'equal)
+                       rata-elfeed-hn-article-max-bytes))
+        (rata-test-hn--flush)
+        (let ((story (rata-test-hn--section-text 'story))
+              (text (rata-test-hn--text)))
+          (should (string-match-p "^Show HN: A test thread$" story))
+          (should (string-match-p "^example\\.com · 42 points · by op · .* ago · 4 comments$" story))
+          (should (string-match-p "three properties we now think"
+                                  (replace-regexp-in-string "\n" " " (rata-test-hn--section-text 'article))))
+          ;; elfeed's own content -- the one word -- is gone.
+          (should-not (string-match-p "^Comments$" text))
+          (should (string-match-p "^4 comments · 42 points$" text))
+          (should (< (string-match "Show HN: A test thread\n" text)
+                     (string-match "three properties" text)
+                     (string-match "^4 comments" text))))))))
+
+(ert-deftest rata-test-hn-ask-hn-shows-post-text ()
+  "An Ask HN entry shows the post's own text, and fetches no article."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net
+        (list (cons (rata-test-hn--api 2000)
+                    (rata-test-hn--ok (rata-test-hn--fixture "ask-2000.json"))))
+      (with-current-buffer
+          (rata-test-hn--show
+           (rata-test-hn--entry 2000 "Ask HN: How do you read Hacker News?"
+                                "https://news.ycombinator.com/item?id=2000"
+                                "<p>I mostly read it in Emacs.</p><p>Comments URL: <a href=\"https://news.ycombinator.com/item?id=2000\">x</a></p>"))
+        (rata-test-hn--flush)
+        (should (equal rata-test-hn--requests (list (rata-test-hn--api 2000))))
+        (should (string-match-p "I mostly read it in Emacs these days\\."
+                                (rata-test-hn--section-text 'article)))
+        (should (string-match-p "^7 points · by asker · .* · 1 comment$"
+                                (rata-test-hn--section-text 'story)))
+        (should (equal (rata-test-hn--blocks) '((2001 0 0))))))))
+
+(ert-deftest rata-test-hn-article-failures-degrade ()
+  "Each way an article can fail leaves the link line and its reason.
+The comments render regardless."
+  (pcase-dolist (`(,reply ,reason)
+                 `((,(rata-test-hn--ok "%PDF-1.7" "application/pdf") "application/pdf")
+                   ((:error "over 2048 KB") "over 2048 KB")
+                   (,(rata-test-hn--ok (rata-test-hn--fixture "cookie-wall.html") "text/html")
+                    "no readable text")
+                   ((:error "HTTP 403") "HTTP 403")
+                   ((:error "timed out") "timed out")))
+    (rata-test-hn--with-elfeed
+      (rata-test-hn--with-net (rata-test-hn--story-routes reply)
+        (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+          (rata-test-hn--flush)
+          (should (equal (string-trim (rata-test-hn--section-text 'article))
+                         (format "article not fetched (%s) — , o to open" reason)))
+          (should (string-match-p "example\\.com · 42 points" (rata-test-hn--section-text 'story)))
+          (should (= (length (rata-test-hn--blocks)) 5)))))))
+
+(ert-deftest rata-test-hn-article-fetch-can-be-turned-off ()
+  "With `rata-elfeed-hn-fetch-article' nil the article's site is never contacted."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net
+        (rata-test-hn--story-routes (rata-test-hn--ok (rata-test-hn--fixture "article.html") "text/html"))
+      (let ((rata-elfeed-hn-fetch-article nil))
+        (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+          (rata-test-hn--flush)
+          (should (equal rata-test-hn--requests (list (rata-test-hn--api 1000))))
+          (should (string-match-p "article not fetched (turned off)"
+                                  (rata-test-hn--section-text 'article)))
+          (should (= (length (rata-test-hn--blocks)) 5)))))))
+
+(ert-deftest rata-test-hn-story-replaces-content-under-goodies-renderer ()
+  "The content is replaced under elfeed-goodies' renderer too.
+This config uses `elfeed-goodies/show-refresh--plain', which draws a
+newline and the content with no marker property -- the mail-style
+renderer's `elfeed-entry-content' marker is not there to find."
+  (rata-test-hn--with-elfeed
+    (rata-test-hn--with-net
+        (rata-test-hn--story-routes (list :error "HTTP 403"))
+      (let ((elfeed-show-refresh-function
+             (if (fboundp 'elfeed-goodies/show-refresh--plain)
+                 #'elfeed-goodies/show-refresh--plain
+               ;; Its body, as of 2026-10-06, for when goodies is not loaded.
+               (lambda ()
+                 (let ((inhibit-read-only t))
+                   (erase-buffer)
+                   (insert "\n")
+                   (elfeed-insert-html (elfeed-deref (elfeed-entry-content elfeed-show-entry)))
+                   (goto-char (point-min)))))))
+        (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+          (rata-test-hn--flush)
+          (let ((text (rata-test-hn--text)))
+            (should (string-prefix-p "\n\nShow HN: A test thread\n" text))
+            (should-not (string-match-p "^Comments$" text))
+            (should (= (length (rata-test-hn--blocks)) 5))))))))
+
+(defmacro rata-test-hn--with-thread (&rest body)
+  "Run BODY in an elfeed entry buffer showing the edge thread, in normal state."
+  (declare (indent 0))
+  `(rata-test-hn--with-elfeed
+     (rata-test-hn--with-net
+         (rata-test-hn--story-routes (list :error "HTTP 403"))
+       (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+         (rata-test-hn--flush)
+         (evil-local-mode 1)
+         (evil-normal-state)
+         ,@body))))
+
+(defun rata-test-hn--goto-comment (id)
+  "Move point to the start of comment ID."
+  (goto-char (text-property-any (point-min) (point-max) 'rata-elfeed-hn-id id)))
+
+(defun rata-test-hn--hidden ()
+  "The ids of the comment blocks that are invisible, in order."
+  (cl-loop for b in (rata-elfeed-hn--blocks)
+           when (invisible-p (nth 0 b)) collect (nth 3 b)))
+
+(ert-deftest rata-test-hn-keys-resolve-in-elfeed-show ()
+  "Every thread key resolves in normal state, and elfeed's own keys survive."
+  (rata-test-hn--with-thread
+    (should rata-elfeed-hn-thread-mode)
+    (pcase-dolist (`(,key ,command ,_label) rata-elfeed-hn--keys)
+      (should (equal (cons key (key-binding (kbd key))) (cons key command))))
+    (let ((ours (mapcar (lambda (k) (key-binding (kbd k))) '("]]" "[[" "TAB"))))
+      (rata-elfeed-hn-thread-mode -1)
+      (should (equal ours (mapcar (lambda (k) (key-binding (kbd k))) '("]]" "[[" "TAB"))))
+      (should-not (memq (key-binding (kbd "za")) '(rata-elfeed-hn-toggle-fold))))))
+
+(ert-deftest rata-test-hn-keys-only-where-there-is-a-thread ()
+  "The reused entry buffer drops the thread keys on a non-HN entry."
+  (rata-test-hn--with-thread
+    (rata-test-hn--show (rata-test-hn--blog-entry))
+    (should-not rata-elfeed-hn-thread-mode)))
+
+(ert-deftest rata-test-hn-fold-hides-exactly-the-replies ()
+  "`za' hides a comment's replies and nothing else; again shows them."
+  (rata-test-hn--with-thread
+    (rata-test-hn--goto-comment 1001)
+    (forward-line 1)                    ; anywhere in the comment will do
+    (rata-elfeed-hn-toggle-fold)
+    (should (equal (rata-test-hn--hidden) '(1002)))
+    (should-not (invisible-p (1- (nth 1 (car (rata-elfeed-hn--block-at))))))
+    (rata-elfeed-hn-toggle-fold)
+    (should-not (rata-test-hn--hidden))
+    (rata-elfeed-hn-fold)
+    (rata-elfeed-hn-fold)                ; idempotent
+    (rata-elfeed-hn-unfold)
+    (should-not (rata-test-hn--hidden))
+    ;; A comment with no replies has nothing to fold.
+    (rata-test-hn--goto-comment 1006)
+    (rata-elfeed-hn-toggle-fold)
+    (should-not (rata-test-hn--hidden))))
+
+(ert-deftest rata-test-hn-fold-all-leaves-top-level ()
+  "`zM' leaves only depth-0 comments visible; `zR' shows everything."
+  (rata-test-hn--with-thread
+    (rata-elfeed-hn-fold-all)
+    (should (equal (rata-test-hn--hidden) '(1002 1005)))
+    (rata-elfeed-hn-unfold-all)
+    (should-not (rata-test-hn--hidden))))
+
+(ert-deftest rata-test-hn-large-thread-opens-folded ()
+  "Over `rata-elfeed-hn-fold-threshold' comments, replies open folded."
+  (let ((rata-elfeed-hn-fold-threshold 3))
+    (rata-test-hn--with-thread
+      (should (equal (rata-test-hn--hidden) '(1002 1005)))))
+  (let ((rata-elfeed-hn-fold-threshold 4))
+    (rata-test-hn--with-thread
+      (should-not (rata-test-hn--hidden)))))
+
+(ert-deftest rata-test-hn-sibling-and-parent-navigation ()
+  "`zj'/`zk' move between comments at one depth, skipping replies; `zu' goes up."
+  (rata-test-hn--with-thread
+    (cl-flet ((at () (get-text-property (point) 'rata-elfeed-hn-id)))
+      (goto-char (point-min))
+      (rata-elfeed-hn-next-sibling)       ; from the story: the first comment
+      (should (equal (at) 1001))
+      (rata-elfeed-hn-next-sibling)       ; skips bob's reply
+      (should (equal (at) 1004))
+      (rata-elfeed-hn-next-sibling)
+      (should (equal (at) 1006))
+      (should-error (rata-elfeed-hn-next-sibling) :type 'user-error)
+      (rata-elfeed-hn-previous-sibling)
+      (should (equal (at) 1004))
+      (rata-test-hn--goto-comment 1005)
+      (should-error (rata-elfeed-hn-next-sibling) :type 'user-error) ; last reply under 1004
+      (rata-elfeed-hn-parent)
+      (should (equal (at) 1004))
+      (should-error (rata-elfeed-hn-parent) :type 'user-error))))
+
+(ert-deftest rata-test-hn-permalink-and-browser-commands ()
+  "`, y' copies the comment's permalink; `, o'/`, O' bypass the routing."
+  (rata-test-hn--with-thread
+    (let ((kill-ring nil) opened)
+      (rata-test-hn--goto-comment 1005)
+      (rata-elfeed-hn-copy-permalink)
+      (should (equal (car kill-ring) "https://news.ycombinator.com/item?id=1005"))
+      (cl-letf (((symbol-function 'browse-url)
+                 (lambda (url &rest _)
+                   (push (cons url (cl-some (lambda (h) (eq (cdr h) 'rata-elfeed-hn-browse-url))
+                                            browse-url-handlers))
+                         opened))))
+        (rata-elfeed-hn-open-article)
+        (rata-elfeed-hn-open-thread-in-browser))
+      (should (equal opened '(("https://news.ycombinator.com/item?id=1000")
+                              ("https://example.com/post")))))))
+
+(ert-deftest rata-test-hn-item-url-routing ()
+  "Item URLs, and nothing else, route to the HN buffer."
+  (dolist (url '("https://news.ycombinator.com/item?id=1"
+                 "http://news.ycombinator.com/item?id=42"
+                 "https://www.news.ycombinator.com/item?id=42"))
+    (should (rata-elfeed-hn--route-p url))
+    (should (equal (rata-elfeed-hn--parse-item url)
+                   (string-to-number (car (last (split-string url "=")))))))
+  (dolist (url '("https://news.ycombinator.com/news"
+                 "https://news.ycombinator.com/item?id="
+                 "https://news.ycombinator.com/item?id=5&p=2"
+                 "https://evil.example/news.ycombinator.com/item?id=1"
+                 "https://news.ycombinator.com.evil.example/item?id=1"))
+    (should-not (rata-elfeed-hn--route-p url)))
+  (should (equal (rata-elfeed-hn--parse-item " 8863 ") 8863))
+  (should (equal (rata-elfeed-hn--parse-item 8863) 8863))
+  (should-not (rata-elfeed-hn--parse-item "news"))
+  (require 'browse-url)
+  (should (eq (cdr (cl-find-if (lambda (h) (functionp (car h))) browse-url-handlers
+                               :key (lambda (h) (and (eq (cdr h) 'rata-elfeed-hn-browse-url) h))))
+              'rata-elfeed-hn-browse-url))
+  (should (eq (browse-url-select-handler "https://news.ycombinator.com/item?id=1")
+              'rata-elfeed-hn-browse-url))
+  (let ((rata-elfeed-hn-route-item-links nil))
+    (should-not (eq (browse-url-select-handler "https://news.ycombinator.com/item?id=1")
+                    'rata-elfeed-hn-browse-url))))
+
+(ert-deftest rata-test-hn-open-item-buffer ()
+  "An item opened by URL shows story, article and thread in `*HN <id>*'."
+  (rata-test-hn--with-net
+      (rata-test-hn--story-routes
+       (rata-test-hn--ok (rata-test-hn--fixture "article.html") "text/html"))
+    (require 'shr)                      ; so the binding below is dynamic
+    (let ((shr-use-fonts nil))
+      (cl-letf (((symbol-function 'pop-to-buffer) #'set-buffer))
+        (unwind-protect
+            (progn
+              (rata-elfeed-hn-open-item "https://news.ycombinator.com/item?id=1000")
+              (with-current-buffer "*HN 1000*"
+                (should (derived-mode-p 'rata-elfeed-hn-item-mode))
+                (should rata-elfeed-hn-thread-mode)
+                ;; No entry here: the article URL comes with the thread.
+                (should (equal rata-test-hn--requests (list (rata-test-hn--api 1000))))
+                (rata-test-hn--flush)
+                (should (equal (cadr rata-test-hn--requests) rata-test-hn--article-url))
+                (should (string-match-p "^Show HN: A test thread$" (rata-test-hn--section-text 'story)))
+                (should (string-match-p "three properties"
+                                        (replace-regexp-in-string
+                                         "\n" " " (rata-test-hn--section-text 'article))))
+                (should (= (length (rata-test-hn--blocks)) 5))
+                ;; `g' redraws from the network, not the caches: the thread,
+                ;; then -- once the thread names it -- the article again.
+                (revert-buffer)
+                (rata-test-hn--flush)
+                (should (= (length rata-test-hn--requests) 4))
+                (should (= (length (rata-test-hn--blocks)) 5))))
+          (when (get-buffer "*HN 1000*") (kill-buffer "*HN 1000*")))))))
+
+(ert-deftest rata-test-hn-curl-args ()
+  "curl follows redirects, bounds time and, when asked, size; URL comes last."
+  (let ((args (rata-elfeed-hn--curl-args "https://example.com/a" 2048 20)))
+    (should (member "--location" args))
+    (should (equal (cadr (member "--max-time" args)) "20"))
+    (should (equal (cadr (member "--max-filesize" args)) "2048"))
+    (should (equal (last args 2) '("--" "https://example.com/a"))))
+  (should-not (member "--max-filesize" (rata-elfeed-hn--curl-args "https://x" nil 20))))
+
+(ert-deftest rata-test-hn-curl-result ()
+  "curl's stdout, exit code and stderr become a result, never a signal."
+  (let ((ok (encode-coding-string "<p>héllo</p>\n200 text/html; charset=UTF-8" 'utf-8)))
+    (should (equal (rata-elfeed-hn--curl-result ok 0 "" nil)
+                   '(:ok t :type "text/html" :body "<p>héllo</p>"))))
+  (should (equal (rata-elfeed-hn--curl-result "gone\n404 text/html" 0 "" nil)
+                 '(:error "HTTP 404")))
+  (should (equal (rata-elfeed-hn--curl-result "%PDF\n200 application/pdf" 0 "" nil)
+                 '(:ok t :type "application/pdf" :body "%PDF")))
+  (should (equal (rata-elfeed-hn--curl-result "" 28 "curl: (28) Operation timed out" nil)
+                 '(:error "timed out")))
+  (should (equal (rata-elfeed-hn--curl-result "" 63 "" 2048) '(:error "over 2 KB")))
+  (should (equal (rata-elfeed-hn--curl-result (concat (make-string 3000 ?x) "\n200 text/html") 0 "" 2048)
+                 '(:error "over 2 KB")))
+  (should (equal (rata-elfeed-hn--curl-result "" 6 "curl: (6) Could not resolve host: x\n" nil)
+                 '(:error "Could not resolve host: x")))
+  (should (equal (rata-elfeed-hn--curl-result "" 7 "" nil) '(:error "curl exited 7")))
+  (should (equal (rata-elfeed-hn--curl-result "no status line" 0 "" nil)
+                 '(:error "no response"))))
+
+(ert-deftest rata-test-hn-curl-retrieve-plumbing ()
+  "A real process through `rata-elfeed-hn--curl-retrieve', against a stub curl.
+This is the path that replaced url.el for articles: url.el does not race
+IPv6 against IPv4, so on a network with an unrouted IPv6 address every
+site that publishes an AAAA record timed out."
+  (let* ((program (expand-file-name "tests/fixtures/hn/fake-curl" user-emacs-directory))
+         (args-file (make-temp-file "rata-fake-curl-args"))
+         (process-environment
+          (append (list (concat "RATA_FAKE_CURL_BODY="
+                                (expand-file-name "tests/fixtures/hn/article.html" user-emacs-directory))
+                        (concat "RATA_FAKE_CURL_ARGS=" args-file))
+                  process-environment))
+         result)
+    (unwind-protect
+        (progn
+          (rata-elfeed-hn--curl-retrieve program "https://example.com/post" 4096
+                                         (lambda (r) (setq result r)))
+          (with-timeout (10 (ert-fail "the stub curl never finished"))
+            (while (not result) (accept-process-output nil 0.05)))
+          (should (eq (plist-get result :ok) t))
+          (should (equal (plist-get result :type) "text/html"))
+          (should (string-match-p "three properties we now think" (plist-get result :body)))
+          (should (member "https://example.com/post"
+                          (with-temp-buffer (insert-file-contents args-file)
+                                            (split-string (buffer-string) "\n" t))))
+          ;; A failing curl reports its exit, not a hang and not a signal.
+          (setq result nil)
+          (let ((process-environment (cons "RATA_FAKE_CURL_EXIT=28" process-environment)))
+            (rata-elfeed-hn--curl-retrieve program "https://example.com/post" nil
+                                           (lambda (r) (setq result r)))
+            (with-timeout (10 (ert-fail "the stub curl never finished"))
+              (while (not result) (accept-process-output nil 0.05))))
+          (should (equal result '(:error "timed out")))
+          (should-not (cl-find-if (lambda (b) (string-prefix-p " *rata-elfeed-hn-curl" (buffer-name b)))
+                                  (buffer-list))))
+      (delete-file args-file))))
+
+(ert-deftest rata-test-hn-ok-result-keeps-image-bytes ()
+  "Text is decoded; an image, SVG included, is kept as the bytes it is."
+  (let ((png (unibyte-string #x89 ?P ?N ?G #x0d #x0a #x1a #x0a #xff #xd8)))
+    (should (equal (plist-get (rata-elfeed-hn--ok-result "image/png" png) :body) png))
+    (should-not (multibyte-string-p (plist-get (rata-elfeed-hn--ok-result "image/png" png) :body))))
+  (let ((svg (encode-coding-string "<svg>é</svg>" 'utf-8)))
+    (should (equal (plist-get (rata-elfeed-hn--ok-result "image/svg+xml" svg) :body) svg)))
+  (should (equal (plist-get (rata-elfeed-hn--ok-result "text/html; charset=utf-8"
+                                                       (encode-coding-string "é" 'utf-8))
+                            :body)
+                 "é")))
+
+(defmacro rata-test-hn--with-image-article (images &rest body)
+  "Show the edge thread with an article holding two images, replies IMAGES.
+IMAGES is an alist of image URL to fake result.  Inside BODY,
+`placed' lists the (DATA TYPE ALT) shr was asked to insert, newest first;
+batch Emacs cannot display an image, so shr's inserter is stubbed."
+  (declare (indent 1))
+  `(rata-test-hn--with-elfeed
+     (rata-test-hn--with-net
+         (append (rata-test-hn--story-routes
+                  (rata-test-hn--ok (rata-test-hn--fixture "article-images.html") "text/html"))
+                 ,images)
+       (let* ((placed nil)
+              (shr-put-image-function
+               (lambda (spec alt &optional _flags)
+                 (push (list (car spec) (cadr spec) alt) placed)
+                 (insert "[IMG]"))))
+         (with-current-buffer (rata-test-hn--show (rata-test-hn--rss-entry 1000 "Show HN: A test thread"))
+           ,@body)))))
+
+(defconst rata-test-hn--png (unibyte-string #x89 ?P ?N ?G #x0d #x0a #x1a #x0a))
+
+(ert-deftest rata-test-hn-article-images-arrive-through-retrieve ()
+  "Article images are fetched by this module, not by shr through url.el.
+shr's own fetch goes through `url-queue-retrieve', which stalls on an
+unrouted IPv6 address like every url.el request (FAIL-0024).  A relative
+src resolves against the article: `shr-insert-document' ignores a bound
+`shr-base' and reads only a <base> element."
+  (rata-test-hn--with-image-article
+      (list (cons "https://example.com/img/one.png" (rata-test-hn--ok rata-test-hn--png "image/png"))
+            (cons "https://cdn.example.net/two.png" (rata-test-hn--ok rata-test-hn--png "image/png")))
+    (cl-letf (((symbol-function 'url-queue-retrieve)
+               (lambda (url &rest _) (error "shr fetched %s itself" url))))
+      (rata-test-hn--flush))
+    (should (member "https://example.com/img/one.png" rata-test-hn--requests))
+    (should (member "https://cdn.example.net/two.png" rata-test-hn--requests))
+    (should (equal (alist-get "https://example.com/img/one.png" rata-test-hn--caps nil nil #'equal)
+                   rata-elfeed-hn-image-max-bytes))
+    (should (equal (sort (mapcar #'caddr placed) #'string<)
+                   '("the new build graph" "the old build graph")))
+    (should (cl-every (lambda (p) (and (equal (car p) rata-test-hn--png) (eq (cadr p) 'image/png)))
+                      placed))
+    (let ((article (rata-test-hn--section-text 'article)))
+      (should (= 2 (how-many "\\[IMG\\]" (car (rata-elfeed-hn--section-bounds 'article))
+                             (cdr (rata-elfeed-hn--section-bounds 'article)))))
+      (should (string-match-p "three properties" (replace-regexp-in-string "\n" " " article))))
+    ;; The relative link resolves too.
+    ;; `text-property-any' compares with `eq', so scan with `equal'.
+    (should (cl-loop for pos from (point-min) below (point-max)
+                     thereis (equal (get-text-property pos 'shr-url)
+                                    "https://example.com/posts/part-two")))))
+
+(ert-deftest rata-test-hn-article-images-degrade-and-stop ()
+  "A failed image keeps its placeholder; at most `rata-elfeed-hn-max-images'
+are fetched; and leaving the entry stops the queue."
+  (let ((rata-elfeed-hn-max-images 1))
+    (rata-test-hn--with-image-article
+        (list (cons "https://example.com/img/one.png" (list :error "HTTP 404")))
+      (rata-test-hn--flush)
+      (should (equal (cl-count-if (lambda (u) (string-match-p "\\.png\\'" u)) rata-test-hn--requests) 1))
+      (should-not placed)
+      (should (string-match-p "three properties"
+                              (replace-regexp-in-string "\n" " " (rata-test-hn--section-text 'article))))))
+  (rata-test-hn--with-image-article
+      (list (cons "https://example.com/img/one.png" (rata-test-hn--ok rata-test-hn--png "image/png"))
+            (cons "https://cdn.example.net/two.png" (rata-test-hn--ok rata-test-hn--png "image/png")))
+    ;; Answer the article and thread only, then leave before the images.
+    (let ((first (reverse rata-test-hn--pending)))
+      (setq rata-test-hn--pending nil)
+      (pcase-dolist (`(,url ,cb) first)
+        (funcall cb (cdr (assoc url rata-test-hn--routes))))
+      (rata-test-hn--drain))
+    (rata-test-hn--show (rata-test-hn--blog-entry))
+    (rata-test-hn--flush)
+    (should-not placed)))
 
 ;;; ============================================================
 ;;; Test — dialogic formatting (lisp/init-dialogic.el)
@@ -2286,6 +3313,197 @@ L-029 shape once more, so the two cases are kept apart."
           (set-file-times note (time-add (current-time) 60))
           (should (eq (rata-blog--state note md) 'stale)))
       (delete-directory tmp t))))
+
+;;; ============================================================
+;;; Test — LLM providers drive gptel, ellama and aidermacs (lisp/init-llm.el)
+;;; ============================================================
+
+(defconst rata-test--llm-ollama-provider
+  '(:name "Ollama" :protocol ollama :url "http://localhost:11434"
+    :models ("qwen3.5-coder:9b-32k" "mistral:latest")
+    :embedding-model "nomic-embed-text")
+  "The home shape: local Ollama, no key.")
+
+(defconst rata-test--llm-litellm-provider
+  '(:name "LiteLLM" :protocol openai :url "https://litellm.example.com/v1/"
+    :models ("gpt-x" "gpt-y"))
+  "The work shape: an OpenAI-compatible proxy, keyed.  Trailing slash on
+purpose -- the entry is hand-typed in local.el and both spellings must work.")
+
+(ert-deftest rata-test-llm-ollama-provider-configures-all-three-tools ()
+  "One Ollama entry becomes gptel's, ellama's and aider's own configuration.
+D-022: endpoint and models are data in `rata-llm-providers\='; each tool
+derives its shape from the same entry, so a machine changes one variable."
+  (let* ((p rata-test--llm-ollama-provider)
+         (gptel (rata-llm-gptel-backend-spec p))
+         (ellama (rata-llm-ellama-provider-spec p)))
+    (should (eq (car gptel) 'gptel-make-ollama))
+    (should (equal (cadr gptel) "Ollama"))
+    (let ((args (cddr gptel)))
+      (should (equal (plist-get args :host) "localhost:11434"))
+      (should (equal (plist-get args :protocol) "http"))
+      (should (equal (plist-get args :endpoint) "/api/chat"))
+      ;; Bare tags as symbols: gptel talks to Ollama directly, no litellm prefix.
+      (should (equal (plist-get args :models) '(qwen3.5-coder:9b-32k mistral:latest)))
+      (should-not (plist-get args :key)))
+    (should (eq (rata-llm-gptel-default-model p) 'qwen3.5-coder:9b-32k))
+    (should (eq (car ellama) 'make-llm-ollama))
+    (let ((args (cdr ellama)))
+      (should (equal (plist-get args :scheme) "http"))
+      (should (equal (plist-get args :host) "localhost"))
+      (should (eql (plist-get args :port) 11434))
+      (should (equal (plist-get args :chat-model) "qwen3.5-coder:9b-32k"))
+      (should (equal (plist-get args :embedding-model) "nomic-embed-text")))
+    (should (equal (rata-llm-aider-model p) "ollama_chat/qwen3.5-coder:9b-32k"))
+    (should (equal (rata-llm-aider-environment p nil)
+                   '("OLLAMA_API_BASE=http://localhost:11434")))
+    (should-not (rata-llm-auth-host p))))
+
+(ert-deftest rata-test-llm-openai-provider-configures-all-three-tools ()
+  "An OpenAI-compatible entry reaches all three tools, keyed but key-free.
+The key is a closure over the auth-source host, resolved through
+`rata-auth-get\=' when called and never at load; the config carries the
+host, ~/.authinfo.gpg carries the secret.  Stubbed here: nothing in
+tests/ opens that file."
+  (let* ((p rata-test--llm-litellm-provider)
+         (asked nil)
+         (gptel (rata-llm-gptel-backend-spec p))
+         (ellama (rata-llm-ellama-provider-spec p)))
+    (should (equal (rata-llm-auth-host p) "litellm.example.com"))
+    (should (eq (car gptel) 'gptel-make-openai))
+    (let ((args (cddr gptel)))
+      (should (equal (plist-get args :host) "litellm.example.com"))
+      (should (equal (plist-get args :protocol) "https"))
+      (should (equal (plist-get args :endpoint) "/v1/chat/completions"))
+      (should (equal (plist-get args :models) '(gpt-x gpt-y)))
+      (should (functionp (plist-get args :key)))
+      (cl-letf (((symbol-function 'rata-auth-get)
+                 (lambda (host &optional _user) (setq asked host) "sk-test")))
+        (should (equal (funcall (plist-get args :key)) "sk-test")))
+      (should (equal asked "litellm.example.com")))
+    (should (eq (car ellama) 'make-llm-openai-compatible))
+    (let ((args (cdr ellama)))
+      ;; llm wants the base with exactly one trailing slash.
+      (should (equal (plist-get args :url) "https://litellm.example.com/v1/"))
+      (should (functionp (plist-get args :key)))
+      (should (equal (plist-get args :chat-model) "gpt-x"))
+      (should-not (plist-member args :embedding-model)))
+    (should (equal (rata-llm-aider-model p) "openai/gpt-x"))
+    (should (equal (rata-llm-aider-environment p "sk-test")
+                   '("OPENAI_API_BASE=https://litellm.example.com/v1"
+                     "OPENAI_API_KEY=sk-test")))
+    (should (equal (rata-llm-aider-environment p nil)
+                   '("OPENAI_API_BASE=https://litellm.example.com/v1")))
+    ;; An explicit nil :auth-host means a keyless server, not "derive it".
+    (let ((keyless (append '(:auth-host nil) p)))
+      (should-not (rata-llm-auth-host keyless))
+      (should-not (plist-get (cddr (rata-llm-gptel-backend-spec keyless)) :key)))
+    (let ((named (append '(:auth-host "llm-proxy") p)))
+      (should (equal (rata-llm-auth-host named) "llm-proxy")))))
+
+(ert-deftest rata-test-llm-aider-environment-is-scoped-to-the-aider-child ()
+  "The hook is installed, and what it sets stays inside aidermacs's `let\='.
+aidermacs runs `aidermacs-before-run-backend-hook\=' inside a `let\=' of
+`process-environment\=' (aidermacs-backends.el:91); pushing there hands the
+key to the aider child and to nothing else Emacs spawns."
+  (should (memq #'rata-llm-aider-set-environment aidermacs-before-run-backend-hook))
+  (let ((rata-llm-providers (list rata-test--llm-litellm-provider))
+        (before (getenv "OPENAI_API_KEY")))
+    (cl-letf (((symbol-function 'rata-auth-get)
+               (lambda (host &optional _user) (concat "key-for-" host))))
+      (let ((process-environment (copy-sequence process-environment)))
+        (rata-llm-aider-set-environment)
+        (should (equal (getenv "OPENAI_API_BASE") "https://litellm.example.com/v1"))
+        (should (equal (getenv "OPENAI_API_KEY") "key-for-litellm.example.com"))))
+    (should (equal (getenv "OPENAI_API_KEY") before))))
+
+(ert-deftest rata-test-llm-provider-problems-name-the-entry ()
+  "A malformed entry is reported by index and name, one line per fault.
+The loaded value is checked too: on a machine whose local.el entry is
+wrong, this is the test that says so, in the same words as the startup
+warning."
+  (should-not (rata-llm-provider-problems (list rata-test--llm-ollama-provider
+                                                rata-test--llm-litellm-provider)))
+  (should-not (rata-llm-provider-problems rata-llm-providers))
+  (should (equal (rata-llm-provider-problems "ollama")
+                 '("rata-llm-providers is not a list")))
+  (let ((problems (rata-llm-provider-problems
+                   '((:name "Bad" :protocol litellm :url "litellm.example.com" :models ())
+                     (:protocol ollama)))))
+    (should (= (length problems) 4))
+    (should (cl-every (lambda (s) (string-prefix-p "entry 0 (Bad)" s))
+                      (seq-take problems 3)))
+    (should (string-match-p ":protocol" (nth 0 problems)))
+    (should (string-match-p ":url" (nth 1 problems)))
+    (should (string-match-p ":models" (nth 2 problems)))
+    (should (string-prefix-p "entry 1 (unnamed)" (nth 3 problems)))))
+
+(ert-deftest rata-test-llm-tracked-default-is-localhost-only ()
+  "The default in the tracked source names no host but localhost.
+D-022: Ollama on localhost may stay in git because it is not identity;
+anything else -- a work proxy, a homelab hostname -- belongs in local.el.
+Reads the file on disk, not the loaded value, which local.el may have
+replaced on this machine."
+  (let ((default
+         (with-temp-buffer
+           (insert-file-contents
+            (expand-file-name "lisp/init-llm.el" user-emacs-directory))
+           (goto-char (point-min))
+           (re-search-forward "^(defcustom rata-llm-providers$")
+           (eval (read (current-buffer)) t))))
+    (should (consp default))
+    (should-not (rata-llm-provider-problems default))
+    (dolist (provider default)
+      (should (eq (plist-get provider :protocol) 'ollama))
+      (should (equal (url-host (url-generic-parse-url (plist-get provider :url)))
+                     "localhost")))))
+
+(ert-deftest rata-test-llm-tools-start-on-the-default-provider ()
+  "Once loaded, gptel, ellama and aidermacs all sit on the first provider.
+This is the FAIL-0016 check for this module: the two :config bodies must
+actually run and agree with the data, and the aidermacs :custom value must
+be applied when its `defcustom\=' runs (it is void before the package loads,
+like the ACP adapter pins -- so the package is loaded here first)."
+  (let ((default (rata-llm-default-provider)))
+    ;; `aidermacs-models', not `aidermacs': the umbrella pulls in the vterm
+    ;; backend, and vterm prompts to compile its module at load (FAIL-0022).
+    (skip-unless (and (require 'aidermacs-models nil t) (require 'gptel nil t)
+                      (require 'ellama nil t)))
+    (should (equal aidermacs-default-model (rata-llm-aider-model default)))
+    (should (equal (gptel-backend-name gptel-backend) (plist-get default :name)))
+    (should (eq gptel-model (rata-llm-gptel-default-model default)))
+    (should (= (length ellama-providers) (length rata-llm-providers)))
+    (should (equal (caar ellama-providers) (plist-get default :name)))
+    (should (eq ellama-provider (cdar ellama-providers)))))
+
+;;; ============================================================
+;;; Test — Khoj's server comes from a variable local.el can set (lisp/init-khoj.el)
+;;; ============================================================
+
+(ert-deftest rata-test-khoj-server-url-comes-from-rata-variable ()
+  "`khoj-server-url\=' is `rata-khoj-server-url\=' once khoj has loaded.
+L-051: use-package :custom runs `custom-theme-set-variables\=' when the
+package loads, after local.el, so a template line saying
+\=(setq khoj-server-url ...) was overwritten the moment khoj loaded.  The
+module now hands :custom the `rata-\=' variable, and local.el.example names
+that one.  Loads khoj with its auto-index timer disabled: the package
+would otherwise schedule `khoj--server-index-files\=' -- a network call --
+sixty seconds in."
+  (should (boundp 'rata-khoj-server-url))
+  (should (stringp rata-khoj-server-url))
+  (defvar khoj-auto-index)
+  (defvar khoj--index-timer)
+  (let ((khoj-auto-index nil))
+    (skip-unless (require 'khoj nil t)))
+  (when (and (boundp 'khoj--index-timer) khoj--index-timer)
+    (cancel-timer khoj--index-timer))
+  (should (equal khoj-server-url rata-khoj-server-url))
+  ;; The template must name the variable that actually works.
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "local.el.example" user-emacs-directory))
+    (should (search-forward "(setq rata-khoj-server-url" nil t))
+    (goto-char (point-min))
+    (should-not (search-forward "(setq khoj-server-url" nil t))))
 
 ;;; ============================================================
 ;;; Test — agent-shell ACP adapter pins (lisp/init-llm.el)
@@ -2734,6 +3952,1188 @@ the difference between a mailbox and a duplicated one."
                       rata-mail-bridge-cert-candidates))
     ;; No real address leaked into the template.
     (should (string-match-p "CHANGE-ME@proton.me" text))))
+
+;;; ============================================================
+;;; init-agent-center: state model and registry
+;;; ============================================================
+;; Nothing here starts an agent: events are synthetic alists of the shape
+;; `agent-shell--emit-event' builds, fed straight to the handler.
+
+(defun rata-test-agent-center--ev (event &rest data)
+  "Build an agent-shell event alist for EVENT with DATA as a plist."
+  (let ((alist (list (cons :event event))))
+    (when data
+      (let (pairs)
+        (while data
+          (push (cons (pop data) (pop data)) pairs))
+        (push (cons :data (nreverse pairs)) alist)))
+    alist))
+
+(defmacro rata-test-agent-center--with-registry (&rest body)
+  "Run BODY against an empty private registry, with rendering stubbed out."
+  (declare (indent 0))
+  `(let ((rata-agent-center--registry (make-hash-table :test #'eq))
+         (renders 0))
+     (ignore renders)
+     (cl-letf (((symbol-function 'rata-agent-center--schedule-render)
+                (lambda () (cl-incf renders)))
+               ((symbol-function 'rata-agent-center--schedule-activity-render)
+                (lambda () (cl-incf renders))))
+       ,@body)))
+
+(ert-deftest rata-test-agent-center-next-state-table ()
+  "Every row of the plan's state table is a transition."
+  (let ((ev #'rata-test-agent-center--ev))
+    ;; needs-input
+    (should (eq (rata-agent-center--next-state 'working (funcall ev 'permission-request) nil)
+                'needs-input))
+    ;; error
+    (should (eq (rata-agent-center--next-state 'working (funcall ev 'error :message "x") nil)
+                'error))
+    ;; done: a finished turn nobody is looking at
+    (should (eq (rata-agent-center--next-state 'working (funcall ev 'turn-complete) nil)
+                'done))
+    ;; ...and ready when the shell is the selected window's buffer
+    (should (eq (rata-agent-center--next-state 'working (funcall ev 'turn-complete) t)
+                'ready))
+    ;; working
+    (dolist (e '(input-submitted permission-response tool-call-update))
+      (should (eq (rata-agent-center--next-state 'ready (funcall ev e) nil) 'working)))
+    ;; starting, and the handshake events between do not leave it
+    (should (eq (rata-agent-center--next-state 'ready (funcall ev 'init-started) nil)
+                'starting))
+    (dolist (e '(init-client init-handshake init-session session-selected init-finished))
+      (should (eq (rata-agent-center--next-state 'starting (funcall ev e) nil) 'starting)))
+    ;; ready: prompt shown, or a `done' shell visited
+    (should (eq (rata-agent-center--next-state 'starting (funcall ev 'prompt-ready) nil)
+                'ready))
+    (should (eq (rata-agent-center--next-state 'done (funcall ev 'visited) t) 'ready))
+    ;; Visiting only clears `done'; it never hides a question or an error.
+    (dolist (s '(needs-input error working))
+      (should (eq (rata-agent-center--next-state s (funcall ev 'visited) t) s)))
+    ;; A tool call updating while a permission question is open does not hide it:
+    ;; only the answer does.
+    (should (eq (rata-agent-center--next-state 'needs-input (funcall ev 'tool-call-update) nil)
+                'needs-input))
+    ;; Streamed chunks and unknown events change nothing.
+    (dolist (e '(agent-message-chunk idle session-title-changed file-write no-such-event))
+      (should (eq (rata-agent-center--next-state 'done (funcall ev e) nil) 'done)))))
+
+(ert-deftest rata-test-agent-center-last-column-shows-only-the-unusual ()
+  "The Last column carries an error or an unusual stop reason, nothing else.
+`end_turn' and the cost were dropped to save panel width (2026-10-02)."
+  (should (equal (rata-agent-center--last
+                  '(:last-stop-reason "end_turn" :cost 0.12)) ""))
+  (should (equal (rata-agent-center--last '()) ""))
+  (should (equal (rata-agent-center--last
+                  '(:last-stop-reason "max_tokens" :cost 0.12)) "max_tokens"))
+  (should (equal (rata-agent-center--last
+                  '(:last-stop-reason "end_turn" :error "request failed"))
+                 "request failed")))
+
+(ert-deftest rata-test-agent-center-state-order ()
+  "Sort order is the plan's: attention first, idle last."
+  (should (equal rata-agent-center-states
+                 '(needs-input error done working starting ready)))
+  (should (< (rata-agent-center--state-rank 'needs-input)
+             (rata-agent-center--state-rank 'error)
+             (rata-agent-center--state-rank 'done)
+             (rata-agent-center--state-rank 'working)
+             (rata-agent-center--state-rank 'starting)
+             (rata-agent-center--state-rank 'ready)))
+  ;; An unknown state sorts after every known one rather than signalling.
+  (should (> (rata-agent-center--state-rank 'bogus)
+             (rata-agent-center--state-rank 'ready))))
+
+(ert-deftest rata-test-agent-center-reconcile-trusts-status ()
+  "`agent-shell-status' overrides a recorded state events cannot explain."
+  (should (eq (rata-agent-center--reconcile 'working 'blocked nil) 'needs-input))
+  (should (eq (rata-agent-center--reconcile 'ready 'busy nil) 'working))
+  (should (eq (rata-agent-center--reconcile 'done 'busy nil) 'working))
+  ;; Recorded busy, status idle, no `turn-complete' seen: the turn ended unseen.
+  (should (eq (rata-agent-center--reconcile 'working 'ready nil) 'done))
+  (should (eq (rata-agent-center--reconcile 'working 'ready t) 'ready))
+  (should (eq (rata-agent-center--reconcile 'needs-input 'ready nil) 'done))
+  ;; Agreement, and the states status cannot see, are left alone.
+  (dolist (s '(done ready error starting))
+    (should (eq (rata-agent-center--reconcile s 'ready nil) s)))
+  (should (eq (rata-agent-center--reconcile 'working 'busy nil) 'working))
+  (should (eq (rata-agent-center--reconcile 'needs-input 'blocked nil) 'needs-input))
+  ;; No status (shell gone, agent-shell unloaded): keep what we have.
+  (should (eq (rata-agent-center--reconcile 'working nil nil) 'working)))
+
+(ert-deftest rata-test-agent-center-registry-follows-events ()
+  "A registered shell's entry tracks state, title, stop reason and cost."
+  (rata-test-agent-center--with-registry
+    (with-temp-buffer
+      (let* ((buf (current-buffer))
+             (ev #'rata-test-agent-center--ev)
+             (handler (progn (rata-agent-center--add-entry
+                              buf :layout "work" :project "~/src/x/" :agent "Claude")
+                             (rata-agent-center--make-handler buf)))
+             (get (lambda (k) (plist-get (rata-agent-center--entry buf) k))))
+        (should (eq (funcall get :state) 'starting))
+        (should (equal (funcall get :layout) "work"))
+        (should (equal (funcall get :agent) "Claude"))
+        (funcall handler (funcall ev 'prompt-ready))
+        (should (eq (funcall get :state) 'ready))
+        (funcall handler (funcall ev 'input-submitted :prompt "hi"))
+        (should (eq (funcall get :state) 'working))
+        (let ((since (funcall get :since)))
+          ;; Same state again: the clock does not restart.
+          (funcall handler (funcall ev 'tool-call-update :tool-call-id "t1"))
+          (should (eq (funcall get :since) since)))
+        (funcall handler (funcall ev 'permission-request :request-id 1))
+        (should (eq (funcall get :state) 'needs-input))
+        (funcall handler (funcall ev 'permission-response :request-id 1))
+        (should (eq (funcall get :state) 'working))
+        (funcall handler (funcall ev 'session-title-changed :title "Fix the parser"))
+        (should (equal (funcall get :title) "Fix the parser"))
+        (funcall handler (funcall ev 'turn-complete
+                                  :stop-reason "end_turn"
+                                  :usage '((:cost-amount . 0.12) (:cost-currency . "USD"))))
+        (should (eq (funcall get :state) 'done))
+        (should (equal (funcall get :last-stop-reason) "end_turn"))
+        (should (equal (funcall get :cost) 0.12))
+        (funcall handler (funcall ev 'error :code -1 :message "overloaded"))
+        (should (eq (funcall get :state) 'error))
+        (should (equal (funcall get :error) "overloaded"))
+        ;; Every event that changed something asked for a render; none rendered.
+        (should (> renders 0))
+        (funcall handler (funcall ev 'clean-up))
+        (should-not (rata-agent-center--entry buf))))))
+
+(ert-deftest rata-test-agent-center-turn-complete-while-visible-is-ready ()
+  "A turn that finishes in front of you is not `done' (nothing unread)."
+  (rata-test-agent-center--with-registry
+    (with-temp-buffer
+      (let ((buf (current-buffer)))
+        (rata-agent-center--add-entry buf :state 'working)
+        (save-window-excursion
+          (set-window-buffer (selected-window) buf)
+          (funcall (rata-agent-center--make-handler buf)
+                   (rata-test-agent-center--ev 'turn-complete)))
+        (should (eq (plist-get (rata-agent-center--entry buf) :state) 'ready))))))
+
+(ert-deftest rata-test-agent-center-erroring-callback-shows-error ()
+  "A bug in the handler lands on the entry as `error', not in *Messages*.
+agent-shell demotes a subscriber's error to a `message', which would hide it."
+  (rata-test-agent-center--with-registry
+    (with-temp-buffer
+      (let ((buf (current-buffer)))
+        (rata-agent-center--add-entry buf :state 'working)
+        (cl-letf (((symbol-function 'rata-agent-center--next-state)
+                   (lambda (&rest _) (error "Boom in next-state"))))
+          ;; Must not signal: the handler contains its own failure.
+          (funcall (rata-agent-center--make-handler buf)
+                   (rata-test-agent-center--ev 'input-submitted)))
+        (let ((entry (rata-agent-center--entry buf)))
+          (should (eq (plist-get entry :state) 'error))
+          (should (string-match-p "Boom in next-state" (plist-get entry :error))))))))
+
+(ert-deftest rata-test-agent-center-layout-capture ()
+  "The layout is the current persp at start, else the persp holding the buffer."
+  (should (featurep 'persp-mode))
+  (let ((name "rata-test-agent-center"))
+    (unwind-protect
+        (with-temp-buffer
+          (let ((buf (current-buffer)))
+            ;; Opened now: the current layout, whatever holds the buffer.
+            (should (equal (rata-agent-center--layout-for buf 'current)
+                           (safe-persp-name (get-current-persp))))
+            ;; Adopted later: the layout the buffer was added to wins.
+            (persp-add-new name)
+            (persp-add-buffer buf (persp-get-by-name name) nil nil)
+            (should (equal (rata-agent-center--layout-for buf 'adopted) name))))
+      (persp-remove-by-name name))))
+
+(ert-deftest rata-test-agent-center-adopt-and-disable ()
+  "Existing shells are adopted once; disable unsubscribes every token."
+  (rata-test-agent-center--with-registry
+    (let ((a (generate-new-buffer " *rata-test-shell-a*"))
+          (b (generate-new-buffer " *rata-test-shell-b*"))
+          (subscribed nil) (unsubscribed nil) (token 0))
+      (unwind-protect
+          (progn
+            (dolist (buf (list a b))
+              ;; Enough of a shell for the guard, without running the mode.
+              (with-current-buffer buf (setq-local major-mode 'agent-shell-mode)))
+            (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () (list a b)))
+                      ;; Adoption waits for the feature, not an autoload stub.
+                      ((symbol-function 'rata-agent-center--agent-shell-loaded-p)
+                       (lambda () t))
+                      ((symbol-function 'agent-shell-status) (lambda (&rest _) 'ready))
+                      ((symbol-function 'agent-shell-subscribe-to)
+                       (lambda (&rest args)
+                         (push (plist-get args :shell-buffer) subscribed)
+                         (cl-incf token)))
+                      ((symbol-function 'agent-shell-unsubscribe)
+                       (lambda (&rest args)
+                         (push (plist-get args :subscription) unsubscribed))))
+              (rata-agent-center--adopt)
+              (rata-agent-center--adopt)   ; idempotent: no second subscription
+              (should (= (length subscribed) 2))
+              (should (rata-agent-center--entry a))
+              (should (rata-agent-center--entry b))
+              (should (plist-get (rata-agent-center--entry a) :token))
+              (rata-agent-center-disable)
+              (should (equal (sort unsubscribed #'<) '(1 2)))
+              (should (= (hash-table-count rata-agent-center--registry) 0))
+              (should-not (memq #'rata-agent-center--on-mode-hook agent-shell-mode-hook))))
+        (kill-buffer a)
+        (kill-buffer b)
+        ;; Leave the real hook as init left it.
+        (rata-agent-center-enable)))))
+
+(ert-deftest rata-test-agent-center-sweep-drops-dead-buffers ()
+  "Entries whose buffer died without a `clean-up' are dropped at sweep."
+  (rata-test-agent-center--with-registry
+    (let ((buf (generate-new-buffer " *rata-test-dead-shell*")))
+      (rata-agent-center--add-entry buf)
+      (kill-buffer buf)
+      (rata-agent-center--sweep)
+      (should (= (hash-table-count rata-agent-center--registry) 0)))))
+
+;;; --- init-agent-center: the *Agents* panel (phase 2) ---
+
+(defun rata-test-agent-center--panel-windows ()
+  "Every window in the selected frame showing *Agents*, as (SIDE . WIDTH)."
+  (let ((buf (get-buffer rata-agent-center-buffer-name)))
+    (mapcar (lambda (w) (cons (window-parameter w 'window-side) (window-total-width w)))
+            (seq-filter (lambda (w) (and buf (eq (window-buffer w) buf)))
+                        (window-list nil 'nomini)))))
+
+(ert-deftest rata-test-agent-center-panel-survives-layout-switch ()
+  "Exactly one *Agents* side window after every layout switch while pinned,
+and none after closing -- in either layout.
+persp-mode saves each layout's window configuration, side windows included,
+and restores it on switch (probed 2026-09-30, L-053): left alone, the panel
+vanishes in a layout it was never opened in and comes back in one it was
+closed in."
+  (should (bound-and-true-p persp-mode))
+  (let ((orig (safe-persp-name (get-current-persp)))
+        (rata-agent-center-side 'right)
+        (rata-agent-center-width 45))
+    (unwind-protect
+        (progn
+          (persp-add-new "rata-ac-a")
+          (persp-add-new "rata-ac-b")
+          (persp-switch "rata-ac-a")
+          (rata-agent-center-toggle)
+          (should (equal (rata-test-agent-center--panel-windows) '((right . 45))))
+          (dolist (layout '("rata-ac-b" "rata-ac-a" "rata-ac-b" "rata-ac-a"))
+            (persp-switch layout)
+            (should (equal (safe-persp-name (get-current-persp)) layout))
+            (should (equal (rata-test-agent-center--panel-windows) '((right . 45)))))
+          ;; A side window survives `delete-other-windows' (SPC w m).
+          (delete-other-windows (get-mru-window nil nil t))
+          (should (equal (rata-test-agent-center--panel-windows) '((right . 45))))
+          ;; Closed: unpinned, and no layout's saved configuration brings it back.
+          (rata-agent-center-close)
+          (should-not (rata-test-agent-center--panel-windows))
+          (dolist (layout '("rata-ac-b" "rata-ac-a" "rata-ac-b"))
+            (persp-switch layout)
+            (should-not (rata-test-agent-center--panel-windows))))
+      (rata-agent-center-close)
+      (persp-switch orig)
+      (persp-remove-by-name "rata-ac-a")
+      (persp-remove-by-name "rata-ac-b"))))
+
+(ert-deftest rata-test-agent-center-panel-kept-out-of-saved-layouts ()
+  "*Agents* is never written into a persp state file."
+  (let ((buf (get-buffer-create rata-agent-center-buffer-name)))
+    (should (persp-buffer-filtered-out-p buf persp-filter-save-buffers-functions))
+    (should (memq #'rata-agent-center--persp-save-filter
+                  persp-filter-save-buffers-functions))))
+
+(ert-deftest rata-test-agent-center-age-strings ()
+  "Time in state is one short unit, like `3m'."
+  (should (equal (rata-agent-center--age 0) "0s"))
+  (should (equal (rata-agent-center--age 59) "59s"))
+  (should (equal (rata-agent-center--age 185) "3m"))
+  (should (equal (rata-agent-center--age 3700) "1h"))
+  (should (equal (rata-agent-center--age 90000) "1d")))
+
+(ert-deftest rata-test-agent-center-long-title-is-truncated ()
+  "A long session title is cut to its column, so the row stays one line wide."
+  (with-temp-buffer
+    (let* ((cols (append (rata-agent-center--row
+                          (list :buffer (current-buffer) :state 'ready :agent "Claude"
+                                :title "Refactor the jira sprint grouping" :since 0)
+                          0)
+                         nil))
+           (title (aref (cadr cols) 2)))
+      (should (<= (string-width title) rata-agent-center--title-width))
+      (should (string-suffix-p "…" title)))))
+
+(ert-deftest rata-test-agent-center-render-groups-and-order ()
+  "A fixture registry renders grouped by layout, most urgent group and row first."
+  (rata-test-agent-center--with-registry
+    (let* ((mk (lambda (name) (generate-new-buffer (format " *rata-ac-%s*" name))))
+           (w1 (funcall mk "w1")) (w2 (funcall mk "w2"))
+           (h1 (funcall mk "h1")) (z1 (funcall mk "z1"))
+           (panel nil))
+      (unwind-protect
+          (progn
+            (rata-agent-center--add-entry w1 :layout "work" :project "~/src/x/"
+                                          :agent "Claude" :title "Tidy" :state 'ready)
+            (rata-agent-center--add-entry w2 :layout "work" :project "~/src/x/"
+                                          :agent "Pi" :title "Fix parser" :state 'needs-input)
+            (rata-agent-center--add-entry h1 :layout "home" :project "~/blog/"
+                                          :agent "Claude" :title "Post" :state 'done)
+            (rata-agent-center--add-entry z1 :layout "zeta" :project "~/z/"
+                                          :agent "Claude" :title nil :state 'error)
+            (rata-agent-center--put h1 :last-stop-reason "end_turn" :cost 0.12)
+            (setq panel (rata-agent-center--refresh-buffer))
+            (with-current-buffer panel
+              (should (derived-mode-p 'rata-agent-center-mode))
+              (let ((lines (split-string (buffer-substring-no-properties
+                                          (point-min) (point-max))
+                                         "\n" t)))
+                (should (= (length lines) 7))
+                ;; Groups by their most urgent row: needs-input, error, done.
+                (should (string-match-p "\\`work — ~/src/x/" (nth 0 lines)))
+                (should (string-match-p "input .*Pi .*Fix parser" (nth 1 lines)))
+                (should (string-match-p "ready .*Claude .*Tidy" (nth 2 lines)))
+                (should (string-match-p "\\`zeta — ~/z/" (nth 3 lines)))
+                (should (string-match-p "error .*Claude" (nth 4 lines)))
+                (should (string-match-p "\\`home — ~/blog/" (nth 5 lines)))
+                (should (string-match-p "done .*Claude .*Post" (nth 6 lines)))
+                ;; A normal end and the cost are left out to save width.
+                (should-not (string-match-p "end_turn\\|\\$" (nth 6 lines))))
+              ;; A row's id is its shell buffer: that is what RET acts on.
+              (goto-char (point-min))
+              (forward-line 1)
+              (should (eq (tabulated-list-get-id) w2))
+              ;; The badge carries the state's face.
+              (should (search-forward "input" (line-end-position) t))
+              (should (eq (get-text-property (match-beginning 0) 'face)
+                          'rata-agent-center-needs-input))))
+        (mapc #'kill-buffer (list w1 w2 h1 z1))
+        (when (buffer-live-p panel) (kill-buffer panel))))))
+
+(ert-deftest rata-test-agent-center-render-is-debounced-and-gated ()
+  "Events arm one timer; a render with the panel hidden prints nothing."
+  (let ((rata-agent-center--registry (make-hash-table :test #'eq))
+        (rata-agent-center--render-timer nil))
+    (when (get-buffer rata-agent-center-buffer-name)
+      (kill-buffer rata-agent-center-buffer-name))
+    (unwind-protect
+        (progn
+          (rata-agent-center--schedule-render)
+          (let ((timer rata-agent-center--render-timer))
+            (should (timerp timer))
+            (rata-agent-center--schedule-render)
+            (should (eq rata-agent-center--render-timer timer)))
+          (rata-agent-center--render)
+          (should-not rata-agent-center--render-timer)
+          (should-not (get-buffer rata-agent-center-buffer-name)))
+      (when (timerp rata-agent-center--render-timer)
+        (cancel-timer rata-agent-center--render-timer)))))
+
+(ert-deftest rata-test-agent-center-panel-keys ()
+  "RET, o, q and g r are live in normal state in the panel."
+  (let ((buf (get-buffer-create "*rata-test-agents*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (rata-agent-center-mode)
+          (should (eq evil-state 'normal))
+          (should (eq (key-binding (kbd "RET")) 'rata-agent-center-visit))
+          (should (eq (key-binding (kbd "o")) 'rata-agent-center-show))
+          (should (eq (key-binding (kbd "q")) 'rata-agent-center-close))
+          (should (eq (key-binding (kbd "g r")) 'rata-agent-center-refresh))
+          ;; Evil motion still works: this is a list, not an emacs-state buffer.
+          (should (eq (key-binding (kbd "j")) 'evil-next-line)))
+      (kill-buffer buf))))
+
+(ert-deftest rata-test-agent-center-no-shackle-rule ()
+  "shackle must not place *Agents*: it is a side window, and a rule would fight it."
+  (should-not (seq-find (lambda (rule)
+                          (and (stringp (car rule))
+                               (string-match-p (regexp-quote (car rule))
+                                               rata-agent-center-buffer-name)))
+                        shackle-rules)))
+
+;;; --- init-agent-center: navigation and actions (phase 3) ---
+
+(defmacro rata-test-agent-center--with-fixture (bindings &rest body)
+  "Run BODY with a private registry holding live buffers from BINDINGS.
+Each binding is (VAR LAYOUT STATE SINCE); the buffers are killed after."
+  (declare (indent 1))
+  `(rata-test-agent-center--with-registry
+     (let ,(mapcar (lambda (b) `(,(car b) (generate-new-buffer
+                                            ,(format " *rata-ac-%s*" (car b)))))
+                   bindings)
+       (unwind-protect
+           (progn
+             ,@(mapcar (lambda (b)
+                         `(progn
+                            (rata-agent-center--add-entry
+                             ,(car b) :layout ,(nth 1 b) :project "~/src/x/"
+                             :agent "Claude" :title ,(symbol-name (car b))
+                             :state ',(nth 2 b))
+                            (rata-agent-center--put ,(car b) :since ,(nth 3 b))))
+                       bindings)
+             ,@body)
+         (mapc (lambda (buf) (when (buffer-live-p buf) (kill-buffer buf)))
+               (list ,@(mapcar #'car bindings)))))))
+
+(ert-deftest rata-test-agent-center-most-urgent-picks-right-buffer ()
+  "Next attention: most urgent state first, longest waiting within a state."
+  (rata-test-agent-center--with-fixture ((a "l" ready 1) (b "l" working 2)
+                                         (c "l" done 100) (d "l" needs-input 300)
+                                         (e "l" error 50) (f "l" needs-input 200))
+    (should (eq (plist-get (rata-agent-center--most-urgent) :buffer) f))
+    (rata-agent-center--put f :state 'ready)
+    (rata-agent-center--put d :state 'ready)
+    (should (eq (plist-get (rata-agent-center--most-urgent) :buffer) e))
+    (rata-agent-center--put e :state 'working)
+    (should (eq (plist-get (rata-agent-center--most-urgent) :buffer) c))
+    (rata-agent-center--put c :state 'ready)
+    ;; `working' and `ready' never need you.
+    (should-not (rata-agent-center--most-urgent))))
+
+(ert-deftest rata-test-agent-center-next-attention-shows-the-shell ()
+  "`SPC a i n' puts the most urgent shell in front of you; `done' becomes seen."
+  (let ((here (rata-agent-center--current-layout)))
+    (rata-test-agent-center--with-fixture ((c here done 100) (r here ready 1))
+      (save-window-excursion
+        (rata-agent-center-next-attention)
+        (should (eq (window-buffer (selected-window)) c))
+        (should (eq (plist-get (rata-agent-center--entry c) :state) 'ready))
+        (should-error (rata-agent-center-next-attention) :type 'user-error)))))
+
+(ert-deftest rata-test-agent-center-visiting-clears-done ()
+  "A `done' shell becomes `ready' once it is the selected window's buffer."
+  (should (memq #'rata-agent-center--on-window-change
+                (default-value 'window-selection-change-functions)))
+  (should (memq #'rata-agent-center--on-window-change
+                (default-value 'window-buffer-change-functions)))
+  (rata-test-agent-center--with-fixture ((seen "l" done 1) (unseen "l" done 1)
+                                         (asking "l" needs-input 1))
+    (save-window-excursion
+      (set-window-buffer (selected-window) seen)
+      (rata-agent-center--on-window-change (selected-frame))
+      (should (eq (plist-get (rata-agent-center--entry seen) :state) 'ready))
+      (should (eq (plist-get (rata-agent-center--entry unseen) :state) 'done))
+      ;; A question is not answered by looking at it.
+      (set-window-buffer (selected-window) asking)
+      (rata-agent-center--on-window-change (selected-frame))
+      (should (eq (plist-get (rata-agent-center--entry asking) :state) 'needs-input)))))
+
+(ert-deftest rata-test-agent-center-attention-row-motion ()
+  "]] and [[ move between rows that need you, skipping headings and idle rows."
+  (rata-test-agent-center--with-fixture ((w1 "work" needs-input 1) (w2 "work" ready 1)
+                                         (h1 "home" done 1) (h2 "home" working 1))
+    (let ((panel (rata-agent-center--refresh-buffer)))
+      (unwind-protect
+          (with-current-buffer panel
+            (goto-char (point-min))
+            (rata-agent-center-next-attention-row)
+            (should (eq (tabulated-list-get-id) w1))
+            (rata-agent-center-next-attention-row)
+            (should (eq (tabulated-list-get-id) h1))
+            ;; None further: point stays put.
+            (rata-agent-center-next-attention-row)
+            (should (eq (tabulated-list-get-id) h1))
+            (rata-agent-center-previous-attention-row)
+            (should (eq (tabulated-list-get-id) w1)))
+        (kill-buffer panel)))))
+
+(ert-deftest rata-test-agent-center-fold-survives-rerender ()
+  "Folding a layout hides its rows, and stays folded across re-renders."
+  (let ((rata-agent-center--folded nil))
+    (rata-test-agent-center--with-fixture ((w1 "work" ready 1) (w2 "work" done 1)
+                                           (h1 "home" working 1))
+      (let ((panel (rata-agent-center--refresh-buffer))
+            (lines (lambda () (split-string (buffer-substring-no-properties
+                                             (point-min) (point-max))
+                                            "\n" t))))
+        (unwind-protect
+            (with-current-buffer panel
+              (should (= (length (funcall lines)) 5))
+              ;; From a row, the fold applies to the row's group.
+              (goto-char (point-min))
+              (forward-line 1)
+              (should (eq (tabulated-list-get-id) w2))
+              (rata-agent-center-toggle-group)
+              (should (equal rata-agent-center--folded '("work")))
+              (should (= (length (funcall lines)) 3))
+              (should (string-match-p "\\`work — .*2 hidden" (car (funcall lines))))
+              ;; Point is left on the folded heading.
+              (should (= (line-number-at-pos) 1))
+              (rata-agent-center--refresh-buffer)
+              (should (= (length (funcall lines)) 3))
+              ;; From the heading, it unfolds.
+              (rata-agent-center-toggle-group)
+              (should-not rata-agent-center--folded)
+              (should (= (length (funcall lines)) 5)))
+          (kill-buffer panel))))))
+
+(ert-deftest rata-test-agent-center-interrupt-and-new-shell ()
+  "K interrupts the row's shell after asking; c starts a shell in the row's project."
+  (let ((dir (file-name-as-directory (make-temp-file "rata-ac-proj" t)))
+        (interrupted nil) (started nil))
+    (unwind-protect
+        (rata-test-agent-center--with-fixture ((s (rata-agent-center--current-layout)
+                                                  working 1))
+          (rata-agent-center--put s :project (abbreviate-file-name dir))
+          (let ((panel (rata-agent-center--refresh-buffer)))
+            (unwind-protect
+                (with-current-buffer panel
+                  (goto-char (point-min))
+                  (forward-line 1)
+                  (should (eq (tabulated-list-get-id) s))
+                  (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t))
+                            ((symbol-function 'agent-shell-interrupt)
+                             (lambda (&optional force)
+                               (setq interrupted (list (current-buffer) force))))
+                            ((symbol-function 'agent-shell-new-shell)
+                             (lambda () (interactive)
+                               (setq started (expand-file-name default-directory)))))
+                    (rata-agent-center-interrupt)
+                    (should (equal interrupted (list s t)))
+                    (save-window-excursion
+                      (rata-agent-center-new-shell))
+                    (should (equal started dir))))
+              (kill-buffer panel))))
+      (delete-directory dir t))))
+
+(ert-deftest rata-test-agent-center-phase3-keys ()
+  "]] [[ TAB za c K are live in normal state in the panel."
+  (let ((buf (get-buffer-create "*rata-test-agents-3*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (rata-agent-center-mode)
+          (should (eq (key-binding (kbd "]]")) 'rata-agent-center-next-attention-row))
+          (should (eq (key-binding (kbd "[[")) 'rata-agent-center-previous-attention-row))
+          (should (eq (key-binding (kbd "TAB")) 'rata-agent-center-toggle-group))
+          (should (eq (key-binding (kbd "za")) 'rata-agent-center-toggle-group))
+          (should (eq (key-binding (kbd "c")) 'rata-agent-center-new-shell))
+          (should (eq (key-binding (kbd "K")) 'rata-agent-center-interrupt)))
+      (kill-buffer buf))))
+
+;;; --- init-agent-center: mode-line segment (phase 4) ---
+
+(ert-deftest rata-test-agent-center-mode-line-text ()
+  "The segment counts what needs you and what is busy; empty when nothing is."
+  (should (equal (rata-agent-center--mode-line-text nil) ""))
+  (should (equal (rata-agent-center--mode-line-text '((ready . 3) (starting . 1))) ""))
+  (should (equal (substring-no-properties
+                  (rata-agent-center--mode-line-text
+                   '((working . 3) (done . 1) (needs-input . 2) (ready . 4))))
+                 "⚠2 ✓1 ●3"))
+  (should (equal (substring-no-properties
+                  (rata-agent-center--mode-line-text '((error . 1) (working . 1))))
+                 "✗1 ●1"))
+  ;; Each count wears its state's face, and a click opens the panel.
+  (let ((text (rata-agent-center--mode-line-text '((needs-input . 2)))))
+    (should (eq (get-text-property 0 'face text) 'rata-agent-center-needs-input))
+    (should (eq (lookup-key (get-text-property 0 'local-map text) [mode-line mouse-1])
+                'rata-agent-center-toggle))))
+
+(ert-deftest rata-test-agent-center-mode-line-counts-registry ()
+  "The segment reads the registry, and is on `global-mode-string'."
+  (should (member 'rata-agent-center-mode-line global-mode-string))
+  (should (get 'rata-agent-center-mode-line 'risky-local-variable))
+  (rata-test-agent-center--with-fixture ((a "l" needs-input 1) (b "l" working 1)
+                                         (c "l" working 1) (d "l" ready 1))
+    (should (equal (rata-agent-center--counts)
+                   '((needs-input . 1) (working . 2) (ready . 1))))
+    ;; Through the construct's own function: batch `format-mode-line' never
+    ;; evaluates `:eval' (probed on 31.1, L-054), so it would print "" regardless.
+    (should (equal rata-agent-center-mode-line '(:eval (rata-agent-center--mode-line-segment))))
+    (should (equal (substring-no-properties (rata-agent-center--mode-line-segment))
+                   " ⚠1 ●2")))
+  (rata-test-agent-center--with-registry
+    (should (equal (rata-agent-center--mode-line-segment) ""))))
+
+(ert-deftest rata-test-agent-center-hooked-at-startup ()
+  "The module is loaded by init and listens for new shells."
+  (should (featurep 'init-agent-center))
+  (should (memq #'rata-agent-center--on-mode-hook agent-shell-mode-hook)))
+
+;;; --- init-agent-center: activity line (A2, plans/ai-agent-powerhouse.md) ---
+
+(ert-deftest rata-test-agent-center-tool-activity-strings ()
+  "A tool call reads as `Label: detail', from its title, command and kind."
+  ;; Claude's ACP adapter titles a Bash call with the command in backticks.
+  (should (equal (rata-agent-center--tool-activity
+                  '((:kind . "execute") (:title . "`just test`") (:command . "just test")))
+                 "Bash: just test"))
+  (should (equal (rata-agent-center--tool-activity
+                  '((:kind . "edit") (:title . "Edit `/s/x/lisp/init-org.el`")))
+                 "Edit: /s/x/lisp/init-org.el"))
+  ;; The verb in the title wins over the kind: a Write is kind `edit'.
+  (should (equal (rata-agent-center--tool-activity
+                  '((:kind . "edit") (:title . "Write /s/x/new.el")))
+                 "Write: /s/x/new.el"))
+  ;; A title that does not start with a verb gets the kind as its label.
+  (should (equal (rata-agent-center--tool-activity
+                  '((:kind . "search") (:title . "grep \"defun\" lisp")))
+                 "Search: grep \"defun\" lisp"))
+  (should-not (rata-agent-center--tool-activity nil))
+  (should-not (rata-agent-center--tool-activity '((:kind . "read")))))
+
+(ert-deftest rata-test-agent-center-activity-follows-events ()
+  "Tool calls set the activity; message chunks only while no tool is in flight."
+  (rata-test-agent-center--with-registry
+    (with-temp-buffer
+      (let* ((buf (current-buffer))
+             (ev #'rata-test-agent-center--ev)
+             (handler (progn (rata-agent-center--add-entry buf :state 'ready)
+                             (rata-agent-center--make-handler buf)))
+             (activity (lambda () (plist-get (rata-agent-center--entry buf) :activity)))
+             (tool (lambda (id status)
+                     (funcall ev 'tool-call-update :tool-call-id id
+                              :tool-call `((:kind . "execute") (:title . "`just test`")
+                                           (:command . "just test") (:status . ,status))))))
+        (funcall handler (funcall ev 'input-submitted :prompt "fix it"))
+        (should-not (funcall activity))
+        (funcall handler (funcall ev 'agent-message-chunk :text-chunk "I'll look"))
+        (funcall handler (funcall ev 'agent-message-chunk :text-chunk " at the parser.\nThen"))
+        (should (equal (funcall activity) "I'll look at the parser.\nThen"))
+        (funcall handler (funcall tool "t1" "in_progress"))
+        (should (equal (funcall activity) "Bash: just test"))
+        ;; While the tool runs, its line is not overwritten by chatter.
+        (funcall handler (funcall ev 'agent-message-chunk :text-chunk "Running tests"))
+        (should (equal (funcall activity) "Bash: just test"))
+        ;; Finished, it stays until something newer arrives...
+        (funcall handler (funcall tool "t1" "completed"))
+        (should (equal (funcall activity) "Bash: just test"))
+        ;; ...and the next message starts afresh rather than appending.
+        (funcall handler (funcall ev 'agent-message-chunk :text-chunk "Tests pass."))
+        (should (equal (funcall activity) "Tests pass."))
+        ;; A non-text chunk (an image) changes nothing.
+        (funcall handler (funcall ev 'agent-message-chunk :text-chunk nil))
+        (should (equal (funcall activity) "Tests pass."))
+        ;; A long stream is capped, not kept whole.
+        (dotimes (_ 100)
+          (funcall handler (funcall ev 'agent-message-chunk :text-chunk "0123456789")))
+        (should (<= (length (funcall activity)) rata-agent-center--activity-max))
+        ;; A new prompt clears what the last turn was doing.
+        (funcall handler (funcall ev 'input-submitted :prompt "next"))
+        (should-not (funcall activity))))))
+
+(ert-deftest rata-test-agent-center-activity-line-format ()
+  "The line is the first non-blank line, squeezed, project-relative and cut to width."
+  (let ((line (lambda (state activity &optional width project)
+                (rata-agent-center--activity-line
+                 (list :state state :activity activity :project project)
+                 (or width 60)))))
+    (should (equal (funcall line 'working "\n  First   line \nsecond") "First line"))
+    (should (equal (funcall line 'needs-input "Bash: rm -r build") "Bash: rm -r build"))
+    ;; Unread output is worth a line; so is a failure.
+    (should (equal (funcall line 'done "All done.") "All done."))
+    (should (equal (funcall line 'error "Bash: just test") "Bash: just test"))
+    ;; Paths under the shell's project lose the project prefix.
+    (should (equal (funcall line 'working
+                            (concat "Edit: " (expand-file-name "~/src/x/") "lisp/init-org.el")
+                            60 "~/src/x/")
+                   "Edit: lisp/init-org.el"))
+    (let ((cut (funcall line 'working "Bash: just test-everything-forever" 12)))
+      (should (<= (string-width cut) 12))
+      (should (string-suffix-p "…" cut)))
+    ;; Nothing to say: seen and idle, no activity, or only whitespace.
+    (should-not (funcall line 'ready "Tests pass."))
+    (should-not (funcall line 'working nil))
+    (should-not (funcall line 'working " \n\t "))
+    (should-not (funcall line 'working "text" 2))))
+
+(ert-deftest rata-test-agent-center-activity-render-throttled ()
+  "A burst of 50 chunks arms one render per interval; a state change is not held back."
+  (let ((rata-agent-center--registry (make-hash-table :test #'eq))
+        (rata-agent-center--render-timer nil)
+        (rata-agent-center--render-due nil)
+        (rata-agent-center--last-render (float-time))
+        (rata-agent-center-activity-interval 1.0)
+        (rata-agent-center-show-activity t)
+        (delays nil))
+    (with-temp-buffer
+      (let* ((buf (current-buffer))
+             (handler (progn (rata-agent-center--add-entry buf :state 'working)
+                             (rata-agent-center--make-handler buf)))
+             (chunks (lambda ()
+                       (dotimes (i 50)
+                         (funcall handler (rata-test-agent-center--ev
+                                           'agent-message-chunk
+                                           :text-chunk (format "c%d " i)))))))
+        (cl-letf (((symbol-function 'rata-agent-center--panel-windows) (lambda (&rest _) '(t)))
+                  ((symbol-function 'run-with-timer)
+                   (lambda (delay &rest _) (push delay delays) (timer-create))))
+          ;; Just rendered: the burst waits out the interval, in one timer.
+          (funcall chunks)
+          (should (= (length delays) 1))
+          (should (>= (car delays) 0.8))
+          ;; A permission request in the middle is shown at the normal debounce.
+          (funcall handler (rata-test-agent-center--ev 'permission-request :request-id 1))
+          (should (= (length delays) 2))
+          (should (< (car delays) 0.5))
+          ;; The timer fired long after the last render: the next burst is prompt.
+          (setq rata-agent-center--render-timer nil
+                rata-agent-center--render-due nil
+                rata-agent-center--last-render (- (float-time) 10)
+                delays nil)
+          (funcall chunks)
+          (should (equal (length delays) 1))
+          (should (< (car delays) 0.5))
+          ;; Turned off, activity schedules nothing at all.
+          (setq rata-agent-center--render-timer nil rata-agent-center--render-due nil
+                delays nil rata-agent-center-show-activity nil)
+          (funcall chunks)
+          (should-not delays))))))
+
+(ert-deftest rata-test-agent-center-render-activity-line ()
+  "The activity prints dim under its row, belongs to that row, and ]] skips it."
+  (let ((rata-agent-center-show-activity t))
+    (rata-test-agent-center--with-fixture ((w1 "work" needs-input 1) (w2 "work" ready 2)
+                                           (h1 "home" working 1) (h2 "home" done 2))
+      (rata-agent-center--put w1 :activity "Bash: rm -r build")
+      (rata-agent-center--put w2 :activity "Seen already.")
+      (rata-agent-center--put h1 :activity "Edit: lisp/init-org.el")
+      (let ((panel (rata-agent-center--refresh-buffer))
+            (lines (lambda () (split-string (buffer-substring-no-properties
+                                             (point-min) (point-max))
+                                            "\n" t))))
+        (unwind-protect
+            (with-current-buffer panel
+              (let ((ls (funcall lines)))
+                (should (= (length ls) 8))
+                (should (string-match-p "input .*w1" (nth 1 ls)))
+                (should (string-match-p "\\`  +↳ Bash: rm -r build\\'" (nth 2 ls)))
+                ;; `ready' has nothing to report, whatever it last did.
+                (should (string-match-p "ready .*w2" (nth 3 ls)))
+                ;; Within a group `done' sorts before `working'.
+                (should (string-match-p "done .*h2" (nth 5 ls)))
+                (should (string-match-p "work .*h1" (nth 6 ls)))
+                (should (string-match-p "↳ Edit: lisp/init-org.el" (nth 7 ls))))
+              ;; The activity line is part of its row: RET, o and K act on it.
+              (goto-char (point-min))
+              (forward-line 2)
+              (should (eq (tabulated-list-get-id) w1))
+              (should (eq (get-text-property (+ (point) 5) 'face)
+                          'rata-agent-center-activity))
+              ;; ]] goes row to row, never onto a row's own activity line.
+              (goto-char (point-min))
+              (rata-agent-center-next-attention-row)
+              (should (= (line-number-at-pos) 2))
+              (rata-agent-center-next-attention-row)
+              (should (eq (tabulated-list-get-id) h2))
+              (rata-agent-center-previous-attention-row)
+              (should (= (line-number-at-pos) 2))
+              ;; Switched off, the rows are single lines again.
+              (let ((rata-agent-center-show-activity nil))
+                (rata-agent-center--refresh-buffer)
+                (should (= (length (funcall lines)) 6))))
+          (kill-buffer panel))))))
+
+;;; --- init-agent-worktree: one worktree per task (B6, plans/ai-agent-powerhouse.md) ---
+;; Every git call runs against a throwaway repository under `temporary-file-directory'
+;; with the user's git config shut out; nothing starts an agent.
+
+(ert-deftest rata-test-agent-worktree-branch-name ()
+  "A task name becomes `agent/<slug>': lower case, dashes, bounded, Jira keys kept."
+  (should (equal (rata-agent-worktree-branch-name "Fix Jira sprint grouping!")
+                 "agent/fix-jira-sprint-grouping"))
+  (should (equal (rata-agent-worktree-branch-name "  ABC-123: Fix the  parser ")
+                 "agent/abc-123-fix-the-parser"))
+  (should (equal (rata-agent-worktree-branch-name "fix_the/parser..again")
+                 "agent/fix-the-parser-again"))
+  ;; Bounded, and never ends on a dash after the cut.
+  (let ((name (rata-agent-worktree-branch-name (make-string 80 ?a))))
+    (should (<= (length name) (+ (length "agent/") rata-agent-worktree-slug-max)))
+    (should-not (string-suffix-p "-" name)))
+  (let ((name (rata-agent-worktree-branch-name
+               "a b c d e f g h i j k l m n o p q r s t u v w x y z a b c")))
+    (should (<= (length name) (+ (length "agent/") rata-agent-worktree-slug-max)))
+    (should-not (string-suffix-p "-" name)))
+  (should-error (rata-agent-worktree-branch-name "!!! ") :type 'user-error))
+
+(ert-deftest rata-test-agent-worktree-parse-list ()
+  "`git worktree list --porcelain' becomes (PATH . BRANCH) pairs, main first."
+  (should (equal (rata-agent-worktree--parse-list
+                  (concat "worktree /src/repo\nHEAD 1111\nbranch refs/heads/dev\n\n"
+                          "worktree /src/repo/.agent-shell/worktrees/fix-x\nHEAD 2222\n"
+                          "branch refs/heads/agent/fix-x\n\n"
+                          "worktree /src/other\nHEAD 3333\ndetached\n\n"))
+                 '(("/src/repo" . "dev")
+                   ("/src/repo/.agent-shell/worktrees/fix-x" . "agent/fix-x")
+                   ("/src/other"))))
+  (should-not (rata-agent-worktree--parse-list "")))
+
+(ert-deftest rata-test-agent-worktree-path ()
+  "A branch's worktree sits under the main checkout's .agent-shell/worktrees/."
+  (should (equal (rata-agent-worktree--path "/src/repo/" "agent/fix-x")
+                 "/src/repo/.agent-shell/worktrees/fix-x"))
+  (should (equal (rata-agent-worktree--path "/src/repo" "other/name")
+                 "/src/repo/.agent-shell/worktrees/other-name")))
+
+(defmacro rata-test-agent-worktree--with-repo (&rest body)
+  "Run BODY in a fresh git repository with one commit on `main'.
+`repo' is bound to its root (a directory name).  Git sees no user or
+system config, so a hook or signing setting cannot leak in.  The
+repository, every worktree under it and any layout named agent/* are
+removed afterwards."
+  (declare (indent 0))
+  `(let* ((repo (file-name-as-directory
+                 (file-truename (make-temp-file "rata-wt-" t))))
+          (process-environment
+           (append (list "GIT_CONFIG_GLOBAL=/dev/null" "GIT_CONFIG_NOSYSTEM=1"
+                         "GIT_AUTHOR_NAME=t" "GIT_AUTHOR_EMAIL=t@t"
+                         "GIT_COMMITTER_NAME=t" "GIT_COMMITTER_EMAIL=t@t")
+                   process-environment))
+          (orig-layout (and (bound-and-true-p persp-mode)
+                            (safe-persp-name (get-current-persp))))
+          (default-directory repo))
+     (unwind-protect
+         (progn
+           (rata-test-agent-worktree--git repo "init" "-q" "-b" "main")
+           (write-region "x\n" nil (expand-file-name "f.txt" repo))
+           (rata-test-agent-worktree--git repo "add" "f.txt")
+           (rata-test-agent-worktree--git repo "commit" "-q" "-m" "init")
+           ,@body)
+       (when orig-layout
+         (unless (equal (safe-persp-name (get-current-persp)) orig-layout)
+           (persp-switch orig-layout))
+         (dolist (name (persp-names))
+           (when (string-prefix-p "agent/" name) (persp-remove-by-name name))))
+       (dolist (buf (buffer-list))
+         (when (string-prefix-p repo (buffer-local-value 'default-directory buf))
+           (let (kill-buffer-query-functions) (kill-buffer buf))))
+       (delete-directory repo t))))
+
+(defun rata-test-agent-worktree--git (dir &rest args)
+  "Run git ARGS in DIR; return its trimmed output, failing the test on error."
+  (with-temp-buffer
+    (let ((default-directory dir))
+      (unless (zerop (apply #'process-file "git" nil t nil args))
+        (ert-fail (format "git %S failed: %s" args (buffer-string))))
+      (string-trim (buffer-string)))))
+
+(defmacro rata-test-agent-worktree--answering (answers &rest body)
+  "Run BODY with `y-or-n-p' answering from the list ANSWERS, in order.
+Binds `questions' to the prompts asked.  An unexpected extra question fails."
+  (declare (indent 1))
+  `(let ((answers ,answers) (questions nil) (started nil))
+     (ignore started)
+     (cl-letf (((symbol-function 'y-or-n-p)
+                (lambda (prompt)
+                  (push prompt questions)
+                  (if answers (pop answers)
+                    (ert-fail (format "Unexpected question: %s" prompt)))))
+               ((symbol-function 'agent-shell-new-shell)
+                (lambda (&rest _) (interactive) (push default-directory started))))
+       ,@body)))
+
+(ert-deftest rata-test-agent-worktree-create ()
+  "A new worktree: branch from the current branch, base recorded, layout, shell."
+  (rata-test-agent-worktree--with-repo
+    (rata-test-agent-worktree--answering nil
+      (let ((wt (rata-agent-worktree-create repo "agent/fix-x")))
+        (should (equal wt (concat repo ".agent-shell/worktrees/fix-x")))
+        (should (file-exists-p (expand-file-name "f.txt" wt)))
+        (should (equal (rata-test-agent-worktree--git wt "symbolic-ref" "--short" "HEAD")
+                       "agent/fix-x"))
+        (should (equal (rata-agent-worktree--base repo "agent/fix-x") "main"))
+        ;; The main checkout does not see the worktree as untracked files.
+        (should (equal (rata-test-agent-worktree--git repo "status" "--porcelain") ""))
+        ;; The shell starts inside the worktree ...
+        (should (equal started (list (file-name-as-directory wt))))
+        ;; ... in a layout named after the branch, which is now current.
+        (when (bound-and-true-p persp-mode)
+          (should (equal (safe-persp-name (get-current-persp)) "agent/fix-x")))
+        ;; The same branch twice is refused before git is asked.
+        (should-error (rata-agent-worktree-create repo "agent/fix-x") :type 'user-error)))))
+
+(ert-deftest rata-test-agent-worktree-create-refuses-detached-head ()
+  "No branch to come back to means no base; refuse rather than guess."
+  (rata-test-agent-worktree--with-repo
+    (rata-test-agent-worktree--git repo "checkout" "-q" "--detach")
+    (rata-test-agent-worktree--answering nil
+      (should-error (rata-agent-worktree-create repo "agent/x") :type 'user-error)
+      (should-not started))))
+
+(ert-deftest rata-test-agent-worktree-finish-refuses-dirty-and-unmerged ()
+  "Finish refuses, without asking, while there is work that removal would lose."
+  (rata-test-agent-worktree--with-repo
+    (rata-test-agent-worktree--answering nil
+      (let ((wt (rata-agent-worktree-create repo "agent/fix-x")))
+        ;; Untracked file.
+        (write-region "y\n" nil (expand-file-name "new.txt" wt))
+        (should-error (rata-agent-worktree-finish-at wt) :type 'user-error)
+        ;; Committed, so clean -- but not merged into main.
+        (rata-test-agent-worktree--git wt "add" "new.txt")
+        (rata-test-agent-worktree--git wt "commit" "-q" "-m" "work")
+        (should-error (rata-agent-worktree-finish-at wt) :type 'user-error)
+        ;; An unsaved buffer on a file in the worktree also blocks it.
+        (rata-test-agent-worktree--git repo "merge" "-q" "--ff-only" "agent/fix-x")
+        (with-current-buffer (find-file-noselect (expand-file-name "f.txt" wt))
+          (insert "unsaved")
+          (should-error (rata-agent-worktree-finish-at wt) :type 'user-error)
+          (set-buffer-modified-p nil))
+        (should-not questions)
+        (should (file-directory-p wt))))))
+
+(ert-deftest rata-test-agent-worktree-finish-removes-merged ()
+  "Clean and merged: one question, then shells, layout and worktree go; transcripts
+are kept in the main checkout; the branch goes only on a second yes."
+  (rata-test-agent-worktree--with-repo
+    (rata-test-agent-worktree--answering nil
+      (let* ((wt (rata-agent-worktree-create repo "agent/fix-x"))
+             (shell (generate-new-buffer " *rata-wt-shell*"))
+             (transcript (expand-file-name ".agent-shell/transcripts/t1.md" wt)))
+        (with-current-buffer shell (setq default-directory (file-name-as-directory wt)))
+        (make-directory (file-name-directory transcript) t)
+        (write-region "transcript\n" nil transcript)
+        (write-region "y\n" nil (expand-file-name "new.txt" wt))
+        (rata-test-agent-worktree--git wt "add" "new.txt")
+        (rata-test-agent-worktree--git wt "commit" "-q" "-m" "work")
+        (rata-test-agent-worktree--git repo "merge" "-q" "--ff-only" "agent/fix-x")
+        ;; Declining the first question changes nothing.
+        (setq answers (list nil))
+        (rata-agent-worktree-finish-at wt)
+        (should (file-directory-p wt))
+        (should (buffer-live-p shell))
+        ;; Yes to removal, no to deleting the branch.
+        (setq answers (list t nil) questions nil)
+        (rata-agent-worktree-finish-at wt)
+        (should (= (length questions) 2))
+        (should-not (file-exists-p wt))
+        (should-not (buffer-live-p shell))
+        (should (equal (with-temp-buffer
+                         (insert-file-contents
+                          (expand-file-name ".agent-shell/transcripts/t1.md" repo))
+                         (buffer-string))
+                       "transcript\n"))
+        (when (bound-and-true-p persp-mode)
+          (should-not (member "agent/fix-x" (persp-names))))
+        (should (equal (rata-test-agent-worktree--git repo "branch" "--list" "agent/fix-x")
+                       "agent/fix-x"))))))
+
+(ert-deftest rata-test-agent-worktree-finish-deletes-branch-on-second-yes ()
+  "A second yes deletes the merged branch and its recorded base."
+  (rata-test-agent-worktree--with-repo
+    (rata-test-agent-worktree--answering (list t t)
+      (let ((wt (rata-agent-worktree-create repo "agent/fix-x")))
+        (rata-agent-worktree-finish-at wt)
+        (should-not (file-exists-p wt))
+        (should (equal (rata-test-agent-worktree--git repo "branch" "--list" "agent/fix-x")
+                       ""))))))
+
+(ert-deftest rata-test-agent-worktree-finish-only-own-worktrees ()
+  "Finish refuses the main checkout and worktrees it did not create."
+  (rata-test-agent-worktree--with-repo
+    (rata-test-agent-worktree--answering nil
+      (should-error (rata-agent-worktree-finish-at repo) :type 'user-error)
+      (let ((other (concat repo "../" (file-name-nondirectory
+                                       (directory-file-name repo)) "-other")))
+        (unwind-protect
+            (progn
+              (rata-test-agent-worktree--git repo "worktree" "add" "-q" "-b" "mine" other)
+              (should-error (rata-agent-worktree-finish-at other) :type 'user-error)
+              (should (file-directory-p other)))
+          (delete-directory other t)))
+      (should-not questions))))
+
+(ert-deftest rata-test-agent-worktree-panel-label ()
+  "A shell in an agent worktree is labelled `repo ⎇ branch' in the panel."
+  (rata-test-agent-worktree--with-repo
+    (rata-test-agent-worktree--answering nil
+      (let ((wt (rata-agent-worktree-create repo "agent/fix-x")))
+        (should (equal (rata-agent-worktree-project-label wt)
+                       (format "%s ⎇ agent/fix-x"
+                               (abbreviate-file-name (directory-file-name repo)))))
+        (should-not (rata-agent-worktree-project-label repo))
+        (should (memq #'rata-agent-worktree-project-label
+                      rata-agent-center-project-label-functions))
+        ;; The heading uses the label rather than the long worktree path.
+        (should (string-match-p
+                 "agent/fix-x — .* ⎇ agent/fix-x"
+                 (rata-agent-center--group-heading
+                  "agent/fix-x"
+                  (list (list :project (abbreviate-file-name (file-name-as-directory wt))
+                              :project-label (rata-agent-worktree-project-label wt))))))))))
+
+(ert-deftest rata-test-agent-worktree-panel-keys ()
+  "`C' and `X' in the panel start and finish a worktree."
+  (let ((buf (get-buffer-create "*rata-test-agents-wt*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (rata-agent-center-mode)
+          (should (eq (key-binding (kbd "C")) 'rata-agent-worktree-new))
+          (should (eq (key-binding (kbd "X")) 'rata-agent-worktree-finish)))
+      (kill-buffer buf))))
+
+;;; ============================================================
+;;; Agent prompt library (C12, lisp/init-agent-prompts.el)
+;;; ============================================================
+
+(ert-deftest rata-test-agent-prompt-expand-fills-present-context ()
+  "Every placeholder with a value in the context is replaced."
+  (should (equal "Review @a.el in demo:\n```diff\n+x\n```"
+                 (rata-agent-prompt-expand
+                  "Review {{file}} in {{project}}:\n{{diff}}"
+                  '((file . "@a.el") (project . "demo")
+                    (diff . "```diff\n+x\n```"))))))
+
+(ert-deftest rata-test-agent-prompt-expand-leaves-gaps-visible ()
+  "A known placeholder without a value and an unknown one both stay as
+written, and both are reported -- nothing is dropped silently."
+  (let ((tpl "Fix {{error}} near {{region}}; see {{nonsense}}.")
+        (ctx '((region . "R") (error . nil) (diff . ""))))
+    (should (equal "Fix {{error}} near R; see {{nonsense}}."
+                   (rata-agent-prompt-expand tpl ctx)))
+    (should (equal '("error" "nonsense") (rata-agent-prompt-unfilled tpl ctx)))
+    ;; An empty string counts as missing, like nil.
+    (should (equal "{{diff}}" (rata-agent-prompt-expand "{{diff}}" ctx)))
+    (should (equal '("diff") (rata-agent-prompt-unfilled "{{diff}} {{diff}}" ctx)))))
+
+(ert-deftest rata-test-agent-prompt-expand-is-one-pass ()
+  "Text substituted from the buffer is not scanned again: a `{{file}}'
+inside your region stays literal, and `\\1' is not a back-reference."
+  (should (equal "code: x = \"{{file}}\" \\1 -- @f"
+                 (rata-agent-prompt-expand
+                  "code: {{region}} -- {{file}}"
+                  '((region . "x = \"{{file}}\" \\1") (file . "@f"))))))
+
+(ert-deftest rata-test-agent-prompt-parse-description ()
+  "A leading HTML comment is the description and is not sent."
+  (should (equal '("Review the diff" . "Look at {{diff}}.")
+                 (rata-agent-prompt-parse "<!-- Review the diff -->\n\nLook at {{diff}}.\n")))
+  (should (equal '(nil . "Just a body.")
+                 (rata-agent-prompt-parse "Just a body.\n"))))
+
+(ert-deftest rata-test-agent-prompt-files-extra-directory-wins ()
+  "A per-machine prompt overrides a repository prompt of the same name;
+a missing extra directory is not an error."
+  (let* ((repo (make-temp-file "rata-prompts-repo-" t))
+         (extra (make-temp-file "rata-prompts-extra-" t)))
+    (unwind-protect
+        (progn
+          (write-region "a" nil (expand-file-name "shared.md" repo))
+          (write-region "b" nil (expand-file-name "only-repo.md" repo))
+          (write-region "c" nil (expand-file-name "shared.md" extra))
+          (write-region "x" nil (expand-file-name "notes.txt" extra))
+          (let ((rata-agent-prompt-directory repo)
+                (rata-agent-prompt-extra-directory extra))
+            (let ((files (rata-agent-prompt-files)))
+              (should (equal '("only-repo" "shared") (sort (mapcar #'car files) #'string<)))
+              (should (equal (expand-file-name "shared.md" extra)
+                             (cdr (assoc "shared" files))))))
+          (let ((rata-agent-prompt-directory repo)
+                (rata-agent-prompt-extra-directory (expand-file-name "nope" extra)))
+            (should (= 2 (length (rata-agent-prompt-files))))))
+      (delete-directory repo t)
+      (delete-directory extra t))))
+
+(ert-deftest rata-test-agent-prompt-shipped-prompts-are-valid ()
+  "Every prompt in the repository has a description and uses only known
+placeholders, so a typo cannot reach a shell as a literal `{{difff}}'."
+  (let ((files (directory-files rata-agent-prompt-directory t "\\.md\\'")))
+    (should files)
+    (dolist (file files)
+      (let* ((parsed (rata-agent-prompt-parse
+                      (with-temp-buffer (insert-file-contents file) (buffer-string))))
+             (full (mapcar (lambda (p) (cons (intern p) "v")) rata-agent-prompt-placeholders)))
+        (should (car parsed))
+        (should (equal (list file nil)
+                       (list file (rata-agent-prompt-unfilled (cdr parsed) full))))))))
+
+(ert-deftest rata-test-agent-prompt-collect-from-file-buffer ()
+  "Context collected from a visited file in a git repository.
+A second changed file must stay out of {{diff}}: the diff is the visited
+file's, so reading `buffer-file-name' from inside a temp buffer (where it
+is nil, and the diff silently widens to the project) fails here."
+  (rata-test-agent-worktree--with-repo
+    (write-region "g\n" nil (expand-file-name "g.txt" repo))
+    (rata-test-agent-worktree--git repo "add" "g.txt")
+    (rata-test-agent-worktree--git repo "commit" "-qm" "g")
+    (write-region "g2\n" nil (expand-file-name "g.txt" repo))
+    (write-region "x\ny\n" nil (expand-file-name "f.txt" repo))
+    (let ((buf (find-file-noselect (expand-file-name "f.txt" repo))))
+      (with-current-buffer buf
+        (let ((transient-mark-mode t))
+          (goto-char (point-min))
+          (set-mark (point))
+          (forward-line 1)
+          (activate-mark)
+          (let ((ctx (rata-agent-prompt--collect)))
+            (should (equal "@f.txt" (alist-get 'file ctx)))
+            (should (equal (file-name-nondirectory (directory-file-name repo))
+                           (alist-get 'project ctx)))
+            (should (string-match-p "\\`f.txt:1-1\n```.*\nx\n```\\'" (alist-get 'region ctx)))
+            (should (string-match-p "^\\+y$" (alist-get 'diff ctx)))
+            (should (string-prefix-p "```diff\n" (alist-get 'diff ctx)))
+            (should-not (string-match-p "g2" (alist-get 'diff ctx)))
+            (should-not (alist-get 'error ctx)))
+          ;; No region, no diff: both missing rather than empty text.
+          (deactivate-mark)
+          (rata-test-agent-worktree--git repo "commit" "-qm" "y" "--" "f.txt")
+          (let ((ctx (rata-agent-prompt--collect)))
+            (should-not (alist-get 'region ctx))
+            (should-not (alist-get 'diff ctx))))))))
+
+(ert-deftest rata-test-agent-prompt-diff-is-capped ()
+  "A diff longer than the cap is cut, and says so."
+  (let ((rata-agent-prompt-diff-max-chars 10))
+    (should (equal "```diff\n0123456789\n[... diff truncated at 10 characters]\n```"
+                   (rata-agent-prompt--fence-diff "0123456789abcdef")))))
+
+(defmacro rata-test-agent-prompt--with-stubs (busy &rest body)
+  "Run BODY with one prompt `t1' and agent-shell stubbed.
+`inserted' and `queued' collect what reached the stubs."
+  (declare (indent 1))
+  `(let* ((dir (make-temp-file "rata-prompts-" t))
+          (shell (generate-new-buffer " *rata-test-shell*"))
+          (rata-agent-prompt-directory dir)
+          (rata-agent-prompt-extra-directory nil)
+          inserted queued)
+     (unwind-protect
+         (progn
+           (write-region "<!-- d -->\nHello {{project}} {{region}}" nil
+                         (expand-file-name "t1.md" dir))
+           (cl-letf (((symbol-function 'agent-shell-shell-buffer)
+                      (lambda (&rest _) shell))
+                     ((symbol-function 'agent-shell-insert)
+                      (lambda (&rest args) (push args inserted)))
+                     ((symbol-function 'shell-maker-busy) (lambda () ,busy))
+                     ((symbol-function 'agent-shell--prompt-queue-read)
+                      (lambda (&rest args) (plist-get args :initial)))
+                     ((symbol-function 'agent-shell-prompt-queue)
+                      (lambda (prompt) (push (cons (current-buffer) prompt) queued)))
+                     ((symbol-function 'rata-agent-prompt--collect)
+                      (lambda () '((project . "demo")))))
+             ,@body))
+       (kill-buffer shell)
+       (delete-directory dir t))))
+
+(ert-deftest rata-test-agent-prompt-inserts-without-submitting ()
+  "The expanded prompt is inserted into the shell and never submitted."
+  (rata-test-agent-prompt--with-stubs nil
+    (rata-agent-prompt "t1")
+    (should (= 1 (length inserted)))
+    (let ((args (car inserted)))
+      (should (equal "Hello demo {{region}}" (plist-get args :text)))
+      (should (eq shell (plist-get args :shell-buffer)))
+      (should-not (plist-get args :submit)))
+    (should-not queued)))
+
+(ert-deftest rata-test-agent-prompt-busy-shell-queues ()
+  "A busy shell gets the prompt through its queue, editable first."
+  (rata-test-agent-prompt--with-stubs t
+    (rata-agent-prompt "t1")
+    (should-not inserted)
+    (should (equal (list (cons shell "Hello demo {{region}}")) queued))))
+
+(ert-deftest rata-test-agent-prompt-loads-without-agent-shell ()
+  "The module loads with agent-shell absent, and does not load it (L-052)."
+  (let* ((emacs (expand-file-name invocation-name invocation-directory))
+         (lisp (expand-file-name "lisp" user-emacs-directory))
+         (status (call-process
+                  emacs nil nil nil "-Q" "--batch" "-L" lisp
+                  "--eval" "(require 'init-agent-prompts)"
+                  "--eval" "(kill-emacs (if (featurep 'agent-shell) 2 0))")))
+    (should (eq status 0))))
 
 ;;; ============================================================
 ;;; Run all tests

@@ -64,7 +64,7 @@ Not in the repo, not covered by any test, and modules here can read or transmit 
 | Hugo site | `~/workspace/second-brain/hugo/` | `init-blog.el` (`ox-hugo` export, `rata-hugo-dir`) |
 | Credentials | `~/.authinfo.gpg`, `~/.ansible-vault-pass` | `auth-source`, ansible-vault |
 | Editor state | `var/`, `etc/` — recentf, history, elfeed db, SQL scratch, persp | `no-littering`; gitignored |
-| Buffer contents sent to models | wherever the operator is editing | `init-llm.el` — `gptel`/`ellama`/`aidermacs` all point at **local Ollama**, so this stays on the machine; `init-claude-loop.el` and `agent-shell` send to Anthropic |
+| Buffer contents sent to models | wherever the operator is editing | `init-llm.el` — `gptel`/`ellama`/`aidermacs` all send to the **first entry of `rata-llm-providers`**: local Ollama by the tracked default, the corporate LiteLLM proxy where `local.el` says so (D-022). The proxy key lives in `~/.authinfo.gpg` under the URL host, never in either file; `init-claude-loop.el` and `agent-shell` send to Anthropic |
 
 `init-present.el` deliberately redirects HTML export **out of** the roam tree
 (`rata-reveal-export-dir`) so generated files never land among the notes. Preserve that.

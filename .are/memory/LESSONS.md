@@ -1414,3 +1414,180 @@ not a keymap: turning one on in a test runs whatever its body runs, so read the
 `define-derived-mode` before you `funcall` it. And read ERT's summary line, not its
 failure lines — a run that never printed `Ran N tests` did not run N tests. Related:
 L-034, FAIL-0016.
+
+## L-050 — In batch, every minibuffer read is a hang or an abort; fence `read-from-minibuffer` in the harness and give the recipe `/dev/null`
+
+**Date:** 2026-09-14. `(require 'aidermacs)` in a new test loaded its vterm backend, vterm
+asked "Compile vterm-module? (y or n)", and `just test-ert` sat on a socket read for seven
+minutes with no failure and no summary (FAIL-0022). L-049 had fenced the *network*
+chokepoints after a passphrase prompt; the prompt itself — the stdin read — was the
+general case and was still open. Apply: (1) the harness overrides `read-from-minibuffer`,
+`read-string` and `yes-or-no-p` to signal with the prompt text — three, because the last
+two are C primitives that read the minibuffer inside C where advice on the first is
+invisible; a probe of all five prompt kinds (`y-or-n-p`, `yes-or-no-p`, `read-string`,
+`read-passwd`, `completing-read`) is what showed one entry caught only `completing-read`,
+so verify a fence by driving every path into it, not the one you met; (2) the recipe redirects stdin
+from `/dev/null` so a read the advice cannot see errors instead of waiting; (3) a
+`require` in a test is a load of every top-level form in the package *and its requires* —
+read them first, and prefer the sub-file that owns the variable you need
+(`aidermacs-models`, not `aidermacs`). A run that prints no `Ran N tests` line did not run
+N tests; check the process's `wchan` and fd 0 before assuming slowness. Related: L-049,
+FAIL-0021, FAIL-0016.
+
+## L-051 — A use-package `:custom` clause beats a `local.el` setq; a template line that names such a variable is a lie
+
+**Date:** 2026-09-15. `local.el.example` told the reader to `(setq khoj-server-url ...)` for
+a different homelab host, and `init-khoj.el` set the same variable through `:custom`.
+`:custom` expands to `custom-theme-set-variables` under the `use-package` theme, which
+runs when the package loads — after `local.el` — and sets the value unconditionally, so
+the override was overwritten the moment khoj loaded. Probed in batch: `setq`, then a
+theme-set of the same variable; the theme value won. Nothing had ever tested the template
+line, and the audit's comment explicitly excused the variable as "set through :custom".
+Apply: (1) a per-machine value that a module passes to `:custom` goes through a `rata-`
+`defvar` the clause reads from, and the template names the `rata-` variable
+(`rata-khoj-server-url`); (2) the `local-example-in-sync` audit now fails when a
+template variable is the target of any `:custom` clause in `lisp/`;
+(3) `rata-test-khoj-server-url-comes-from-rata-variable` loads khoj and asserts the
+package's variable equals the `rata-` one. The same mechanism is why
+`aidermacs-default-model` in `init-llm.el` is *computed from* `rata-llm-providers` inside
+its `:custom` clause rather than set beside it. Related: D-012, L-011, L-039, FAIL-0016.
+
+## L-052 — On Emacs 31, `featurep` ignores a `let` of `features`; guard on a function a test can stub
+
+**Date:** 2026-09-30. `init-agent-center.el` adopts already-open shells only once agent-shell
+has loaded, and the guard is `featurep`, not `fboundp` — `agent-shell-buffers` is an
+autoload, so `fboundp` is true at startup and calling it would load the package, defeating
+its `:commands` deferral (the same cost as L-028). The adoption test then faked the feature
+with `(cl-letf ((features (cons 'agent-shell features))) ...)` and still saw nothing adopted.
+Probed on 31.1: under `(let ((features (cons 'x features))) ...)` `(memq 'x features)` is
+true and `(featurep 'x)` is nil; after `(provide 'x)`, `(let ((features nil)) (featurep 'x))`
+is still t. The primitive no longer reads the dynamic value. Apply: (1) a load-state guard a
+test must flip goes behind a one-line predicate (`rata-agent-center--agent-shell-loaded-p`)
+that the test stubs with `cl-letf`; (2) an autoloaded symbol is never evidence that its
+package is loaded — `fboundp` is true for the stub. Related: L-028, FAIL-0012.
+
+## L-053 — persp-mode saves and restores side windows with each layout; take a panel off before the save
+
+**Date:** 2026-09-30. Probed in a fully initialised batch Emacs (Emacs 31.1, persp-mode
+from `elpaca/sources`) before writing `init-agent-center.el`'s pin code: open a
+`display-buffer-in-side-window` panel in layout A, switch to B — **gone**; back to A —
+**back**, still a right side window of the same width. persp stores each layout's window
+state (side windows included) in `persp-frame-save-state` and puts it back on activation,
+so a panel belongs to whichever layouts it was open in when you left them. Closing it in B
+would not stop A from restoring it. Apply: a frame-wide panel deletes itself in
+`persp-before-deactivate-functions` — which persp runs *before* `persp-frame-save-state`
+(`persp--deactivate`) — so no layout ever stores it, and re-displays in
+`persp-activated-functions` while a pin flag is set. `persp-filter-save-buffers-functions`
+is a different mechanism (state *files*, not switches) and already skips `*`-named buffers
+by default. `rata-test-agent-center-panel-survives-layout-switch` drives both directions,
+`delete-other-windows`, and close-then-switch. Not proven here: the GUI frame (batch has one
+80x25 TTY frame) and `persp-save-state-to-file` with the panel open.
+
+## L-054 — Batch `format-mode-line` never evaluates `:eval`; a mode-line test that uses it passes or fails on nothing
+
+**Date:** 2026-09-30. `rata-test-agent-center-mode-line-counts-registry` rendered
+`rata-agent-center-mode-line` (`(:eval ...)`) with `format-mode-line` and got `""`, though
+the segment function returned `" ⚠1 ●2"`. Probed with `emacs -Q --batch` on 31.1:
+`(format-mode-line '(:eval "abc"))` is `""`, and a `setq` inside the `:eval` never runs. A
+test that asserts an *empty* segment through `format-mode-line` would therefore pass
+whatever the code does. Apply: assert the construct's shape (`(:eval (FN))`) and call FN
+directly; keep FN free of side effects, since redisplay runs it. Related: L-052 (another
+Emacs 31 primitive that a batch test cannot drive the obvious way).
+
+## L-055 — Write a fake implementation before calling an interface extracted; it finds what the interface secretly assumes
+
+**Date:** 2026-10-01. Phase 1 of `plans/claude-loop-agent-shell.md` pulled the CLI out of
+`init-claude-loop.el` behind `rata-claude-loop--backends`. Every existing test passed
+unchanged — which proved the CLI path was preserved and nothing about the seam, because
+those tests only ever drive the one implementation that already satisfies every hidden
+assumption. The first run through an in-process fake backend (e2e §16) halted with "no
+session to resume": the shared failure path refuses a retry without `:session-id`, which
+the CLI sets as a side effect of parsing its `init` event. Nothing in the contract said
+so. Apply: when extracting an interface, add a second, minimal implementation in the test
+suite in the same change and drive a full run through it; whatever it trips over is
+either a contract obligation to document (as here) or an implementation detail leaking
+through the seam (move it behind). Related: the backend docstring now states the
+`:session-id` obligation.
+
+## L-056 — A verification step that can install can wait on the internet; compiling must not install
+
+**Date:** 2026-10-06. `just compile` byte-compiles each module in bare `--batch`, where
+package.el is live, and `use-package` honours `:ensure t` *at compile time*. So every gate
+above `fast` quietly depended on `elpa.gnu.org`: slow on 2026-09-30 (FAIL-0023, filed with
+the mechanism unknown), a hang on 2026-10-06 when the host was down, and all along an
+unnoticed `./elpa/` full of package.el installs that nothing loads. The symptom looked like
+gpg or stdin because the last line printed was the keyring import; the line after it,
+`Contacting host: elpa.gnu.org:443`, only appears when the compile is run alone. Apply: a
+check proves something about the repository only if it needs nothing outside it — when a
+gate is slow, run the slow step by itself and read *all* its output before guessing.
+`use-package-ensure-function` is `ignore` in the recipe, and the audit's
+`compile-installs-nothing` check holds it there. Related: FAIL-0023, FAIL-0022, L-050.
+
+## L-057 — Let-binding a package's variable before the package loads binds it lexically
+
+**Date:** 2026-10-06. A test in `lexical-binding: t` wrapped `rata-elfeed-hn-open-item` in
+`(let ((shr-use-fonts nil)) ...)`. shr had not loaded yet, so the variable was not special,
+the `let` was lexical, and when the code inside loaded shr its `defcustom` signalled
+"Defining as dynamic an already lexical var" — caught by the module's own callback guard
+and turned into a `message`, so the test failed on a missing request, far from the cause.
+Every earlier test passed only because elfeed had already loaded shr. The module had the
+same trap latent for `shr-width`, `shr-base` and `browse-url-handlers`. Apply: before
+let-binding another package's variable, either `require` the package or declare the
+variable special at top level (`(eval-when-compile (defvar shr-width))` in this repo, which
+lint accepts); a binding that works only because of load order breaks when the order does.
+
+## L-058 — Fixture-backed network code is untested at the transport; probe the live path against several hosts before calling it done
+
+**Date:** 2026-10-06. `init-elfeed-hn.el` passed 28 tests and `are-verify full`, and every
+article still timed out on first use (FAIL-0024): all tests answered from fixtures behind the
+one network function, which is the right rule for `tests/`, and the single live request made
+went to a host that happened to be reachable. Apply: when a feature adds a network fetch, the
+session runs a throwaway live probe outside `tests/` against a handful of *different* hosts
+(different CDNs, IPv4-only and dual-stack, an error status, a non-HTML reply) and compares it
+with `curl`. A difference is a transport finding no fixture can produce. Related: FAIL-0017.
+
+## L-059 — `shr-insert-document` ignores a bound `shr-base`; give it a `<base>` element
+
+**Date:** 2026-10-06. `init-elfeed-hn.el` rendered articles inside
+`(let ((shr-base (shr-parse-base url))) (shr-insert-document dom))`, and every relative image
+and link stayed relative. `shr-insert-document` binds `shr-base` to nil itself and sets it
+only from a `<base href>` element as it walks the DOM (`shr-tag-base`). Apply: render as
+`(shr-insert-document `(base ((href . ,url)) ,dom))` — which is what elfeed does — and test
+the resolved URL, since nothing about the rendered text shows the link is wrong. Related:
+FAIL-0024, L-057 (another shr variable that looked bound and was not).
+
+## L-060 — A deadline recomputed from a fresh clock never compares equal; give "already armed" a slack
+
+**Date:** 2026-10-08. A2's activity throttle (`init-agent-center.el`) arms a render at
+`last-render + interval` and keeps an armed timer unless the new deadline is earlier. Each
+chunk recomputes that deadline as `now + (interval - (now - last))`, which is the same
+instant on paper, but float rounding makes it a hair earlier about every tenth call, so 50
+chunks armed 4 timers instead of 1. `rata-test-agent-center-activity-render-throttled`
+caught it by counting `run-with-timer` calls, not by reading the code. Apply: when a
+debounce compares deadlines, compare with a tolerance (`rata-agent-center--arm-render`
+uses 50 ms), and test a debounce by counting the timers it creates under a burst.
+
+## L-061 — An ignored directory inside a worktree is deleted by `git worktree remove` without a word
+
+**Date:** 2026-10-08. B6 (`init-agent-worktree.el`). `git worktree remove` refuses a
+worktree with modified or *untracked* files, so it reads as safe — but *ignored* files go
+with it. agent-shell writes its transcripts to `<cwd>/.agent-shell/transcripts/`, the cwd
+of a worktree shell is the worktree, and `.agent-shell/` is ignored through
+`$GIT_COMMON_DIR/info/exclude`, which every worktree shares. So "clean, merged, remove"
+would have erased the only record of each session, the thing B9 is built on.
+`rata-agent-worktree--keep-transcripts` copies them to the main checkout first, and
+`rata-test-agent-worktree-finish-removes-merged` asserts the copy. Apply: before removing
+a worktree (or any directory git calls clean), list what `git status --ignored` would
+show there and decide what of it is data.
+
+## L-062 — A buffer-local read inside `with-temp-buffer` is the temp buffer's, and a test may not notice
+
+**Date:** 2026-10-08. C12 (`init-agent-prompts.el`). `rata-agent-prompt--diff` first bound
+`(file (and buffer-file-name …))` inside the `with-temp-buffer` that collects git output.
+There `buffer-file-name` is nil, so `{{diff}}` silently widened from the visited file to the
+whole project. The first test missed it: the visited file was the only change in the repo,
+so both diffs were identical. `rata-test-agent-prompt-collect-from-file-buffer` now
+changes a second file and asserts it is absent, and was checked against the buggy version.
+Apply: read `buffer-file-name`, `default-directory`, `major-mode` and other buffer-locals
+*before* entering `with-temp-buffer`; and when a fallback exists (file → project), give
+the test a fixture where the two answers differ.

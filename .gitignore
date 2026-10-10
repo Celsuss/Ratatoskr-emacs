@@ -46,6 +46,7 @@ transient/history.el
 /.org-id-locations
 /projectile-bookmarks.eld
 /.agent-shell/
+/ellama-sessions/
 
 docs/*
 # ...except hand-written documentation, which belongs on the remote.

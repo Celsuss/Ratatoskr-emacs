@@ -20,6 +20,13 @@
 ;; no-op on mismatch, which covers the child process, the stderr pipe, the
 ;; timeout timer, the grace-period kill and the pending step timer with one
 ;; check.
+;;
+;; How an attempt reaches Claude is a backend (`rata-claude-loop-backend',
+;; `rata-claude-loop--backends').  The state machine, checkbox marking, verify,
+;; budgets and the journal are shared; a backend only starts, retries, stops
+;; and reports an attempt, and reports it as a normalised attempt record (see
+;; `rata-claude-loop--cli-attempt') so classification never reads one
+;; backend's wire format.
 
 (require 'ansi-color)
 (require 'seq)
@@ -42,6 +49,15 @@
 (defcustom rata-claude-loop-executable "claude"
   "Name of (or path to) the Claude Code CLI executable."
   :type 'string
+  :group 'rata-claude-loop)
+
+(defcustom rata-claude-loop-backend 'cli
+  "How each task attempt reaches Claude.
+`cli' runs one headless `claude -p' process per attempt and retries by
+resuming its session.  Read once when a run starts, so changing it
+mid-run takes effect from the next run.  Each value is a key of
+`rata-claude-loop--backends'."
+  :type '(choice (const :tag "Headless claude -p" cli))
   :group 'rata-claude-loop)
 
 (defcustom rata-claude-loop-extra-args '("--permission-mode" "acceptEdits")
@@ -138,6 +154,18 @@ Group 1 must be the task description.  Only used in `org-mode' files."
   :type 'regexp
   :group 'rata-claude-loop)
 
+(defcustom rata-claude-loop-heading-regexp
+  "^#\\{1,6\\}[ \t]+\\(\\(?:Phase\\|Task\\)\\b.*\\)$"
+  "Regexp matching a Markdown heading that is a task; group 1 is the text.
+Lets a plan written as `## Phase 0 -- ...' sections run without first
+being rewritten as a checklist.  Matched case-sensitively, and only in a
+non-Org file that holds no checklist item at all: see
+`rata-claude-loop--headings-apply-p'.  A finished heading is marked by
+appending \" [done]\" or \" [skipped]\", which is also how to keep a phase
+out of a run -- mark it skipped by hand.  nil disables heading tasks."
+  :type '(choice (const :tag "Off" nil) regexp)
+  :group 'rata-claude-loop)
+
 (defcustom rata-claude-loop-org-cancelled-keywords '("CANCELLED" "CANCELED" "KILL")
   "Org keywords meaning \"deliberately not done\", tried in order.
 A skipped Org task moves to the first of these present in
@@ -194,10 +222,12 @@ before the prompt is built."
   :type 'boolean
   :group 'rata-claude-loop)
 
-(defcustom rata-claude-loop-task-body-limit 2000
+(defcustom rata-claude-loop-task-body-limit 4000
   "Maximum characters of task detail to include in a prompt.
 Truncated from the end, the opposite of `rata-claude-loop-feedback-limit':
-the top of a task description is the part that defines it."
+the top of a task description is the part that defines it.  Sized for a
+whole plan section under a Phase heading, which ends in its verification
+steps -- the part a tighter limit would cut first."
   :type 'integer
   :group 'rata-claude-loop)
 
@@ -415,7 +445,8 @@ run."
   :group 'rata-claude-loop)
 
 (defcustom rata-claude-loop-task-file-names
-  '("tasks.md" "TASKS.md" "tasks.org" "TASKS.org" "TODO.md" "TODO.org")
+  '("tasks.md" "TASKS.md" "tasks.org" "TASKS.org" "TODO.md" "TODO.org"
+    "PLAN.md" "plan.md")
   "File names searched for at the project root when no task file is obvious."
   :type '(repeat string)
   :group 'rata-claude-loop)
@@ -467,12 +498,13 @@ Determines the working directory Claude is launched in."
   "Plist describing the running loop, or nil when idle.
 
 Loop-wide keys: :file :root :started :single :status :phase :epoch :index
-:open-count :cost :tasks :journal.  :status is `running', `halted' or
+:open-count :cost :tasks :journal :backend.  :status is `running', `halted' or
 `finished'.  :phase is `idle', `baseline', `claude', `verify', `mark',
 `between' or `done' and is the finer grained truth; :status exists so
 `rata-claude-loop-running-p' stays cheap.  :cost accumulates every
 attempt's reported spend, :tasks holds one record per finished task
-(newest first) and :journal is the run's journal file, or nil.
+(newest first), :journal is the run's journal file, or nil, and
+:backend is the `rata-claude-loop-backend' the run started with.
 
 Per-task keys: :attempt :current-task :current-line :current-body
 :task-started :task-cost :baseline.
@@ -499,8 +531,8 @@ outstanding callbacks; see the commentary at the top of this file.")
        (eq (rata-claude-loop--get :status) 'running)))
 
 (defun rata-claude-loop--busy-p ()
-  "Return non-nil while the loop owns a live process."
-  (or (process-live-p (rata-claude-loop--get :process))
+  "Return non-nil while the loop owns a live attempt or verify process."
+  (or (rata-claude-loop--backend-call :live-p)
       (process-live-p (rata-claude-loop--get :verify-process))))
 
 (defun rata-claude-loop--wedged-p ()
@@ -759,30 +791,96 @@ the project root, then ask."
       (list rata-claude-loop-task-regexp rata-claude-loop-org-todo-regexp)
     (list rata-claude-loop-task-regexp)))
 
-(defun rata-claude-loop--scan-buffer ()
-  "Return (LINE . TEXT) for the first open task in the current buffer, or nil."
-  (save-excursion
-    (let ((best nil))
-      (dolist (regexp (rata-claude-loop--task-regexps))
-        (goto-char (point-min))
-        (when (re-search-forward regexp nil t)
-          (let ((position (match-beginning 0)))
-            (when (or (null best) (< position (car best)))
-              (setq best (list position
-                               (line-number-at-pos position)
-                               (string-trim (match-string 1))))))))
-      (when best
-        (cons (nth 1 best) (nth 2 best))))))
+(defconst rata-claude-loop--checklist-item-regexp "^[ \t]*[-+*] \\[[ xX-]\\]"
+  "Regexp matching a checklist item in any state, open or closed.")
 
-(defun rata-claude-loop--count-in-buffer ()
-  "Return the number of open tasks in the current buffer."
+(defconst rata-claude-loop--heading-closed-regexp
+  "[ \t]\\[\\(?:done\\|skipped\\)\\]\\'"
+  "Regexp matching the marker that closes a heading task's text.")
+
+(defconst rata-claude-loop--fence-regexp "^[ \t]*\\(```\\|~~~\\)"
+  "Regexp matching a Markdown code fence; group 1 is the fence itself.")
+
+(defun rata-claude-loop--fence-step (fence line)
+  "Return the fence state after LINE, given the open FENCE (or nil).
+Only the fence that opened a block closes it, so a ``` line inside a ~~~
+block is content."
+  (cond
+   ((not (string-match rata-claude-loop--fence-regexp line)) fence)
+   ((null fence) (match-string 1 line))
+   ((equal fence (match-string 1 line)) nil)
+   (t fence)))
+
+(defun rata-claude-loop--headings-apply-p ()
+  "Return non-nil when Phase/Task headings count as tasks in this buffer.
+Only outside Org, where TODO keywords already do this job, and only in a
+file with no checklist item at all, open or ticked.  Checkboxes win so an
+existing checklist behaves exactly as before, and so a phase is never sent
+with its own sub-boxes as detail and then made to run each of them again."
+  (and rata-claude-loop-heading-regexp
+       (not (derived-mode-p 'org-mode))
+       (save-excursion
+         (goto-char (point-min))
+         (not (re-search-forward rata-claude-loop--checklist-item-regexp
+                                 nil t)))))
+
+(defun rata-claude-loop--heading-tasks ()
+  "Return (LINE . TEXT) for every open Phase/Task heading in the buffer.
+Headings already closed with a done or skipped marker are left out, and
+so is anything inside fenced code: a `# Task' comment in a shell block is
+not a heading.  So is a matching heading inside another task's section,
+open or closed: that section is the outer task's detail, and running the
+inner one too would do its work twice -- the same reason checkboxes win."
   (save-excursion
-    (let ((count 0))
+    (goto-char (point-min))
+    (let ((case-fold-search nil)
+          (line 1)
+          (fence nil)
+          (scope nil)                   ; level of the enclosing task heading
+          (tasks nil))
+      (while (not (eobp))
+        (let ((text (buffer-substring-no-properties (line-beginning-position)
+                                                    (line-end-position))))
+          (if (or fence (string-match-p rata-claude-loop--fence-regexp text))
+              (setq fence (rata-claude-loop--fence-step fence text))
+            (when (string-match "\\`\\(#+\\)[ \t]" text)
+              (let ((level (length (match-string 1 text))))
+                (when (and scope (<= level scope))
+                  (setq scope nil))
+                (when (and (null scope)
+                           (string-match rata-claude-loop-heading-regexp text))
+                  (setq scope level)
+                  (let ((task (string-trim (match-string 1 text))))
+                    (unless (string-match-p
+                             rata-claude-loop--heading-closed-regexp task)
+                      (push (cons line task) tasks))))))))
+        (setq line (1+ line))
+        (forward-line 1))
+      (nreverse tasks))))
+
+(defun rata-claude-loop--open-tasks ()
+  "Return (LINE . TEXT) for every open task in the current buffer, in order.
+The one enumeration every other scan goes through, so the first task, the
+open count and the unambiguous-match check can never disagree about what
+counts as a task."
+  (let ((tasks (and (rata-claude-loop--headings-apply-p)
+                    (rata-claude-loop--heading-tasks))))
+    (save-excursion
       (dolist (regexp (rata-claude-loop--task-regexps))
         (goto-char (point-min))
         (while (re-search-forward regexp nil t)
-          (setq count (1+ count))))
-      count)))
+          (push (cons (line-number-at-pos (match-beginning 0))
+                      (string-trim (match-string 1)))
+                tasks))))
+    (sort tasks (lambda (a b) (< (car a) (car b))))))
+
+(defun rata-claude-loop--scan-buffer ()
+  "Return (LINE . TEXT) for the first open task in the current buffer, or nil."
+  (car (rata-claude-loop--open-tasks)))
+
+(defun rata-claude-loop--count-in-buffer ()
+  "Return the number of open tasks in the current buffer."
+  (length (rata-claude-loop--open-tasks)))
 
 (defun rata-claude-loop--dedent (lines)
   "Return LINES with the whitespace common to all of them removed."
@@ -849,15 +947,41 @@ it, and a property drawer in a prompt reads as noise."
       (unless done (forward-line 1)))
     (rata-claude-loop--body-string (nreverse lines))))
 
+(defun rata-claude-loop--heading-body-at-point ()
+  "Return the section under the Markdown heading at point, or nil.
+Runs to the next heading of the same level or higher, so a phase's own
+subsections belong to it.  A `#' line inside fenced code is content."
+  (let ((level (save-excursion (beginning-of-line) (skip-chars-forward "#")))
+        (lines nil)
+        (fence nil)
+        (done nil))
+    (forward-line 1)
+    (while (and (not done) (not (eobp)))
+      (let ((line (buffer-substring-no-properties (line-beginning-position)
+                                                  (line-end-position))))
+        (if (or fence (string-match-p rata-claude-loop--fence-regexp line))
+            (progn (setq fence (rata-claude-loop--fence-step fence line))
+                   (push line lines))
+          (if (and (string-match "\\`\\(#+\\)[ \t]" line)
+                   (<= (length (match-string 1 line)) level))
+              (setq done t)
+            (push line lines))))
+      (unless done (forward-line 1)))
+    (rata-claude-loop--body-string (nreverse lines))))
+
 (defun rata-claude-loop--body-at (line)
   "Return the detail written under the task on LINE of this buffer, or nil."
-  (save-excursion
-    (goto-char (point-min))
-    (forward-line (1- line))
-    (if (and (derived-mode-p 'org-mode)
+  (let ((heading (and (rata-claude-loop--headings-apply-p)
+                      (assq line (rata-claude-loop--heading-tasks)))))
+    (save-excursion
+      (goto-char (point-min))
+      (forward-line (1- line))
+      (cond
+       ((and (derived-mode-p 'org-mode)
              (looking-at rata-claude-loop-org-todo-regexp))
-        (rata-claude-loop--org-body-at-point)
-      (rata-claude-loop--indented-body-at-point))))
+        (rata-claude-loop--org-body-at-point))
+       (heading (rata-claude-loop--heading-body-at-point))
+       (t (rata-claude-loop--indented-body-at-point))))))
 
 (defun rata-claude-loop--task-body (file line)
   "Return the detail written under the task on LINE of FILE, or nil."
@@ -867,13 +991,7 @@ it, and a property drawer in a prompt reads as noise."
 
 (defun rata-claude-loop--task-at-line-p (line text)
   "Return non-nil when LINE of the current buffer is an open task reading TEXT."
-  (save-excursion
-    (goto-char (point-min))
-    (forward-line (1- line))
-    (seq-some (lambda (regexp)
-                (and (looking-at regexp)
-                     (equal (string-trim (match-string 1)) text)))
-              (rata-claude-loop--task-regexps))))
+  (equal (cdr (assq line (rata-claude-loop--open-tasks))) text))
 
 (defun rata-claude-loop--find-task-line (line text)
   "Return the line of the current buffer holding the open task TEXT, or nil.
@@ -883,15 +1001,11 @@ ambiguous match: ticking the wrong box is worse than halting and saying
 so."
   (if (rata-claude-loop--task-at-line-p line text)
       line
-    (save-excursion
-      (let ((matches nil))
-        (dolist (regexp (rata-claude-loop--task-regexps))
-          (goto-char (point-min))
-          (while (re-search-forward regexp nil t)
-            (when (equal (string-trim (match-string 1)) text)
-              (push (line-number-at-pos (match-beginning 0)) matches))))
-        (setq matches (delete-dups matches))
-        (and (= (length matches) 1) (car matches))))))
+    (let ((matches (delete-dups
+                    (mapcar #'car
+                            (seq-filter (lambda (task) (equal (cdr task) text))
+                                        (rata-claude-loop--open-tasks))))))
+      (and (= (length matches) 1) (car matches)))))
 
 (defun rata-claude-loop--org-mark (marker)
   "Move the Org heading at point to a state representing MARKER.
@@ -912,19 +1026,29 @@ none — so fall back to DONE plus a tag, which keeps the intent."
 (defun rata-claude-loop--mark-in-buffer (line marker)
   "Mark the task on LINE of the current buffer with MARKER.
 MARKER is `done' or `skipped'.  Returns non-nil when the line changed."
-  (save-excursion
-    (goto-char (point-min))
-    (forward-line (1- line))
-    (cond
-     ;; Org TODO heading: go through org so logging/repeaters behave.
-     ((and (derived-mode-p 'org-mode)
-           (looking-at rata-claude-loop-org-todo-regexp))
-      (rata-claude-loop--org-mark marker)
-      t)
-     ((looking-at "^\\([ \t]*[-+*] \\)\\[ \\]")
-      (replace-match (concat "\\1[" (if (eq marker 'done) "X" "-") "]")
-                     nil nil)
-      t))))
+  (let ((heading (and (rata-claude-loop--headings-apply-p)
+                      (assq line (rata-claude-loop--heading-tasks)))))
+    (save-excursion
+      (goto-char (point-min))
+      (forward-line (1- line))
+      (cond
+       ;; Phase/Task heading: it has no box, so a marker is appended instead.
+       ;; Only an open one is in `heading', so a closed line reports no change.
+       (heading
+        (end-of-line)
+        (delete-region (progn (skip-chars-backward " \t") (point))
+                       (line-end-position))
+        (insert (if (eq marker 'done) " [done]" " [skipped]"))
+        t)
+       ;; Org TODO heading: go through org so logging/repeaters behave.
+       ((and (derived-mode-p 'org-mode)
+             (looking-at rata-claude-loop-org-todo-regexp))
+        (rata-claude-loop--org-mark marker)
+        t)
+       ((looking-at "^\\([ \t]*[-+*] \\)\\[ \\]")
+        (replace-match (concat "\\1[" (if (eq marker 'done) "X" "-") "]")
+                       nil nil)
+        t)))))
 
 (defun rata-claude-loop--mark-task (file line text marker)
   "Mark the task TEXT of FILE, expected on LINE, with MARKER.
@@ -1231,26 +1355,54 @@ each chunk would split one message across several marker lines."
     ("error_during_execution" 'execution)
     (_ 'crash)))
 
-(defun rata-claude-loop--denials ()
-  "Return the permission denials recorded in this attempt's result event."
-  (alist-get 'permission_denials (rata-claude-loop--get :result)))
+(defun rata-claude-loop--cli-attempt (result code)
+  "Return the attempt record for a CLI attempt.
+RESULT is the decoded `result' stream event, or nil if none arrived, and
+CODE the process exit code.  The record is what every backend reports
+and all that classification reads:
 
-(defun rata-claude-loop--denied-names (tools)
-  "Return the names of denied tools that appear in TOOLS, without duplicates."
+  :result-p      non-nil when the attempt reported a result at all
+  :subtype       \"success\", or an error subtype for
+                 `rata-claude-loop--subtype-kind' to map
+  :is-error      non-nil when the result itself says it failed
+  :exit-code     the process exit code, or nil for a backend with no process
+  :denials       permission denials, each an alist with `tool_name' and
+                 `tool_input' -- the CLI's own shape, which other backends
+                 produce too
+
+`rata-claude-loop--attempt' adds the status-line verdict to it."
+  (list :result-p (and result t)
+        :subtype (alist-get 'subtype result)
+        :is-error (alist-get 'is_error result)
+        :exit-code code
+        :denials (alist-get 'permission_denials result)))
+
+(defun rata-claude-loop--attempt (code)
+  "Return the current attempt's record, CODE being its exit code.
+The backend supplies the record; the `RATA-TASK-STATUS:' verdict is
+parsed from the agent's text the same way whatever the backend."
+  (append (rata-claude-loop--backend-call :attempt code)
+          (list :report (rata-claude-loop--get :report)
+                :report-reason (rata-claude-loop--get :report-reason))))
+
+(defun rata-claude-loop--denied-names (tools denials)
+  "Return the names of DENIALS whose tool is in TOOLS, without duplicates."
   (delete-dups
    (delq nil
          (mapcar (lambda (denial)
                    (let ((name (alist-get 'tool_name denial)))
                      (and (member name tools) name)))
-                 (rata-claude-loop--denials)))))
+                 denials))))
 
-(defun rata-claude-loop--critical-denials ()
-  "Return the names of denied tools that mean the task cannot have worked."
-  (rata-claude-loop--denied-names rata-claude-loop-critical-denial-tools))
+(defun rata-claude-loop--critical-denials (denials)
+  "Return the names in DENIALS that mean the task cannot have worked."
+  (rata-claude-loop--denied-names rata-claude-loop-critical-denial-tools
+                                  denials))
 
-(defun rata-claude-loop--verification-denials ()
-  "Return the names of denied tools that mean the work was never executed."
-  (rata-claude-loop--denied-names rata-claude-loop-verification-denial-tools))
+(defun rata-claude-loop--verification-denials (denials)
+  "Return the names in DENIALS that mean the work was never executed."
+  (rata-claude-loop--denied-names rata-claude-loop-verification-denial-tools
+                                  denials))
 
 (defun rata-claude-loop--denial-pattern (denial)
   "Return an `--allowedTools' pattern that would have permitted DENIAL.
@@ -1272,22 +1424,23 @@ suggestion, and it is a suggestion, not something this module applies."
               (format "Bash(%s:*)" (file-name-nondirectory program))
             name))))))
 
-(defun rata-claude-loop--denial-patterns (tools)
-  "Return suggested `--allowedTools' patterns for denials of TOOLS."
+(defun rata-claude-loop--denial-patterns (tools denials)
+  "Return suggested `--allowedTools' patterns for DENIALS of TOOLS."
   (delete-dups
    (delq nil
          (mapcar (lambda (denial)
                    (and (member (alist-get 'tool_name denial) tools)
                         (rata-claude-loop--denial-pattern denial)))
-                 (rata-claude-loop--denials)))))
+                 denials))))
 
-(defun rata-claude-loop--unverified-reason (names)
+(defun rata-claude-loop--unverified-reason (names denials)
   "Return the failure reason for an attempt blocked from running anything.
-NAMES are the denied tools.  The reason names the patterns that would have
-let it through, because on this failure the operator has something to fix
-and a retry that changes nothing else will fail identically."
+NAMES are the denied tools, out of the attempt's DENIALS.  The reason
+names the patterns that would have let it through, because on this
+failure the operator has something to fix and a retry that changes
+nothing else will fail identically."
   (let ((patterns (rata-claude-loop--denial-patterns
-                   rata-claude-loop-verification-denial-tools)))
+                   rata-claude-loop-verification-denial-tools denials)))
     (format "%s denied, so the work was never run: %s%s"
             (if (cdr names) "tools were" "a tool was")
             (string-join names ", ")
@@ -1300,25 +1453,31 @@ and a retry that changes nothing else will fail identically."
   "Return (KIND . REASON) for an attempt that exited with CODE, or nil.
 nil means the attempt itself succeeded — which is not the same as the
 task being done; that is what the verify command is for."
-  (let* ((result (rata-claude-loop--get :result))
-         (subtype (alist-get 'subtype result))
-         (denials (rata-claude-loop--critical-denials))
-         (unrun (rata-claude-loop--verification-denials))
-         (report (rata-claude-loop--get :report))
-         (reason (rata-claude-loop--get :report-reason)))
+  ;; A timer got here first; its verdict is the accurate one.
+  (or (rata-claude-loop--get :outcome)
+      (rata-claude-loop--classify-attempt (rata-claude-loop--attempt code))))
+
+(defun rata-claude-loop--classify-attempt (attempt)
+  "Return (KIND . REASON) for the attempt record ATTEMPT, or nil.
+See `rata-claude-loop--cli-attempt' for the record's keys."
+  (let* ((subtype (plist-get attempt :subtype))
+         (code (plist-get attempt :exit-code))
+         (all-denials (plist-get attempt :denials))
+         (denials (rata-claude-loop--critical-denials all-denials))
+         (unrun (rata-claude-loop--verification-denials all-denials))
+         (report (plist-get attempt :report))
+         (reason (plist-get attempt :report-reason)))
     (cond
-     ;; A timer got here first; its verdict is the accurate one.
-     ((rata-claude-loop--get :outcome))
-     ((null result)
+     ((not (plist-get attempt :result-p))
       (cons 'no-result
             (format "claude exited with code %s without reporting a result" code)))
-     ((alist-get 'is_error result)
+     ((plist-get attempt :is-error)
       (cons (rata-claude-loop--subtype-kind subtype)
             (format "claude reported an error (%s)" (or subtype "unknown"))))
      ((and subtype (not (equal subtype "success")))
       (cons (rata-claude-loop--subtype-kind subtype)
             (format "claude ended with subtype %s" subtype)))
-     ((not (zerop code))
+     ((and code (not (zerop code)))
       (cons 'crash (format "claude exited with code %s" code)))
      (denials
       (cons 'denied
@@ -1334,7 +1493,8 @@ task being done; that is what the verify command is for."
      ;; wording.  A task that claims `done' while its every command was
      ;; refused is exactly the case this exists for: the edits are on disk,
      ;; nothing ran them, and the exit code is 0.
-     (unrun (cons 'unverified (rata-claude-loop--unverified-reason unrun)))
+     (unrun (cons 'unverified
+                  (rata-claude-loop--unverified-reason unrun all-denials)))
      ((and rata-claude-loop-require-status (null report))
       (cons 'blocked "the task reported no status line"))
      (t nil))))
@@ -1521,15 +1681,121 @@ FEEDBACK is captured output to hand back, or an empty string."
                 "--resume" (rata-claude-loop--get :session-id))
           (rata-claude-loop--common-args)))
 
-(defun rata-claude-loop--kill-processes ()
-  "Kill whatever the loop still has running.
+
+;;; Backends
+
+(defvar rata-claude-loop--backends
+  '((cli :check rata-claude-loop--cli-check
+         :start rata-claude-loop--cli-start
+         :retry rata-claude-loop--cli-retry
+         :attempt rata-claude-loop--cli-attempt-from-state
+         :live-p rata-claude-loop--cli-live-p
+         :stop rata-claude-loop--cli-stop
+         :kill rata-claude-loop--cli-kill))
+  "Alist of backend name to a plist of the functions implementing it.
+A backend owns only the attempt; verify, marking and budgets are shared.
+
+  :check            signal a `user-error' when the backend cannot run here
+  :start TASK FILE BODY
+                    begin a first attempt: call
+                    `rata-claude-loop--attempt-begin' first, arm the
+                    task timeout, and on completion schedule
+                    `rata-claude-loop--after-claude' through
+                    `rata-claude-loop--later' from an epoch-checked
+                    callback -- record and schedule, never act, inside it.
+                    Record :session-id as soon as it is known: a retry
+                    continues that session, and an attempt without one
+                    cannot be retried at all
+  :retry REASON FEEDBACK
+                    begin a further attempt in the same session
+  :attempt CODE     return the attempt record (`rata-claude-loop--cli-attempt')
+  :live-p           non-nil while an attempt is in flight
+  :stop STILL-WANTED DETACH
+                    ask the attempt to stop now, and return a timer that
+                    ends it outright after `rata-claude-loop-kill-grace' if
+                    STILL-WANTED then returns non-nil; DETACH forgets it
+  :kill             end the attempt immediately and forget it
+
+Registering another backend is a `setf' of its `alist-get' here plus a
+`:type' choice in `rata-claude-loop-backend'.")
+
+(defun rata-claude-loop--backend ()
+  "Return the backend in force: the run's own, else the configured one."
+  (or (rata-claude-loop--get :backend) rata-claude-loop-backend))
+
+(defun rata-claude-loop--backend-call (op &rest args)
+  "Call the current backend's OP with ARGS."
+  (let* ((name (rata-claude-loop--backend))
+         (backend (assq name rata-claude-loop--backends)))
+    (unless backend
+      (user-error "Unknown `rata-claude-loop-backend': %S" name))
+    (let ((function (plist-get (cdr backend) op)))
+      (unless function
+        (error "claude-loop backend %S does not implement %s" name op))
+      (apply function args))))
+
+(defun rata-claude-loop--stop-process (process still-wanted)
+  "Interrupt PROCESS and return a timer that kills it after the grace period.
+The kill only happens if STILL-WANTED then returns non-nil.  Returns nil
+when PROCESS is not live."
+  (when (process-live-p process)
+    ;; SIGINT first: SIGKILL gives the CLI no chance to flush or clean up.
+    ;; Anything its Bash tool spawned is in another process group and
+    ;; survives either way.
+    (interrupt-process process)
+    (run-at-time rata-claude-loop-kill-grace nil
+                 (lambda ()
+                   (when (and (funcall still-wanted)
+                              (process-live-p process))
+                     (kill-process process))))))
+
+(defun rata-claude-loop--cli-check ()
+  "Signal a `user-error' unless the Claude CLI is on `exec-path'."
+  (unless (executable-find rata-claude-loop-executable)
+    (user-error "Cannot find %s in `exec-path'" rata-claude-loop-executable)))
+
+(defun rata-claude-loop--cli-start (task file body)
+  "Start a first CLI attempt at TASK from FILE, with detail BODY."
+  (rata-claude-loop--spawn (rata-claude-loop--build-command task file body)))
+
+(defun rata-claude-loop--cli-retry (reason feedback)
+  "Start a CLI attempt resuming this task's session to fix REASON.
+FEEDBACK is captured output to hand back."
+  (rata-claude-loop--spawn
+   (rata-claude-loop--build-retry-command reason feedback)))
+
+(defun rata-claude-loop--cli-attempt-from-state (code)
+  "Return the CLI attempt record for this attempt, which exited with CODE."
+  (rata-claude-loop--cli-attempt (rata-claude-loop--get :result) code))
+
+(defun rata-claude-loop--cli-live-p ()
+  "Return non-nil while the CLI child is running."
+  (process-live-p (rata-claude-loop--get :process)))
+
+(defun rata-claude-loop--cli-stop (still-wanted detach)
+  "Interrupt the CLI child, killing it later if STILL-WANTED says so.
+DETACH forgets the child.  See `rata-claude-loop--backends'."
+  (let ((process (rata-claude-loop--get :process)))
+    (when detach
+      (rata-claude-loop--put :process nil))
+    (rata-claude-loop--stop-process process still-wanted)))
+
+(defun rata-claude-loop--cli-kill ()
+  "Kill the CLI child outright.
 Only the direct child is signalled; anything its Bash tool spawned is in
 another process group and survives."
-  (dolist (key '(:process :verify-process))
-    (let ((process (rata-claude-loop--get key)))
-      (rata-claude-loop--put key nil)
-      (when (process-live-p process)
-        (kill-process process)))))
+  (let ((process (rata-claude-loop--get :process)))
+    (rata-claude-loop--put :process nil)
+    (when (process-live-p process)
+      (kill-process process))))
+
+(defun rata-claude-loop--kill-processes ()
+  "Kill whatever the loop still has running: the attempt and any verify."
+  (rata-claude-loop--backend-call :kill)
+  (let ((process (rata-claude-loop--get :verify-process)))
+    (rata-claude-loop--put :verify-process nil)
+    (when (process-live-p process)
+      (kill-process process))))
 
 (defun rata-claude-loop--halt (format-string &rest args)
   "Halt the loop, reporting FORMAT-STRING with ARGS."
@@ -1564,18 +1830,14 @@ another process group and survives."
   "Ask the live child to stop, escalating to SIGKILL after a grace period.
 Unlike `rata-claude-loop-stop' this keeps the epoch, so the sentinel
 still fires and the recorded outcome is what gets classified."
-  (let ((process (or (rata-claude-loop--get :process)
-                     (rata-claude-loop--get :verify-process)))
-        (epoch (rata-claude-loop--get :epoch)))
-    (when (process-live-p process)
-      (interrupt-process process)
-      (rata-claude-loop--put
-       :kill-timer
-       (run-at-time rata-claude-loop-kill-grace nil
-                    (lambda ()
-                      (when (and (rata-claude-loop--epoch-current-p epoch)
-                                 (process-live-p process))
-                        (kill-process process))))))))
+  (let* ((epoch (rata-claude-loop--get :epoch))
+         (wanted (lambda () (rata-claude-loop--epoch-current-p epoch)))
+         (timer (if (rata-claude-loop--backend-call :live-p)
+                    (rata-claude-loop--backend-call :stop wanted nil)
+                  (rata-claude-loop--stop-process
+                   (rata-claude-loop--get :verify-process) wanted))))
+    (when timer
+      (rata-claude-loop--put :kill-timer timer))))
 
 (defun rata-claude-loop--arm-timeout (seconds kind reason)
   "Stop the current child after SECONDS, recording KIND and REASON."
@@ -1604,15 +1866,22 @@ still fires and the recorded outcome is what gets classified."
       (rata-claude-loop--later
        (lambda () (rata-claude-loop--after-claude code))))))
 
-(defun rata-claude-loop--spawn (command)
-  "Spawn COMMAND as the loop's child, entering the `claude' phase."
+(defun rata-claude-loop--attempt-begin ()
+  "Enter the `claude' phase for a new attempt, whatever the backend.
+Bumps the epoch, so nothing scheduled by the previous attempt can act,
+and clears every per-attempt verdict, so none of its findings survive
+into this one.  Every backend's :start and :retry call this first."
   (rata-claude-loop--bump-epoch)
   (rata-claude-loop--put :phase 'claude)
   (rata-claude-loop--put :status 'running)
   (dolist (key '(:pending :stderr-pending))
     (rata-claude-loop--put key ""))
   (dolist (key '(:result :report :report-reason :outcome :verify-output))
-    (rata-claude-loop--put key nil))
+    (rata-claude-loop--put key nil)))
+
+(defun rata-claude-loop--spawn (command)
+  "Spawn COMMAND as the loop's child, entering the `claude' phase."
+  (rata-claude-loop--attempt-begin)
   (let ((default-directory (rata-claude-loop--get :root))
         (epoch (rata-claude-loop--get :epoch)))
     ;; A spawn failure here would otherwise propagate out of the timer that
@@ -1686,8 +1955,7 @@ still fires and the recorded outcome is what gets classified."
                                  :index index :task task :line line
                                  :detail (and body (length body)))
       (message "claude-loop [%d]: %s" index task)
-      (rata-claude-loop--spawn
-       (rata-claude-loop--build-command task file body)))))
+      (rata-claude-loop--backend-call :start task file body))))
 
 (defun rata-claude-loop--feedback (kind)
   "Return captured output to hand back for a failure of KIND."
@@ -1700,8 +1968,8 @@ still fires and the recorded outcome is what gets classified."
   "Resume this task's session and ask it to fix REASON, a failure of KIND."
   (let* ((attempt (1+ (or (rata-claude-loop--get :attempt) 1)))
          (delay (if (eq kind 'execution) rata-claude-loop-retry-backoff 0))
-         (command (rata-claude-loop--build-retry-command
-                   reason (rata-claude-loop--feedback kind))))
+         ;; Captured now, not after the backoff: it describes this failure.
+         (feedback (rata-claude-loop--feedback kind)))
     (rata-claude-loop--put :attempt attempt)
     (rata-claude-loop--insert
      (format "\n  ↻ attempt %d/%d — resuming session %s\n\n"
@@ -1709,7 +1977,7 @@ still fires and the recorded outcome is what gets classified."
              (rata-claude-loop--truncate (rata-claude-loop--get :session-id) 8))
      'rata-claude-loop-meta-face)
     (if (zerop delay)
-        (rata-claude-loop--spawn command)
+        (rata-claude-loop--backend-call :retry reason feedback)
       (rata-claude-loop--log "  … waiting %ds before retrying" delay)
       (let ((epoch (rata-claude-loop--get :epoch)))
         (rata-claude-loop--put
@@ -1719,7 +1987,8 @@ still fires and the recorded outcome is what gets classified."
                         (when (rata-claude-loop--epoch-current-p epoch)
                           (rata-claude-loop--put :step-timer nil)
                           (rata-claude-loop--guard
-                            (rata-claude-loop--spawn command))))))))))
+                            (rata-claude-loop--backend-call
+                             :retry reason feedback))))))))))
 
 (defun rata-claude-loop--failure-action (reason)
   "Return `halt' or `skip' for a task that has finally failed with REASON."
@@ -1976,15 +2245,15 @@ see."
 (defun rata-claude-loop--begin (file root single)
   "Set up fresh loop state for FILE in ROOT and show the output buffer.
 SINGLE means run one task only and stop."
-  (unless (executable-find rata-claude-loop-executable)
-    (user-error "Cannot find %s in `exec-path'" rata-claude-loop-executable))
+  (rata-claude-loop--backend-call :check)
   (setq rata-claude-loop--state
         (list :file file :root root :index 0 :epoch 0
               :status 'running :phase 'between
               :started (current-time) :pending "" :stderr-pending ""
               :cost 0 :tasks nil
               :journal (rata-claude-loop--journal-file file)
-              :single single))
+              :single single
+              :backend rata-claude-loop-backend))
   (with-current-buffer (rata-claude-loop--buffer)
     (let ((inhibit-read-only t)) (erase-buffer)))
   (rata-claude-loop--journal "run-start"
@@ -2015,8 +2284,7 @@ also prompt for the directory Claude should run in."
   (interactive "P")
   (when (rata-claude-loop-running-p)
     (user-error "A claude-loop is already running; stop it first"))
-  (unless (executable-find rata-claude-loop-executable)
-    (user-error "Cannot find %s in `exec-path'" rata-claude-loop-executable))
+  (rata-claude-loop--backend-call :check)
   (let* ((file (rata-claude-loop--task-file ask))
          (root (if (equal ask '(16))
                    (read-directory-name
@@ -2038,19 +2306,12 @@ also prompt for the directory Claude should run in."
   (interactive)
   (when (rata-claude-loop-running-p)
     (user-error "A claude-loop is already running; stop it first"))
-  (unless (executable-find rata-claude-loop-executable)
-    (user-error "Cannot find %s in `exec-path'" rata-claude-loop-executable))
+  (rata-claude-loop--backend-call :check)
   (unless buffer-file-name
     (user-error "This buffer is not visiting a file"))
-  (let ((line (line-number-at-pos))
-        (task (save-excursion
-                (beginning-of-line)
-                (cond
-                 ((looking-at rata-claude-loop-task-regexp) (match-string 1))
-                 ((and (derived-mode-p 'org-mode)
-                       (looking-at rata-claude-loop-org-todo-regexp))
-                  (match-string 1))
-                 (t (user-error "No open task on this line"))))))
+  (let* ((line (line-number-at-pos))
+         (task (or (cdr (assq line (rata-claude-loop--open-tasks)))
+                   (user-error "No open task on this line"))))
     (rata-claude-loop--offer-save buffer-file-name)
     (rata-claude-loop--begin buffer-file-name
                              (rata-claude-loop--project-root buffer-file-name)
@@ -2070,18 +2331,10 @@ also prompt for the directory Claude should run in."
   (rata-claude-loop--bump-epoch)
   (rata-claude-loop--put :status 'halted)
   (rata-claude-loop--put :phase 'idle)
-  (dolist (key '(:process :verify-process))
-    (let ((process (rata-claude-loop--get key)))
-      (rata-claude-loop--put key nil)
-      (when (process-live-p process)
-        ;; SIGINT first: SIGKILL gives the CLI no chance to flush or clean up.
-        ;; Anything its Bash tool spawned is in another process group and
-        ;; survives either way.
-        (interrupt-process process)
-        (run-at-time rata-claude-loop-kill-grace nil
-                     (lambda ()
-                       (when (process-live-p process)
-                         (kill-process process)))))))
+  (rata-claude-loop--backend-call :stop #'always t)
+  (let ((process (rata-claude-loop--get :verify-process)))
+    (rata-claude-loop--put :verify-process nil)
+    (rata-claude-loop--stop-process process #'always))
   (rata-claude-loop--insert "\n■ stopped by user.\n\n"
                             'rata-claude-loop-error-face)
   (message "claude-loop stopped"))
