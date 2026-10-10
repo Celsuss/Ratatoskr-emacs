@@ -21,10 +21,10 @@
 
 (defcustom rata-llm-providers
   '((:name "Ollama"
-     :protocol ollama
-     :url "http://localhost:11434"
-     :models ("qwen3.5-coder:9b-32k" "mistral:latest")
-     :embedding-model "nomic-embed-text"))
+	   :protocol ollama
+	   :url "http://localhost:11434"
+	   :models ("qwen3.5-coder:9b-32k" "mistral:latest")
+	   :embedding-model "nomic-embed-text"))
   "LLM providers that gptel, ellama and aidermacs are configured from.
 Each entry is a plist:
 
@@ -133,10 +133,10 @@ directly, so no aider-style `ollama_chat/' routing prefix belongs here."
                        :stream t)))
     (pcase (plist-get provider :protocol)
       ('ollama `(gptel-make-ollama ,(plist-get provider :name)
-                 ,@common :endpoint ,(concat path "/api/chat")))
+                  ,@common :endpoint ,(concat path "/api/chat")))
       ('openai `(gptel-make-openai ,(plist-get provider :name)
-                 ,@common :endpoint ,(concat path "/chat/completions")
-                 :key ,(rata-llm--key-function provider))))))
+                  ,@common :endpoint ,(concat path "/chat/completions")
+                  :key ,(rata-llm--key-function provider))))))
 
 (defun rata-llm-gptel-default-model (provider)
   "PROVIDER's first model as the symbol `gptel-model' wants."
@@ -244,8 +244,9 @@ spawn time, never at load."
 ;; variable is fine -- the later `defcustom' keeps an existing value.
 (use-package aidermacs
   :after general
-  :commands (aidermacs-transient-menu aidermacs-open)
+  :commands (aidermacs-transient-menu)
   :custom
+  (aidermacs-program (expand-file-name "~/.local/bin/aider"))
   (aidermacs-default-model (rata-llm-aider-model (rata-llm-default-provider))))
 
 (add-hook 'aidermacs-before-run-backend-hook #'rata-llm-aider-set-environment)
