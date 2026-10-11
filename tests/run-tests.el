@@ -3683,6 +3683,48 @@ translating it to `RET'.)"
       (ert-fail (concat "agent-shell prompt submission has regressed:\n"
                         (mapconcat #'identity (nreverse failures) "\n"))))))
 
+(ert-deftest rata-test-agent-shell-local-leader-keys ()
+  "Every key in `rata-agent-shell-local-keys' must reach its command.
+
+agent-shell ships no evil bindings, so these keys exist only because
+`init-llm.el' binds them -- and once already they were lost to a daemon
+restart (L-065).  Resolved through a real evil normal-state lookup on
+`agent-shell-mode-map', so a binding put in the wrong map or state fails
+here.  Each target is also checked with `commandp', so an upstream rename
+fails this test rather than leaving a dead key.  `, ,' (the global C-c C-c
+simulation, interrupt here) must survive `,' becoming a prefix in this map."
+  (require 'agent-shell)
+  (let ((want (cons '("," . rata-send-c-c-c-c)
+                    (mapcar (pcase-lambda (`(,key ,command ,_)) (cons key command))
+                            rata-agent-shell-local-keys)))
+        failures)
+    ;; The table is the source for this test, so pin the two keys it exists
+    ;; for: an edit that drops them from the table would otherwise pass.
+    (dolist (key '("R" "S"))
+      (unless (assoc key rata-agent-shell-local-keys)
+        (push (format ", %s is missing from `rata-agent-shell-local-keys'" key)
+              failures)))
+    (dolist (state '(normal visual))
+      (with-temp-buffer
+        (use-local-map agent-shell-mode-map)
+        (evil-local-mode 1)
+        (if (eq state 'visual)
+            (progn (insert "x") (evil-visual-char))
+          (evil-normal-state))
+        (evil-normalize-keymaps)
+        (pcase-dolist (`(,suffix . ,command) want)
+          (let ((got (key-binding (kbd (concat ", " suffix)))))
+            (unless (eq got command)
+              (push (format "%s state: , %s -> %S (want %S)"
+                            state suffix got command)
+                    failures))))))
+    (dolist (command (mapcar #'cadr rata-agent-shell-local-keys))
+      (unless (commandp command)
+        (push (format "%S is no longer a command upstream" command) failures)))
+    (when failures
+      (ert-fail (concat "agent-shell local-leader keys have regressed:\n"
+                        (mapconcat #'identity (nreverse failures) "\n"))))))
+
 ;;; ============================================================
 ;;; Test — every snippet in snippets/ expands without error
 ;;; ============================================================

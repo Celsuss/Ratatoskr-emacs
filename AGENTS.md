@@ -252,6 +252,14 @@ init-present → init-dashboard
   aider takes the first. A malformed entry is a `display-warning` at load naming the
   entry and the fault, which `just batch-strict` fails on. The agent-shell half (ACP
   adapters, the GUI Enter fold fix) is unaffected by the provider list.
+  In a shell buffer the local leader `,` carries the session commands — `R` restart
+  (clears the session), `S` permission mode, `m` model, `t` thought level, `p` latest
+  permission prompt, `q` quote region, `y`/`c` copy last output / code block, `e`
+  compose, `a` fold all, `f` fork, `u` usage, `o` shell↔viewport — from one table,
+  `rata-agent-shell-local-keys`. Upstream ships no evil keys at all, and its own
+  one-letter keys (`n p r TAB + - 0`) are shadowed by evil's normal state.
+  `rata-test-agent-shell-local-leader-keys` reads the same table, so a key added there is
+  tested and a command renamed upstream fails the suite (L-065).
 - `init-claude-loop.el` — drives the `claude` CLI through a `- [ ]` checklist file, one headless `claude -p` process per task. Pure Elisp (no external package): `make-process` + a filter that decodes `--output-format stream-json` events into the `*claude-loop*` buffer. The only module in the config with real async-process plumbing, and the only one with its own state machine, so it has conventions of its own:
   - **Control flow is a trampoline, not a callback chain.** Sentinels and timers only record an outcome and call `rata-claude-loop--later`; every transition then runs from a zero-delay timer at top level. Errors signalled inside a sentinel are demoted to a `*Messages*` line, and marking a checkbox calls `save-buffer` and `org-todo` (arbitrary hook code) — neither belongs in a process callback. `rata-claude-loop--guard` turns any error into a visible halt.
   - **Staleness is handled by `:epoch`**, an integer bumped on every spawn and every stop. Callbacks and timers capture the epoch they were created under and no-op on mismatch; one check covers the child, the stderr pipe, the timeout timer, the grace-period kill and the pending step timer. `:outcome` is write-once per attempt so a timeout's verdict survives the kill it causes.

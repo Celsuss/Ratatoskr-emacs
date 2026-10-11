@@ -328,6 +328,41 @@ spawn time, never at load."
                   #'agent-shell-ui-toggle-fragment)
     (message "init-llm: agent-shell predates `agent-shell-ui-fragment-map'; GUI Enter will not fold sections until it is updated (FAIL-0019)")))
 
+;; Local leader in the shell buffer.  agent-shell ships no evil bindings at
+;; all, so these are ours to keep: the only copy of a key you rely on must not
+;; be one evaluated by hand in a long-running daemon (L-065).  Scoped with
+;; :keymaps to a map that exists only once agent-shell loads.  The global
+;; `, ,' (C-c C-c, i.e. interrupt) still resolves underneath: a prefix bound
+;; in two active maps is looked up in each, so `,' here does not shadow it.
+;; Several replace upstream's own one-letter keys (`r' quote region), which
+;; evil's normal state shadows, or `C-c C-' chords.  Pinned, key by key, by
+;; `rata-test-agent-shell-local-leader-keys', which reads this same table.
+(defconst rata-agent-shell-local-keys
+  '(("R" agent-shell-restart                             "restart (clear session)")
+    ("S" agent-shell-set-session-mode                    "set permission mode")
+    ("m" agent-shell-set-session-model                   "set model")
+    ("t" agent-shell-set-session-thought-level           "set thought level")
+    ("p" agent-shell-jump-to-latest-permission-button-row "latest permission prompt")
+    ("q" agent-shell-quote-region                        "quote region into prompt")
+    ("y" agent-shell-copy-last-output                    "copy last output")
+    ("c" agent-shell-copy-source-block-at-point          "copy code block at point")
+    ("e" agent-shell-prompt-compose                      "compose prompt in buffer")
+    ("a" agent-shell-ui-toggle-all-fragments             "fold/unfold all sections")
+    ("f" agent-shell-fork                                "fork session")
+    ("u" agent-shell-show-usage                          "show usage")
+    ("o" agent-shell-other-buffer                        "shell <-> viewport"))
+  "Local-leader keys in `agent-shell-mode-map': (KEY COMMAND LABEL).")
+
+(with-eval-after-load 'agent-shell
+  (apply #'general-define-key
+         :states '(normal visual)
+         :keymaps 'agent-shell-mode-map
+         :prefix ","
+         "" '(:ignore t :which-key "agent-shell")
+         (mapcan (pcase-lambda (`(,key ,command ,label))
+                   (list key (list command :which-key label)))
+                 (copy-tree rata-agent-shell-local-keys))))
+
 (defun rata-agent-shell-send-file (&optional prompt-for-file)
   "Send the current file to an agent shell as an `@' context mention.
 Start a shell first when the project has none: `agent-shell-send-file'
