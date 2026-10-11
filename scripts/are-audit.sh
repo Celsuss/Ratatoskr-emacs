@@ -172,6 +172,18 @@ if printf '%s\n' "$just_recipes" | grep -qxF compile; then
         || fail "the compile recipe no longer sets use-package-ensure-function to ignore, so compiling installs packages over the network (FAIL-0023)"
 fi
 
+# --- Check: compile-has-lisp-on-load-path ----------------------------------------
+# FAIL-0025: each file compiles in its own bare process, so a module that requires a
+# sibling (init-agent-worktree -> init-agent-center) fails with "Cannot open load file"
+# unless lisp/ is on the load-path. init.el supplies it at runtime; the recipe must too.
+echo "=== Check: compile-has-lisp-on-load-path ==="
+for r in compile check; do
+    if printf '%s\n' "$just_recipes" | grep -qxF "$r"; then
+        just --show "$r" 2>/dev/null | grep -qE -- '-L (\{\{init_dir\}\}/)?lisp' \
+            || fail "the $r recipe has no -L lisp, so a module requiring a sibling init-* cannot compile (FAIL-0025)"
+    fi
+done
+
 # --- Check: docs-commands --------------------------------------------------------
 # L-016: AGENTS.md told every session to "always consult `repomix-output.xml` first" for
 # months. The file had never existed here -- the paragraph was pasted from a Terraform
