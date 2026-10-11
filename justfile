@@ -20,7 +20,7 @@
 # existing binary wins (Arch: /usr/bin/emacs, Ubuntu snap: /snap/bin/emacs),
 # with a PATH lookup as last resort. Absolute paths dodge shell aliases
 # (e.g. emacs=emacsclient on Arch).
-emacs_bin := env("EMACS_BIN", `for p in /usr/bin/emacs /snap/bin/emacs; do [ -x "$p" ] && { echo "$p"; exit; }; done; command -v emacs`)
+emacs_bin := env("EMACS_BIN", `for p in /usr/bin/emacs /snap/bin/emacs; do [ -x "$p" ] && { echo "$p"; exit; }; done; command -v emacs || echo emacs`)
 init_dir := "."
 
 # Distro family, from /etc/os-release. `install-deps' dispatches on these; ID_LIKE
