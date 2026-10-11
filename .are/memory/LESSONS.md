@@ -1621,3 +1621,18 @@ variable — silencing the very symptom that would have explained it, and lettin
 on a symbol you expect a package to define, and warn when it is missing; an elpaca
 partial clone (`tree:0`) fetches over the network on `git log -S`/`git show`, so give
 such commands a `timeout`.
+
+## L-065 — A key that exists only in a running daemon is lost on the next restart
+
+**Date:** 2026-10-11. After updating agent-shell (7377ba8 → ee760a0), the operator's
+`g R` (restart) and `g S` (set session mode) were gone. Neither agent-shell version, this
+config in either checkout, its git history, evil-collection nor `~/.spacemacs` had ever
+bound them, and both commands survived the update unchanged. The keys most likely lived only
+in the daemon's memory, from a form evaluated by hand, and the restart that followed the
+update dropped them. Blaming the update would have meant diffing upstream for a regression
+that never happened.
+**Apply:** when a key "disappears after an update", first check that *something tracked*
+ever bound it (`grep` the config, `git log -G`, the package's old revision), and query the
+live daemon with `emacsclient -e '(with-current-buffer … (key-binding …))'` before reading
+upstream diffs. A key the operator relies on belongs in `lisp/` with a resolution test;
+agent-shell's are in `init-llm.el`, pinned by `rata-test-agent-shell-local-leader-keys`.

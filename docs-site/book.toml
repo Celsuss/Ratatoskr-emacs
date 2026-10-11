@@ -1,0 +1,15 @@
+[book]
+title = "Ratatoskr Emacs"
+description = "A modular, Evil-based Emacs configuration built for speed and productivity."
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/Celsuss/Ratatoskr-emacs"
+edit-url-template = "https://github.com/Celsuss/Ratatoskr-emacs/edit/master/docs-site/{path}"
+site-url = "/Ratatoskr-emacs/"
+default-theme = "navy"
+preferred-dark-theme = "navy"
+
+[output.html.search]
+enable = true
