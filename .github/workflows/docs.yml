@@ -9,6 +9,7 @@ on:
     paths: &docs-paths
       - 'docs-site/**'
       - 'README.org'
+      - 'logo.png'
       - 'init.el'
       - 'lisp/*.el'
       - 'scripts/docs-build.sh'
