@@ -1161,8 +1161,17 @@ there is a thread.  `]]', `[[' and `TAB' are left to elfeed."
 
 ;; After elfeed-show, never before: its `defvar' of the hook carries elfeed's
 ;; own two functions, and an `add-hook' that ran first would bind the variable
-;; and so silently drop them.
+;; and so silently drop them.  An elfeed without the hook (the frozen `master'
+;; branch, FAIL-0026) would never call ours either, so say so instead.
 (with-eval-after-load 'elfeed-show
-  (add-hook 'elfeed-show-update-hook #'rata-elfeed-hn-show-update t))
+  (if (boundp 'elfeed-show-update-hook)
+      (add-hook 'elfeed-show-update-hook #'rata-elfeed-hn-show-update t)
+    (display-warning
+     'rata-elfeed-hn
+     (concat "This elfeed has no `elfeed-show-update-hook', so Hacker News "
+             "entries will not be drawn.  It is upstream's frozen `master' "
+             "branch; switch the clone to `main' and run `elpaca-rebuild' "
+             "on elfeed (FAIL-0026).")
+     :error)))
 
 (provide 'init-elfeed-hn)

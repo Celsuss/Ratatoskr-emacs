@@ -358,7 +358,7 @@ With prefix PROMPT-FOR-FILE, pick a project file instead of this one."
     "aiec"  '(ellama-enhance-code :which-key "enhance code")
     "aia"   '(:ignore t :which-key "aider")
     "aiaa"  '(aidermacs-transient-menu :which-key "aider menu")
-    "aiao"  '(aidermacs-open           :which-key "open aider")
+    "aiao"  '(aidermacs-run            :which-key "run aider")
     ;; `aicl' is claude-loop's subtree, bound from init-claude-loop.el off this
     ;; same prefix -- do not add a plain `aicl' leaf here.
     "aic"   '(:ignore t :which-key "agent shell")

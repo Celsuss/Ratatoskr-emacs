@@ -415,7 +415,11 @@ init-present → init-dashboard
   computed from `rata-elfeed-hn-depth`), `zj zk zu` move by depth, `, c` refetch, `, o`
   article, `, O` thread in the browser, `, y` permalink; elfeed's `]]` `[[` `TAB` are left
   alone. `browse-url` routes item URLs to a `*HN <id>*` buffer (`rata-elfeed-hn-open-item`,
-  also `SPC a r h`). Threads over `rata-elfeed-hn-fold-threshold` open folded. Tests:
+  also `SPC a r h`). Threads over `rata-elfeed-hn-fold-threshold` open folded.
+  **It needs elfeed's `main` branch** (`:branch "main"` in `init-elfeed.el`): upstream froze
+  `master` at 2026-02-18 and only `main` has `elfeed-show-update-hook`. Without it the
+  module raises a `display-warning` at `elfeed-show` load rather than binding a hook
+  nothing runs (FAIL-0026, L-064). Tests:
   `rata-test-hn-*`, through the real `elfeed-show-entry` over an in-memory `elfeed-db`.
 - `init-mail.el` — email under `SPC a e`: mu4e reading a Maildir that `mbsync` fills from
   Proton Mail Bridge, `smtpmail` sending through Bridge's SMTP port (D-021). Three things
@@ -528,6 +532,11 @@ init-present → init-dashboard
   its done-ness changes, in `hastodo` files only and never for a change inside the open
   block. It moves with `org-move-subtree-down`, which reinstalls markers, so an agenda
   line's marker follows the entry (D-020). Tests drive `org-todo` for real in a temp buffer.
+  **The org-roam buffer hands `n 0 - ^` back to evil** (L-063): magit-section's
+  per-section `keymap` text property outranks evil's maps, so `n` after `/` moved to the
+  next section. `rata-org-roam-evil-unshadowed-keys` rebinds them in `org-roam-mode-map` as
+  `menu-item`s whose `:filter` yields nil outside emacs state;
+  `rata-test-org-roam-section-keys-defer-to-evil` replays `/foo RET n` on a real section.
 - `init-blog.el` — org-roam → Hugo export via `ox-hugo` under `SPC o b`. Posts are org-roam
   nodes in the flat roam root identified by the `rata-blog-tag` (`:blog:`) filetag, not by
   directory — the same design as `init-present.el`, and `rata-blog-files`,

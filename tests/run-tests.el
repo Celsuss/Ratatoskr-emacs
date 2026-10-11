@@ -3840,6 +3840,43 @@ through `org-todo', so a hook that was never added would fail here."
   (require 'org)
   (should (eq org-log-done 'time)))
 
+(ert-deftest rata-test-org-roam-section-keys-defer-to-evil ()
+  "On org-roam section text, `n 0 - ^' run evil's command, not magit-section's.
+
+The section keymap is a `keymap' text property, which outranks evil's state
+maps; before the fix, `/foo RET n' in the backlinks buffer signalled \"No
+next section\" instead of finding the second match.  Asserted on a real
+`org-roam-preview-section' and by replaying the keys, because the defect
+only exists at point on section text."
+  (require 'org-roam-mode)
+  (let ((buf (get-buffer-create " *rata-test-roam*")))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buf)
+          (org-roam-mode)
+          (evil-initialize-state)
+          (let ((inhibit-read-only t))
+            (magit-insert-section (org-roam-backlinks)
+              (magit-insert-heading "Backlinks")
+              (magit-insert-section (org-roam-preview-section)
+                (insert "alpha foo\nbeta\ngamma\ndelta foo\nepsilon\n"))))
+          (goto-char (point-min))
+          (forward-line 2)
+          (should (eq (get-char-property (point) 'keymap) org-roam-preview-map))
+          (should (eq evil-state 'normal))
+          (pcase-dolist (`(,key . ,cmd) rata-org-roam-evil-unshadowed-keys)
+            (should (eq (key-binding key)
+                        (lookup-key evil-motion-state-map key)))
+            (evil-emacs-state)
+            (should (eq (key-binding key) cmd))
+            (evil-normal-state))
+          (goto-char (point-min))
+          (execute-kbd-macro (kbd "/ f o o RET"))
+          (should (= (line-number-at-pos) 2))
+          (execute-kbd-macro (kbd "n"))
+          (should (= (line-number-at-pos) 5)))
+      (kill-buffer buf))))
+
 ;;; ============================================================
 ;;; init-mail.el -- pure helpers and the per-machine contract
 ;;; ============================================================
