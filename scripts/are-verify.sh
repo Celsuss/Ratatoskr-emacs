@@ -105,8 +105,18 @@ if [ "$QUIET" -eq 1 ]; then
         printf '  %-18s %s\n' "$name" "$result"
     done
     if [ "$failed" -gt 0 ]; then
-        echo "REGRESSION: $failed step(s) failing BEFORE you changed anything."
-        echo "Investigate before starting work; do not attribute it to your own edits."
+        # "Before you changed anything" is only true of a clean tree.  A session
+        # resumed after a crash starts on its own uncommitted edits, and telling
+        # it they cannot be the cause sends it hunting for a regression it made.
+        dirty=$(git diff --name-only HEAD -- '*.el' '*.sh' '*.md' 2>/dev/null)
+        if [ -n "$dirty" ]; then
+            echo "FAILING: $failed step(s) failing on a tree with uncommitted edits:"
+            printf '    %s\n' $dirty
+            echo "Those edits (e.g. a crashed earlier session's) may be the cause; check them first."
+        else
+            echo "REGRESSION: $failed step(s) failing BEFORE you changed anything."
+            echo "Investigate before starting work; do not attribute it to your own edits."
+        fi
         echo "Detail: just are-verify $LEVEL"
         exit 1
     fi

@@ -78,6 +78,9 @@
   :demand t
   :config
   (shackle-mode 1)
+  ;; No rule for "*Agents*": init-agent-center.el shows it with
+  ;; `display-buffer-in-side-window' (the first side-window buffer here), and a
+  ;; shackle rule would fight that placement.  `rata-test-agent-center-no-shackle-rule'.
   (setq shackle-rules
         '(("*compilation*"     :align below :size 0.3 :popup t)
           ("*vterm*"           :align below :size 0.4 :popup t :select t)

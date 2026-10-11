@@ -17,7 +17,7 @@ cli:
 
 # Byte-compile a single .el file for syntax checking (removes .elc after)
 check file:
-    {{emacs_bin}} --init-directory {{init_dir}} --batch --eval "(byte-compile-file \"{{file}}\")" ; rm -f "{{file}}c"
+    {{emacs_bin}} --init-directory {{init_dir}} --batch -L lisp --eval "(byte-compile-file \"{{file}}\")" ; rm -f "{{file}}c"
 
 # Batch-load a single module to verify it parses
 load file:
@@ -48,9 +48,18 @@ compile:
     errors=0
     for f in init.el lisp/init-*.el; do
         echo "Compiling $f..."
-        if ! {{emacs_bin}} --init-directory {{init_dir}} --batch \
+        # use-package-ensure-function ignore: plain --batch runs package.el, and
+        # compiling `:ensure t' installs at compile time -- it contacted
+        # elpa.gnu.org for every module and hung for minutes per file when that
+        # host was down, and it filled ./elpa/ with copies nothing loads
+        # (FAIL-0023).  Compiling checks syntax; it must not install anything.
+        # -L lisp: init.el adds lisp/ to load-path at runtime, but each file is
+        # compiled in its own bare process, so a module that requires a sibling
+        # (init-agent-worktree -> init-agent-center) could not be found.
+        if ! {{emacs_bin}} --init-directory {{init_dir}} --batch -L lisp \
             --eval "(setq byte-compile-error-on-warn nil)" \
-            -f batch-byte-compile "$f" 2>&1; then
+            --eval "(setq use-package-ensure-function #'ignore)" \
+            -f batch-byte-compile "$f" < /dev/null 2>&1; then
             errors=$((errors + 1))
         fi
     done

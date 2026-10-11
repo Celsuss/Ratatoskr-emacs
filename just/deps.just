@@ -121,6 +121,7 @@ check-deps:
     # binary|feature that degrades without it
     deps=(
         "git|magit, projectile, vc"
+        "curl|elfeed feed fetching, HN articles and threads (url.el fallback stalls on unrouted IPv6, FAIL-0024)"
         "rg|consult-ripgrep, projectile search"
         "fd|file finding (Debian names the binary fdfind)"
         "enchant-2|jinx spellcheck"
