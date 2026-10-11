@@ -4,6 +4,8 @@
 
 A modular, Evil-based Emacs configuration built for speed and productivity.
 
+*Documentation:* https://lorden.dev/Ratatoskr-emacs/ — install guide, keybindings, the agents panel, the module index and a command reference.
+
 ** Features
 
 - *Evil mode* with full Spacemacs-style =SPC= leader keybindings via =general.el=
