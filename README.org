@@ -223,6 +223,9 @@ target is still =just <name>= with no module prefix.
 | =just check-deps=       | Report which dependency binaries are present |
 | =just install-hooks=    | Install git pre-commit hook (one-time)       |
 | =just are=              | Show the ARE entry point and commands        |
+| =just docs-build=       | Build the documentation site (mdBook + pandoc) |
+| =just docs-serve=       | Build and serve the site on localhost:3000   |
+| =just docs-clean=       | Delete the generated site                    |
 | =just are-context=      | Generate task context from git + the ARE map |
 | =just are-verify LEVEL= | Risk-based verification: fast/relevant/full  |
 | =just are-audit=        | Repo-wide reliability audit                  |

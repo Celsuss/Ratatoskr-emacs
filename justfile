@@ -13,6 +13,7 @@
 #   just/deps-arch.just    pacman + yay
 #   just/deps-debian.just  apt-get + language toolchains
 #   just/tools.just        repomix
+#   just/docs.just         mdBook documentation site (docs-site/)
 
 # Configuration
 # Emacs binary: set EMACS_BIN to override per machine; otherwise the first
@@ -41,6 +42,7 @@ import 'just/deps.just'
 import 'just/deps-arch.just'
 import 'just/deps-debian.just'
 import 'just/tools.just'
+import 'just/docs.just'
 
 # List available commands
 default:
