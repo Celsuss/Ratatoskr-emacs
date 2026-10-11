@@ -528,6 +528,11 @@ init-present → init-dashboard
   its done-ness changes, in `hastodo` files only and never for a change inside the open
   block. It moves with `org-move-subtree-down`, which reinstalls markers, so an agenda
   line's marker follows the entry (D-020). Tests drive `org-todo` for real in a temp buffer.
+  **The org-roam buffer hands `n 0 - ^` back to evil** (L-063): magit-section's
+  per-section `keymap` text property outranks evil's maps, so `n` after `/` moved to the
+  next section. `rata-org-roam-evil-unshadowed-keys` rebinds them in `org-roam-mode-map` as
+  `menu-item`s whose `:filter` yields nil outside emacs state;
+  `rata-test-org-roam-section-keys-defer-to-evil` replays `/foo RET n` on a real section.
 - `init-blog.el` — org-roam → Hugo export via `ox-hugo` under `SPC o b`. Posts are org-roam
   nodes in the flat roam root identified by the `rata-blog-tag` (`:blog:`) filetag, not by
   directory — the same design as `init-present.el`, and `rata-blog-files`,
