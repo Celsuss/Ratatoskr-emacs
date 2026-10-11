@@ -171,8 +171,12 @@ Additive — a tag no longer declared for a feed is left in place."
   (elfeed-apply-autotags-now)
   (elfeed-db-save))
 
+;; Upstream moved development to `main' and froze `master' at 2026-02-18, and
+;; elpaca keeps a clone on whatever branch was the default when it was made.
+;; init-elfeed-hn.el needs `elfeed-show-update-hook', which exists only on
+;; `main' (FAIL-0026).  The rest of the recipe is inherited from MELPA.
 (use-package elfeed
-  :ensure t
+  :ensure (elfeed :branch "main")
   :after general
   :commands (elfeed elfeed-update elfeed-search-set-filter)
   :hook (elfeed-search-mode . elfeed-update)

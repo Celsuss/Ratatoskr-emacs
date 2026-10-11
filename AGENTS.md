@@ -415,7 +415,11 @@ init-present → init-dashboard
   computed from `rata-elfeed-hn-depth`), `zj zk zu` move by depth, `, c` refetch, `, o`
   article, `, O` thread in the browser, `, y` permalink; elfeed's `]]` `[[` `TAB` are left
   alone. `browse-url` routes item URLs to a `*HN <id>*` buffer (`rata-elfeed-hn-open-item`,
-  also `SPC a r h`). Threads over `rata-elfeed-hn-fold-threshold` open folded. Tests:
+  also `SPC a r h`). Threads over `rata-elfeed-hn-fold-threshold` open folded.
+  **It needs elfeed's `main` branch** (`:branch "main"` in `init-elfeed.el`): upstream froze
+  `master` at 2026-02-18 and only `main` has `elfeed-show-update-hook`. Without it the
+  module raises a `display-warning` at `elfeed-show` load rather than binding a hook
+  nothing runs (FAIL-0026, L-064). Tests:
   `rata-test-hn-*`, through the real `elfeed-show-entry` over an in-memory `elfeed-db`.
 - `init-mail.el` — email under `SPC a e`: mu4e reading a Maildir that `mbsync` fills from
   Proton Mail Bridge, `smtpmail` sending through Bridge's SMTP port (D-021). Three things

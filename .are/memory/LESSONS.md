@@ -1607,3 +1607,17 @@ buffer, so lookup falls through to evil; emacs state keeps the magit command.
 section. **Apply:** probe a key with point *on* the text a user is looking at, not in an
 empty buffer of the right mode; any other non-Magit `magit-section-mode` buffer (jira's
 detail view) can have the same shadowing, and it is fixed per mode map, not globally.
+
+## L-064 — elpaca never follows an upstream's default-branch move
+
+**Date:** 2026-10-11. FAIL-0026. elfeed moved development to `main` and froze `master`;
+elpaca had cloned while `master` was the default and keeps that branch forever, so both
+checkouts sat eight months behind with no error. `init-elfeed-hn.el` was then written
+against `main`'s `elfeed-show-update-hook`, and its `add-hook` *created* the missing
+variable — silencing the very symptom that would have explained it, and letting a
+"renders unchanged" test pass by comparing two renders that never ran the hook.
+**Apply:** when a module depends on a package feature newer than the clone, pin
+`:branch`/`:ref` in its recipe; check `boundp`/`fboundp` before `add-hook`/`advice-add`
+on a symbol you expect a package to define, and warn when it is missing; an elpaca
+partial clone (`tree:0`) fetches over the network on `git log -S`/`git show`, so give
+such commands a `timeout`.
