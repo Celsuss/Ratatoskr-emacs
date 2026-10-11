@@ -20,6 +20,9 @@ done
 rm -rf "$out"
 mkdir -p "$out"
 
+# The logo has one source, the repo root; mdBook copies it to the site from here.
+cp logo.png "$out/logo.png"
+
 # README.org section title -> generated page. A title missing from README.org
 # fails the build rather than silently dropping a page.
 pagemap=$(cat <<'MAP'

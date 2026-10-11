@@ -1,3 +1,5 @@
+<p align="center"><img src="generated/logo.png" alt="Ratatoskr, the squirrel on Yggdrasil with circuit branches" width="420"></p>
+
 # Ratatoskr Emacs
 
 A modular, Evil-based Emacs configuration built for speed and productivity, written entirely in Emacs Lisp.
