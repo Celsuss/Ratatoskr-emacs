@@ -262,6 +262,9 @@ re-check `init-llm.el`, `init-khoj.el`, `init-claude-loop.el` before binding.
 
 ## Later (not planned in detail)
 
+The follow-ups chosen on 2026-10-05 (A2, B6, B8, B9, C10–C12) are planned in
+`plans/ai-agent-powerhouse.md`.
+
 - Answer a permission request from the panel (`a` allow / `A` always / `d` deny)
   without visiting the shell. agent-shell has permission-response internals
   (`agent-shell--send-permission-response`) but no public command taking a buffer;
