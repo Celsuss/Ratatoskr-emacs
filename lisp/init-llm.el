@@ -21,10 +21,10 @@
 
 (defcustom rata-llm-providers
   '((:name "Ollama"
-     :protocol ollama
-     :url "http://localhost:11434"
-     :models ("qwen3.5-coder:9b-32k" "mistral:latest")
-     :embedding-model "nomic-embed-text"))
+	   :protocol ollama
+	   :url "http://localhost:11434"
+	   :models ("qwen3.5-coder:9b-32k" "mistral:latest")
+	   :embedding-model "nomic-embed-text"))
   "LLM providers that gptel, ellama and aidermacs are configured from.
 Each entry is a plist:
 
@@ -133,10 +133,10 @@ directly, so no aider-style `ollama_chat/' routing prefix belongs here."
                        :stream t)))
     (pcase (plist-get provider :protocol)
       ('ollama `(gptel-make-ollama ,(plist-get provider :name)
-                 ,@common :endpoint ,(concat path "/api/chat")))
+                  ,@common :endpoint ,(concat path "/api/chat")))
       ('openai `(gptel-make-openai ,(plist-get provider :name)
-                 ,@common :endpoint ,(concat path "/chat/completions")
-                 :key ,(rata-llm--key-function provider))))))
+                  ,@common :endpoint ,(concat path "/chat/completions")
+                  :key ,(rata-llm--key-function provider))))))
 
 (defun rata-llm-gptel-default-model (provider)
   "PROVIDER's first model as the symbol `gptel-model' wants."
@@ -244,8 +244,9 @@ spawn time, never at load."
 ;; variable is fine -- the later `defcustom' keeps an existing value.
 (use-package aidermacs
   :after general
-  :commands (aidermacs-transient-menu aidermacs-open)
+  :commands (aidermacs-transient-menu)
   :custom
+  (aidermacs-program (expand-file-name "~/.local/bin/aider"))
   (aidermacs-default-model (rata-llm-aider-model (rata-llm-default-provider))))
 
 (add-hook 'aidermacs-before-run-backend-hook #'rata-llm-aider-set-environment)
@@ -327,6 +328,41 @@ spawn time, never at load."
                   #'agent-shell-ui-toggle-fragment)
     (message "init-llm: agent-shell predates `agent-shell-ui-fragment-map'; GUI Enter will not fold sections until it is updated (FAIL-0019)")))
 
+;; Local leader in the shell buffer.  agent-shell ships no evil bindings at
+;; all, so these are ours to keep: the only copy of a key you rely on must not
+;; be one evaluated by hand in a long-running daemon (L-065).  Scoped with
+;; :keymaps to a map that exists only once agent-shell loads.  The global
+;; `, ,' (C-c C-c, i.e. interrupt) still resolves underneath: a prefix bound
+;; in two active maps is looked up in each, so `,' here does not shadow it.
+;; Several replace upstream's own one-letter keys (`r' quote region), which
+;; evil's normal state shadows, or `C-c C-' chords.  Pinned, key by key, by
+;; `rata-test-agent-shell-local-leader-keys', which reads this same table.
+(defconst rata-agent-shell-local-keys
+  '(("R" agent-shell-restart                             "restart (clear session)")
+    ("S" agent-shell-set-session-mode                    "set permission mode")
+    ("m" agent-shell-set-session-model                   "set model")
+    ("t" agent-shell-set-session-thought-level           "set thought level")
+    ("p" agent-shell-jump-to-latest-permission-button-row "latest permission prompt")
+    ("q" agent-shell-quote-region                        "quote region into prompt")
+    ("y" agent-shell-copy-last-output                    "copy last output")
+    ("c" agent-shell-copy-source-block-at-point          "copy code block at point")
+    ("e" agent-shell-prompt-compose                      "compose prompt in buffer")
+    ("a" agent-shell-ui-toggle-all-fragments             "fold/unfold all sections")
+    ("f" agent-shell-fork                                "fork session")
+    ("u" agent-shell-show-usage                          "show usage")
+    ("o" agent-shell-other-buffer                        "shell <-> viewport"))
+  "Local-leader keys in `agent-shell-mode-map': (KEY COMMAND LABEL).")
+
+(with-eval-after-load 'agent-shell
+  (apply #'general-define-key
+         :states '(normal visual)
+         :keymaps 'agent-shell-mode-map
+         :prefix ","
+         "" '(:ignore t :which-key "agent-shell")
+         (mapcan (pcase-lambda (`(,key ,command ,label))
+                   (list key (list command :which-key label)))
+                 (copy-tree rata-agent-shell-local-keys))))
+
 (defun rata-agent-shell-send-file (&optional prompt-for-file)
   "Send the current file to an agent shell as an `@' context mention.
 Start a shell first when the project has none: `agent-shell-send-file'
@@ -357,7 +393,7 @@ With prefix PROMPT-FOR-FILE, pick a project file instead of this one."
     "aiec"  '(ellama-enhance-code :which-key "enhance code")
     "aia"   '(:ignore t :which-key "aider")
     "aiaa"  '(aidermacs-transient-menu :which-key "aider menu")
-    "aiao"  '(aidermacs-open           :which-key "open aider")
+    "aiao"  '(aidermacs-run            :which-key "run aider")
     ;; `aicl' is claude-loop's subtree, bound from init-claude-loop.el off this
     ;; same prefix -- do not add a plain `aicl' leaf here.
     "aic"   '(:ignore t :which-key "agent shell")

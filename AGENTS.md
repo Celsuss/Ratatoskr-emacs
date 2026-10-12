@@ -252,6 +252,14 @@ init-present → init-dashboard
   aider takes the first. A malformed entry is a `display-warning` at load naming the
   entry and the fault, which `just batch-strict` fails on. The agent-shell half (ACP
   adapters, the GUI Enter fold fix) is unaffected by the provider list.
+  In a shell buffer the local leader `,` carries the session commands — `R` restart
+  (clears the session), `S` permission mode, `m` model, `t` thought level, `p` latest
+  permission prompt, `q` quote region, `y`/`c` copy last output / code block, `e`
+  compose, `a` fold all, `f` fork, `u` usage, `o` shell↔viewport — from one table,
+  `rata-agent-shell-local-keys`. Upstream ships no evil keys at all, and its own
+  one-letter keys (`n p r TAB + - 0`) are shadowed by evil's normal state.
+  `rata-test-agent-shell-local-leader-keys` reads the same table, so a key added there is
+  tested and a command renamed upstream fails the suite (L-065).
 - `init-claude-loop.el` — drives the `claude` CLI through a `- [ ]` checklist file, one headless `claude -p` process per task. Pure Elisp (no external package): `make-process` + a filter that decodes `--output-format stream-json` events into the `*claude-loop*` buffer. The only module in the config with real async-process plumbing, and the only one with its own state machine, so it has conventions of its own:
   - **Control flow is a trampoline, not a callback chain.** Sentinels and timers only record an outcome and call `rata-claude-loop--later`; every transition then runs from a zero-delay timer at top level. Errors signalled inside a sentinel are demoted to a `*Messages*` line, and marking a checkbox calls `save-buffer` and `org-todo` (arbitrary hook code) — neither belongs in a process callback. `rata-claude-loop--guard` turns any error into a visible halt.
   - **Staleness is handled by `:epoch`**, an integer bumped on every spawn and every stop. Callbacks and timers capture the epoch they were created under and no-op on mismatch; one check covers the child, the stderr pipe, the timeout timer, the grace-period kill and the pending step timer. `:outcome` is write-once per attempt so a timeout's verdict survives the kill it causes.
@@ -445,7 +453,11 @@ init-present → init-dashboard
   computed from `rata-elfeed-hn-depth`), `zj zk zu` move by depth, `, c` refetch, `, o`
   article, `, O` thread in the browser, `, y` permalink; elfeed's `]]` `[[` `TAB` are left
   alone. `browse-url` routes item URLs to a `*HN <id>*` buffer (`rata-elfeed-hn-open-item`,
-  also `SPC a r h`). Threads over `rata-elfeed-hn-fold-threshold` open folded. Tests:
+  also `SPC a r h`). Threads over `rata-elfeed-hn-fold-threshold` open folded.
+  **It needs elfeed's `main` branch** (`:branch "main"` in `init-elfeed.el`): upstream froze
+  `master` at 2026-02-18 and only `main` has `elfeed-show-update-hook`. Without it the
+  module raises a `display-warning` at `elfeed-show` load rather than binding a hook
+  nothing runs (FAIL-0026, L-064). Tests:
   `rata-test-hn-*`, through the real `elfeed-show-entry` over an in-memory `elfeed-db`.
 - `init-mail.el` — email under `SPC a e`: mu4e reading a Maildir that `mbsync` fills from
   Proton Mail Bridge, `smtpmail` sending through Bridge's SMTP port (D-021). Three things
@@ -558,6 +570,11 @@ init-present → init-dashboard
   its done-ness changes, in `hastodo` files only and never for a change inside the open
   block. It moves with `org-move-subtree-down`, which reinstalls markers, so an agenda
   line's marker follows the entry (D-020). Tests drive `org-todo` for real in a temp buffer.
+  **The org-roam buffer hands `n 0 - ^` back to evil** (L-063): magit-section's
+  per-section `keymap` text property outranks evil's maps, so `n` after `/` moved to the
+  next section. `rata-org-roam-evil-unshadowed-keys` rebinds them in `org-roam-mode-map` as
+  `menu-item`s whose `:filter` yields nil outside emacs state;
+  `rata-test-org-roam-section-keys-defer-to-evil` replays `/foo RET n` on a real section.
 - `init-blog.el` — org-roam → Hugo export via `ox-hugo` under `SPC o b`. Posts are org-roam
   nodes in the flat roam root identified by the `rata-blog-tag` (`:blog:`) filetag, not by
   directory — the same design as `init-present.el`, and `rata-blog-files`,

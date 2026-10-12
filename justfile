@@ -13,13 +13,14 @@
 #   just/deps-arch.just    pacman + yay
 #   just/deps-debian.just  apt-get + language toolchains
 #   just/tools.just        repomix
+#   just/docs.just         mdBook documentation site (docs-site/)
 
 # Configuration
 # Emacs binary: set EMACS_BIN to override per machine; otherwise the first
 # existing binary wins (Arch: /usr/bin/emacs, Ubuntu snap: /snap/bin/emacs),
 # with a PATH lookup as last resort. Absolute paths dodge shell aliases
 # (e.g. emacs=emacsclient on Arch).
-emacs_bin := env("EMACS_BIN", `for p in /usr/bin/emacs /snap/bin/emacs; do [ -x "$p" ] && { echo "$p"; exit; }; done; command -v emacs`)
+emacs_bin := env("EMACS_BIN", `for p in /usr/bin/emacs /snap/bin/emacs; do [ -x "$p" ] && { echo "$p"; exit; }; done; command -v emacs || echo emacs`)
 init_dir := "."
 
 # Distro family, from /etc/os-release. `install-deps' dispatches on these; ID_LIKE
@@ -41,6 +42,7 @@ import 'just/deps.just'
 import 'just/deps-arch.just'
 import 'just/deps-debian.just'
 import 'just/tools.just'
+import 'just/docs.just'
 
 # List available commands
 default:

@@ -3797,6 +3797,48 @@ translating it to `RET'.)"
       (ert-fail (concat "agent-shell prompt submission has regressed:\n"
                         (mapconcat #'identity (nreverse failures) "\n"))))))
 
+(ert-deftest rata-test-agent-shell-local-leader-keys ()
+  "Every key in `rata-agent-shell-local-keys' must reach its command.
+
+agent-shell ships no evil bindings, so these keys exist only because
+`init-llm.el' binds them -- and once already they were lost to a daemon
+restart (L-065).  Resolved through a real evil normal-state lookup on
+`agent-shell-mode-map', so a binding put in the wrong map or state fails
+here.  Each target is also checked with `commandp', so an upstream rename
+fails this test rather than leaving a dead key.  `, ,' (the global C-c C-c
+simulation, interrupt here) must survive `,' becoming a prefix in this map."
+  (require 'agent-shell)
+  (let ((want (cons '("," . rata-send-c-c-c-c)
+                    (mapcar (pcase-lambda (`(,key ,command ,_)) (cons key command))
+                            rata-agent-shell-local-keys)))
+        failures)
+    ;; The table is the source for this test, so pin the two keys it exists
+    ;; for: an edit that drops them from the table would otherwise pass.
+    (dolist (key '("R" "S"))
+      (unless (assoc key rata-agent-shell-local-keys)
+        (push (format ", %s is missing from `rata-agent-shell-local-keys'" key)
+              failures)))
+    (dolist (state '(normal visual))
+      (with-temp-buffer
+        (use-local-map agent-shell-mode-map)
+        (evil-local-mode 1)
+        (if (eq state 'visual)
+            (progn (insert "x") (evil-visual-char))
+          (evil-normal-state))
+        (evil-normalize-keymaps)
+        (pcase-dolist (`(,suffix . ,command) want)
+          (let ((got (key-binding (kbd (concat ", " suffix)))))
+            (unless (eq got command)
+              (push (format "%s state: , %s -> %S (want %S)"
+                            state suffix got command)
+                    failures))))))
+    (dolist (command (mapcar #'cadr rata-agent-shell-local-keys))
+      (unless (commandp command)
+        (push (format "%S is no longer a command upstream" command) failures)))
+    (when failures
+      (ert-fail (concat "agent-shell local-leader keys have regressed:\n"
+                        (mapconcat #'identity (nreverse failures) "\n"))))))
+
 ;;; ============================================================
 ;;; Test — every snippet in snippets/ expands without error
 ;;; ============================================================
@@ -3953,6 +3995,43 @@ through `org-todo', so a hook that was never added would fail here."
   "`org-log-done' is set once org loads; the finished block's order depends on it."
   (require 'org)
   (should (eq org-log-done 'time)))
+
+(ert-deftest rata-test-org-roam-section-keys-defer-to-evil ()
+  "On org-roam section text, `n 0 - ^' run evil's command, not magit-section's.
+
+The section keymap is a `keymap' text property, which outranks evil's state
+maps; before the fix, `/foo RET n' in the backlinks buffer signalled \"No
+next section\" instead of finding the second match.  Asserted on a real
+`org-roam-preview-section' and by replaying the keys, because the defect
+only exists at point on section text."
+  (require 'org-roam-mode)
+  (let ((buf (get-buffer-create " *rata-test-roam*")))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buf)
+          (org-roam-mode)
+          (evil-initialize-state)
+          (let ((inhibit-read-only t))
+            (magit-insert-section (org-roam-backlinks)
+              (magit-insert-heading "Backlinks")
+              (magit-insert-section (org-roam-preview-section)
+                (insert "alpha foo\nbeta\ngamma\ndelta foo\nepsilon\n"))))
+          (goto-char (point-min))
+          (forward-line 2)
+          (should (eq (get-char-property (point) 'keymap) org-roam-preview-map))
+          (should (eq evil-state 'normal))
+          (pcase-dolist (`(,key . ,cmd) rata-org-roam-evil-unshadowed-keys)
+            (should (eq (key-binding key)
+                        (lookup-key evil-motion-state-map key)))
+            (evil-emacs-state)
+            (should (eq (key-binding key) cmd))
+            (evil-normal-state))
+          (goto-char (point-min))
+          (execute-kbd-macro (kbd "/ f o o RET"))
+          (should (= (line-number-at-pos) 2))
+          (execute-kbd-macro (kbd "n"))
+          (should (= (line-number-at-pos) 5)))
+      (kill-buffer buf))))
 
 ;;; ============================================================
 ;;; init-mail.el -- pure helpers and the per-machine contract

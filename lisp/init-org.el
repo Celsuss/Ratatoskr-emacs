@@ -572,6 +572,37 @@ File-level nodes (level 0) show only their title."
 
   (org-roam-db-autosync-mode))
 
+;; --- org-roam buffer + Evil compatibility ---
+;; Same trap as `org-super-agenda-header-map' above: magit-section puts each
+;; section's keymap (`org-roam-preview-map', `-node-map', `-grep-map', all
+;; children of `org-roam-mode-map') on the section text as a `keymap'
+;; property, which outranks evil's state maps.  `magit-section-mode-map' binds
+;; `n' to `magit-section-forward', so after `/foo' in the backlinks buffer `n'
+;; stepped to the next section instead of the next match; `0', `-' and `^'
+;; were shadowed the same way.  Each key below resolves to nil while evil
+;; owns the buffer, so lookup falls through to evil, and to the magit command
+;; in emacs state.  Section movement stays on evil-collection's C-j/C-k gj/gk gh.
+(eval-when-compile (defvar org-roam-mode-map))
+(declare-function evil-emacs-state-p "evil-states")
+
+(defconst rata-org-roam-evil-unshadowed-keys
+  '(("n" . magit-section-forward)
+    ("0" . digit-argument)
+    ("-" . negative-argument)
+    ("^" . magit-section-up))
+  "Keys in `org-roam-mode-map' handed back to evil outside emacs state.")
+
+(defun rata-org-roam--defer-to-evil (cmd)
+  "Return CMD unless evil is active in a non-emacs state, else nil."
+  (unless (and (bound-and-true-p evil-local-mode)
+               (not (evil-emacs-state-p)))
+    cmd))
+
+(with-eval-after-load 'org-roam-mode
+  (pcase-dolist (`(,key . ,cmd) rata-org-roam-evil-unshadowed-keys)
+    (define-key org-roam-mode-map key
+                `(menu-item "" ,cmd :filter rata-org-roam--defer-to-evil))))
+
 ;; --- Roam node editing ---
 
 (defun rata-roam-alias-add-to-file (alias)

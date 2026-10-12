@@ -1,0 +1,64 @@
+name: Docs
+
+# Build the mdBook site (docs-site/ + README.org) and publish it to GitHub Pages.
+# The build is `just docs-build`; if a step is wrong, fix it in just/docs.just or
+# scripts/docs-build.sh, not here, so any other CI (GitLab) can reuse it.
+# One-time: repo Settings -> Pages -> Source: "GitHub Actions".
+on:
+  pull_request:
+    paths: &docs-paths
+      - 'docs-site/**'
+      - 'README.org'
+      - 'logo.png'
+      - 'init.el'
+      - 'lisp/*.el'
+      - 'scripts/docs-build.sh'
+      - 'just/docs.just'
+      - '.github/workflows/docs.yml'
+  push:
+    branches: [master]
+    paths: *docs-paths
+  workflow_dispatch:
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MDBOOK_VERSION: '0.5.4'  # same as the version the site is developed against
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pandoc
+        run: sudo apt-get update && sudo apt-get install -y pandoc
+      - name: Install just
+        uses: extractions/setup-just@v2
+      - name: Install mdBook
+        run: |
+          curl -sSfL "https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Build site
+        run: just docs-build
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs-site/book
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
