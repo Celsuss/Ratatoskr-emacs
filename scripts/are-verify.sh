@@ -88,6 +88,9 @@ if [ "$LEVEL" != "fast" ]; then
 
     run "work-agenda" "the \"w\" agenda's rendered output, over org fixtures" -- \
         just test-work-agenda
+
+    run "claude-loop-acp" "claude-loop over real agent-shell + acp.el, vs a stub ACP agent" -- \
+        just test-claude-loop-acp
 fi
 
 # --- full -------------------------------------------------------------------------
@@ -139,7 +142,8 @@ done
 echo
 echo "NOT TESTED at any level — do not report these as PASS:"
 echo "  integrations   every network service (Ollama, Khoj, Snowflake, GitHub, IRC, feeds)"
-echo "  binaries       lsp servers, formatters, kubectl, hugo, the real claude CLI"
+echo "  binaries       lsp servers, formatters, kubectl, hugo, the real claude CLI,"
+echo "                 the real claude-agent-acp adapter"
 echo "  gui            interactive behaviour, frames, faces, popups (headless)"
 echo "  operator-data  org-roam / second-brain read-write paths. Exception: the \"w\""
 echo "                 agenda is rendered over fixtures by the work-agenda step"

@@ -30,6 +30,12 @@ test-work-agenda:
 test-claude-loop:
     RATA_ROOT={{init_dir}} {{emacs_bin}} -Q --batch -l tests/claude-loop-e2e.el
 
+# The claude-loop agent-shell (ACP) backend, end to end against a scripted stub
+# ACP agent (tests/fake-claude-acp, python3).  Loads agent-shell, acp and
+# shell-maker from elpaca/builds, so it is in `are-verify relevant', not fast.
+test-claude-loop-acp:
+    RATA_ROOT={{init_dir}} {{emacs_bin}} -Q --batch -l tests/claude-loop-acp-e2e.el
+
 # Run all tests (lint + compile + startup + ERT)
 # Left exactly as it was on purpose — README, AGENTS.md and habit refer to it.
 # The pre-commit gate runs `are-verify full', which is a superset. See DECISIONS D-004.

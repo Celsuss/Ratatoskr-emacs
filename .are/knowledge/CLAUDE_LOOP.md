@@ -19,12 +19,13 @@ without a human in the loop**:
 | Capability | Where | Consequence |
 |---|---|---|
 | Auto-approves whatever `rata-claude-loop-allowed-tools` lists | `--allowedTools`, `rata-claude-loop--common-args` | commands run unattended; nil by default, and `Bash` (unqualified) here is equivalent to a shell |
-| Launches `claude -p` with `--permission-mode acceptEdits` | `rata-claude-loop-extra-args`, `:63` | file edits are auto-approved inside the resolved project root |
-| Runs an operator-supplied shell string | `rata-claude-loop--start-verify`, `:2057` — `make-process` with `shell-file-name shell-command-switch command` | arbitrary shell, by design; whatever `rata-claude-loop-verify-command` says |
-| Ticks checkboxes in a file and saves it | `rata-claude-loop--mark-task`, `:1053` | mutates the operator's task file, calls `save-buffer` and `org-todo` |
-| Loops unattended over up to 50 tasks | `rata-claude-loop-max-tasks`, `:423` | unattended spend and unattended edits |
-| Spends metered API budget | `rata-claude-loop-task-budget-usd` (per attempt) and `rata-claude-loop-run-budget-usd` `:127` (per run); both nil = unbounded | the only "financial" surface in this repo |
-| Writes a journal outside the project | `rata-claude-loop-journal-directory`, `:433` | task text and session ids land under `user-emacs-directory` |
+| Launches `claude -p` with `--permission-mode acceptEdits` | `rata-claude-loop-extra-args`, `:66` | file edits are auto-approved inside the resolved project root |
+| Answers permission requests for its own agent-shell sessions (`agent-shell` backend) | `rata-claude-loop-acp--responder` in `lisp/init-claude-loop-acp.el` — installed into the global `agent-shell-permission-responder-function`, wrapping the previous value | only ever `reject_once`; a bug here that chose an allow option would grant tools unattended, and `allow_always` would persist the grant in Claude's settings |
+| Runs an operator-supplied shell string | `rata-claude-loop--start-verify`, `:2084` — `make-process` with `shell-file-name shell-command-switch command` | arbitrary shell, by design; whatever `rata-claude-loop-verify-command` says |
+| Ticks checkboxes in a file and saves it | `rata-claude-loop--mark-task`, `:1056` | mutates the operator's task file, calls `save-buffer` and `org-todo` |
+| Loops unattended over up to 50 tasks | `rata-claude-loop-max-tasks`, `:426` | unattended spend and unattended edits |
+| Spends metered API budget | `rata-claude-loop-task-budget-usd` (per attempt) and `rata-claude-loop-run-budget-usd` `:130` (per run); both nil = unbounded | the only "financial" surface in this repo |
+| Writes a journal outside the project | `rata-claude-loop-journal-directory`, `:436` | task text and session ids land under `user-emacs-directory` |
 
 Any change here is `full`-verified and, if it touches the safety guards below, needs
 operator approval before it lands. See [../rules/SAFETY_RULES.md](../rules/SAFETY_RULES.md).
@@ -36,24 +37,27 @@ Each is named with the test that protects it, where one exists.
 
 | Guard | Implementation | Protected by |
 |---|---|---|
-| **`$HOME` can never become the project root.** A dotfiles repo or stray marker in `$HOME` would otherwise scope the agent to the entire home directory | `rata-claude-loop--project-root`, `:746` — rejects a marker at or above `~` | `rata-test-claude-loop-project-root-refuses-home` |
-| **Never tick a box that is not unambiguously the finished task.** Ambiguous or missing → halt | `rata-claude-loop--find-task-line`, `:996` | `rata-test-claude-loop-refuses-ambiguous-task`, `rata-test-claude-loop-relocates-shifted-task`, e2e §4 |
-| **Success comes from the `result` event, never the exit code.** `claude -p` exits 0 when it gave up and when every edit was denied | `rata-claude-loop--classify`, `:1452`; `rata-claude-loop--critical-denials`, `:1397` | `rata-test-claude-loop-classify`, e2e §2 |
-| **The last stdout line must be flushed at EOF** — the CLI does not newline-terminate it, and it carries the result event | `:pending` flush in `rata-claude-loop--consume`, `:1295` | `rata-test-claude-loop-consume-split-and-unterminated` |
-| **Attempts are bounded** and a retry must be told what broke *and* told not to weaken the test | `rata-claude-loop-max-attempts` `:327`; `rata-claude-loop-retry-prompt-template` `:371` | e2e §3 asserts both the failure text and the "not weaken" clause reach the retry prompt |
-| **Stale callbacks cannot act.** One integer covers child, stderr pipe, timeout, kill grace and pending step | `:epoch`, `rata-claude-loop--epoch-current-p`, `:552` | e2e §5 (timeout leaves no process behind) |
-| **Timeouts kill, with a grace period, and the verdict survives the kill** | `:outcome` is write-once, `rata-claude-loop--set-outcome`, `:557` | e2e §5 |
-| **Git interaction is read-only.** `stash create` writes objects but touches neither the working tree nor the stash list | `rata-claude-loop--git-baseline`, `:1514` | none — asserted by code comment and by `--stat`-only usage |
-| **Runaway guard** on task count | `rata-claude-loop-max-tasks`, `:423` | none |
-| **Run-level spend cap.** `--max-budget-usd` is per invocation, so retries and a long list multiply past it. Checked between tasks only — the task in flight is already paid for | `rata-claude-loop--budget-spent`, `:574`; the guard in `rata-claude-loop--advance` | `rata-test-claude-loop-budget-spent`, e2e §10 |
-| **Skipping a failed task still requires marking its box.** Under `rata-claude-loop-on-task-failure` = `skip`, a box that cannot be located unambiguously halts anyway: an open box is handed straight back as the next task | `rata-claude-loop--skip-failed-task`, `:2006` | `rata-test-claude-loop-failure-action`, e2e §9 |
-| **A single-task run always halts on failure**, whatever the policy says | `rata-claude-loop--failure-action`, `:1993` | `rata-test-claude-loop-failure-action`, e2e §9 |
-| **A denial is evidence, not noise.** A denied edit means nothing was written (`denied`); a denied command means nothing was *run* (`unverified`). Both fail the attempt; only the first was modelled before FAIL-0010 | `rata-claude-loop--verification-denials`, `:1402`, alongside the older `rata-claude-loop--critical-denials` | `rata-test-claude-loop-classify-unverified`, e2e §14 |
-| **A task may not report `done` for work it could not execute.** The prompt demands a run rather than a reading, offers `RATA-TASK-STATUS: unverified` as the honest answer, and the classifier infers `unverified` from a denial regardless of what was claimed | `rata-claude-loop-prompt-template` `:178`, `rata-claude-loop--classify` | `rata-test-claude-loop-prompt-demands-verification`, `rata-test-claude-loop-classify-unverified`, e2e §14 |
-| **A verify command that already fails stops the run before any task starts**, and its output is not kept as retry feedback | `rata-claude-loop--after-baseline`, `:2126` | e2e §12 |
-| **Journalling can never stop a run.** A write failure disables the journal and reports once | `rata-claude-loop--journal`, `:729` | e2e §13 (happy path only) |
+| **`$HOME` can never become the project root.** A dotfiles repo or stray marker in `$HOME` would otherwise scope the agent to the entire home directory | `rata-claude-loop--project-root`, `:749` — rejects a marker at or above `~` | `rata-test-claude-loop-project-root-refuses-home` |
+| **Never tick a box that is not unambiguously the finished task.** Ambiguous or missing → halt | `rata-claude-loop--find-task-line`, `:999` | `rata-test-claude-loop-refuses-ambiguous-task`, `rata-test-claude-loop-relocates-shifted-task`, e2e §4 |
+| **Success comes from the `result` event, never the exit code.** `claude -p` exits 0 when it gave up and when every edit was denied | `rata-claude-loop--classify`, `:1458`; `rata-claude-loop--critical-denials`, `:1403` | `rata-test-claude-loop-classify`, e2e §2 |
+| **The last stdout line must be flushed at EOF** — the CLI does not newline-terminate it, and it carries the result event | `:pending` flush in `rata-claude-loop--consume`, `:1298` | `rata-test-claude-loop-consume-split-and-unterminated` |
+| **Attempts are bounded** and a retry must be told what broke *and* told not to weaken the test | `rata-claude-loop-max-attempts` `:330`; `rata-claude-loop-retry-prompt-template` `:374` | e2e §3 asserts both the failure text and the "not weaken" clause reach the retry prompt |
+| **Stale callbacks cannot act.** One integer covers child, stderr pipe, timeout, kill grace and pending step | `:epoch`, `rata-claude-loop--epoch-current-p`, `:555` | e2e §5 (timeout leaves no process behind) |
+| **Timeouts kill, with a grace period, and the verdict survives the kill** | `:outcome` is write-once, `rata-claude-loop--set-outcome`, `:560` | e2e §5 |
+| **Git interaction is read-only.** `stash create` writes objects but touches neither the working tree nor the stash list | `rata-claude-loop--git-baseline`, `:1524` | none — asserted by code comment and by `--stat`-only usage |
+| **Runaway guard** on task count | `rata-claude-loop-max-tasks`, `:426` | none |
+| **Run-level spend cap.** `--max-budget-usd` is per invocation, so retries and a long list multiply past it. Checked between tasks only — the task in flight is already paid for | `rata-claude-loop--budget-spent`, `:577`; the guard in `rata-claude-loop--advance` | `rata-test-claude-loop-budget-spent`, e2e §10 |
+| **Skipping a failed task still requires marking its box.** Under `rata-claude-loop-on-task-failure` = `skip`, a box that cannot be located unambiguously halts anyway: an open box is handed straight back as the next task | `rata-claude-loop--skip-failed-task`, `:2033` | `rata-test-claude-loop-failure-action`, e2e §9 |
+| **A single-task run always halts on failure**, whatever the policy says | `rata-claude-loop--failure-action`, `:2020` | `rata-test-claude-loop-failure-action`, e2e §9 |
+| **A denial is evidence, not noise.** A denied edit means nothing was written (`denied`); a denied command means nothing was *run* (`unverified`). Both fail the attempt; only the first was modelled before FAIL-0010 | `rata-claude-loop--verification-denials`, `:1408`, alongside the older `rata-claude-loop--critical-denials` | `rata-test-claude-loop-classify-unverified`, e2e §14 |
+| **A task may not report `done` for work it could not execute.** The prompt demands a run rather than a reading, offers `RATA-TASK-STATUS: unverified` as the honest answer, and the classifier infers `unverified` from a denial regardless of what was claimed | `rata-claude-loop-prompt-template` `:181`, `rata-claude-loop--classify` | `rata-test-claude-loop-prompt-demands-verification`, `rata-test-claude-loop-classify-unverified`, e2e §14 |
+| **A verify command that already fails stops the run before any task starts**, and its output is not kept as retry feedback | `rata-claude-loop--after-baseline`, `:2153` | e2e §12 |
+| **Journalling can never stop a run.** A write failure disables the journal and reports once | `rata-claude-loop--journal`, `:732` | e2e §13 (happy path only) |
 | **Classification never reads a backend's wire format.** Every backend reports an attempt as the same record, so a denial or a missing result means the same thing whichever backend ran it | `rata-claude-loop--classify-attempt`; record keys at `rata-claude-loop--cli-attempt` | `rata-test-claude-loop-classify-attempt-is-backend-neutral`, `rata-test-claude-loop-classify` (unchanged across the seam refactor) |
 | **A run keeps the backend it started with,** and every attempt resets its verdicts through one function, so no backend can leak a previous attempt's outcome | `:backend` in `rata-claude-loop--begin`; `rata-claude-loop--attempt-begin` | e2e §16, `rata-test-claude-loop-backend-dispatch` |
+| **The `agent-shell` responder grants nothing.** It answers `reject_once` by kind, only for the loop's in-flight shell, and hands every other shell's request on; a request with no reject option cancels the turn rather than picking anything else | `rata-claude-loop-acp--responder`, `rata-claude-loop-acp--pick-reject` | `rata-test-claude-loop-acp-only-ever-rejects-once`, ACP e2e §2 (wire shows only `"reject"`), §7 |
+| **ACP cost is charged as a delta.** The adapter reports the session's running total; a retry reuses the session | `rata-claude-loop-acp--complete` (`:acp-cost-mark`) | ACP e2e §1–2 |
+| **An ACP attempt completes exactly once and never from a stale epoch** — turn-complete, an error, the shell dying or the agent exiting, whichever comes first | `rata-claude-loop-acp--complete` (`:acp-done`), `rata-claude-loop-acp--subscribe` | ACP e2e §4–6 |
 
 ## 3. Test coverage — what is and is not proven
 
@@ -68,7 +72,22 @@ full run through an in-process fake backend. Run: `just test-claude-loop`.
 decoding, classification, command construction, truncation, task-detail extraction,
 budget, failure policy, journal records, summary lines.
 
+**`tests/claude-loop-acp-e2e.el`** (`just test-claude-loop-acp`, in `relevant`) runs the
+`agent-shell` backend through the real agent-shell and acp.el against
+`tests/fake-claude-acp`, which logs every ACP message it receives: happy path with wire
+checks (cwd, `_meta`, mode), denial → retry in the same session with the cost delta,
+denied edit, max-turns, RPC error, agent exit mid-turn, timeout → `session/cancel`, a late
+answer after the operator's stop, responder hand-off, and refused CLI-only arguments.
+Mutation-checked on 2026-10-01: a responder that picks `allow_always`, and a cost that adds
+the raw reading, each turn it red.
+
 **NOT covered by any test:**
+- **The real `claude-agent-acp` adapter.** The stub's shapes come from the two live spike
+  runs (`plans/claude-loop-agent-shell.md`, Phase 0); an adapter change passes every test.
+  Not seen live at all: which stop reason (if any) a `maxBudgetUsd` overrun produces, and
+  `maxTurns` / `model` through `_meta`.
+- Under the `agent-shell` backend `maxBudgetUsd` is the *session's* cap, i.e. per task
+  including its retries, where the CLI's is per attempt. Intended, but untested live.
 - The real `claude` CLI. Every test uses a stub; a change to the CLI's `stream-json`
   schema or flag names would pass all tests and fail in use. In particular **nothing
   verifies that `total_cost_usd` is per invocation rather than cumulative per session**,
@@ -93,6 +112,12 @@ budget, failure policy, journal records, summary lines.
   the buffer-local `evil-define-key*` ones.
 
 ## 4. Operating it safely
+
+- **Choosing the backend.** `rata-claude-loop-backend` `cli` (default) or `agent-shell`.
+  The second needs agent-shell installed and `claude-agent-acp` on `exec-path`; `:check`
+  says which is missing. Its shells are named "Claude loop …", are ordinary agent-shell
+  buffers (they show in the `*Agents*` panel), and the one a halted run stopped in is
+  kept — open it to read or continue the task by hand.
 
 - **Set `rata-claude-loop-allowed-tools` per project, or accept that no task can test
   itself.** With it nil the agent cannot run a command, and a task instructed to verify
@@ -121,7 +146,7 @@ budget, failure policy, journal records, summary lines.
   j`) for the durable record — it holds the session ids to pick a failed task up by hand.
 - Leave `rata-claude-loop-verify-baseline` on. It costs one verify run and is what keeps a
   pre-existing red suite from failing every task in the list.
-- The loop is detectable when wedged: `rata-claude-loop--wedged-p` (`:538`) and
+- The loop is detectable when wedged: `rata-claude-loop--wedged-p` (`:541`) and
   `rata-claude-loop-status`. Prefer those to guessing.
 - `rata-claude-loop-stop` cancels timers and kills with a grace period; it also bumps the
   epoch, so in-flight callbacks become no-ops.

@@ -54,10 +54,13 @@
 (defcustom rata-claude-loop-backend 'cli
   "How each task attempt reaches Claude.
 `cli' runs one headless `claude -p' process per attempt and retries by
-resuming its session.  Read once when a run starts, so changing it
+resuming its session.  `agent-shell' runs each task in an agent-shell
+buffer over ACP and retries in the same live session; see
+`init-claude-loop-acp.el'.  Read once when a run starts, so changing it
 mid-run takes effect from the next run.  Each value is a key of
 `rata-claude-loop--backends'."
-  :type '(choice (const :tag "Headless claude -p" cli))
+  :type '(choice (const :tag "Headless claude -p" cli)
+                 (const :tag "agent-shell over ACP" agent-shell))
   :group 'rata-claude-loop)
 
 (defcustom rata-claude-loop-extra-args '("--permission-mode" "acceptEdits")
@@ -1369,6 +1372,9 @@ and all that classification reads:
   :denials       permission denials, each an alist with `tool_name' and
                  `tool_input' -- the CLI's own shape, which other backends
                  produce too
+  :detail        optional: what went wrong, in words, when there is no
+                 result or the result is an error -- for a backend with
+                 no exit code to quote.  The CLI never sets it
 
 `rata-claude-loop--attempt' adds the status-line verdict to it."
   (list :result-p (and result t)
@@ -1466,14 +1472,18 @@ See `rata-claude-loop--cli-attempt' for the record's keys."
          (denials (rata-claude-loop--critical-denials all-denials))
          (unrun (rata-claude-loop--verification-denials all-denials))
          (report (plist-get attempt :report))
-         (reason (plist-get attempt :report-reason)))
+         (reason (plist-get attempt :report-reason))
+         (detail (plist-get attempt :detail)))
     (cond
      ((not (plist-get attempt :result-p))
       (cons 'no-result
-            (format "claude exited with code %s without reporting a result" code)))
+            (or detail
+                (format "claude exited with code %s without reporting a result"
+                        code))))
      ((plist-get attempt :is-error)
       (cons (rata-claude-loop--subtype-kind subtype)
-            (format "claude reported an error (%s)" (or subtype "unknown"))))
+            (format "claude reported an error (%s)"
+                    (or detail subtype "unknown"))))
      ((and subtype (not (equal subtype "success")))
       (cons (rata-claude-loop--subtype-kind subtype)
             (format "claude ended with subtype %s" subtype)))
@@ -1715,6 +1725,8 @@ A backend owns only the attempt; verify, marking and budgets are shared.
                     ends it outright after `rata-claude-loop-kill-grace' if
                     STILL-WANTED then returns non-nil; DETACH forgets it
   :kill             end the attempt immediately and forget it
+  :teardown STATUS  optional; called once when the run ends, STATUS being
+                    `finished' or `halted'
 
 Registering another backend is a `setf' of its `alist-get' here plus a
 `:type' choice in `rata-claude-loop-backend'.")
@@ -1733,6 +1745,19 @@ Registering another backend is a `setf' of its `alist-get' here plus a
       (unless function
         (error "claude-loop backend %S does not implement %s" name op))
       (apply function args))))
+
+(defun rata-claude-loop--backend-teardown (status)
+  "Let the backend clean up after a run that ended with STATUS.
+Optional, so nothing is called for a backend without it, and a failure
+here is reported rather than allowed to hide how the run ended."
+  (let ((function (plist-get (cdr (assq (rata-claude-loop--backend)
+                                        rata-claude-loop--backends))
+                             :teardown)))
+    (when function
+      (condition-case err
+          (funcall function status)
+        (error (rata-claude-loop--log "  backend teardown failed: %s"
+                                      (error-message-string err)))))))
 
 (defun rata-claude-loop--stop-process (process still-wanted)
   "Interrupt PROCESS and return a timer that kills it after the grace period.
@@ -1809,6 +1834,7 @@ another process group and survives."
     (rata-claude-loop--insert (format "\n■ halted: %s\n\n" message-text)
                               'rata-claude-loop-error-face)
     (rata-claude-loop--journal-run-end "halted" message-text)
+    (rata-claude-loop--backend-teardown 'halted)
     (message "claude-loop halted: %s" message-text))
   (display-buffer (rata-claude-loop--buffer)))
 
@@ -1824,6 +1850,7 @@ another process group and survives."
              message-text index (if (= index 1) "" "s"))
      'rata-claude-loop-success-face))
   (rata-claude-loop--journal-run-end "finished" message-text)
+  (rata-claude-loop--backend-teardown 'finished)
   (message "claude-loop: %s" message-text))
 
 (defun rata-claude-loop--terminate ()
