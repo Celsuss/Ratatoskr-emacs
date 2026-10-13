@@ -30,4 +30,3 @@
 
 - [Adding a module](generated/adding-a-module.md)
 - [Conventions](conventions.md)
-- [Reliability (ARE)](generated/are.md)

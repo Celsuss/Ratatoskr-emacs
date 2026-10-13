@@ -2,89 +2,21 @@
 
 This file contains build commands, code style guidelines, and architectural patterns for agentic coding agents working on this Emacs configuration.
 
-## MANDATORY — Autonomous Reliability Engineering (ARE)
+## Working on this Codebase
 
-**This section is not optional and applies to every session, whether or not the operator mentions ARE.**
-
-This repository runs ARE: a thin reliability layer over the existing `just` targets and test
-suites. Entry point: **`.are/INDEX.md`**. Operating manual: **`.are/SYSTEM.md`**.
-
-### Every session, in order
-
-1. **Read `.are/INDEX.md` before changing anything.** It is short and points at everything else.
-2. **Generate task context before coding:**
-   ```sh
-   just are-context "what you are about to do"
-   ```
-   It reads git state, maps the changed paths through `.are/knowledge/MODULES.md`, and writes
-   `.are/generated/CURRENT_CONTEXT.md` with the risk tier, the affected areas, the specific
-   knowledge pages to open, and the relevant failure records. **Open only what it names.**
-3. **Apply risk-based verification depth** (`.are/rules/RISK_RULES.md`,
-   `.are/rules/VERIFICATION_RULES.md`):
-
-   | Risk | Required |
-   |---|---|
-   | LOW | `just are-verify fast` (~4 s) |
-   | MEDIUM | `just are-verify relevant` (~1.8 min) |
-   | HIGH | `just are-verify full` (~3 min) |
-   | CRITICAL | `full` + a new case in `tests/claude-loop-e2e.el` + operator approval |
-
-4. **Run full verification before ending any session that changed code.** A session that
-   touched a `.el` file may not end below `just are-verify relevant`.
-5. **Report PASS / FAIL / NOT TESTED per area.** Never report PASS for a command you did not
-   run. `just compile` proves syntax only; `just batch` exiting 0 does *not* mean modules
-   loaded. Integrations (Ollama, Khoj, Snowflake, GitHub, IRC, feeds, the real `claude` CLI)
-   are **always NOT TESTED** — nothing in `tests/` contacts a network service.
-6. **Self-improve before closing — on every task, not only on failures.** Work through
-   `.are/SYSTEM.md` §3: a failure record, a lesson, a decision, a missing path-map row, a
-   check that would have caught it sooner, or a stale knowledge line to correct. Apply the
-   cheap ones immediately. Prefer an executable test over prose. The repository must be
-   harder to break than it was when the session started.
-
-### Efficient context use — a requirement, not a preference
-
-- Start from `.are/generated/CURRENT_CONTEXT.md` and the tables in `.are/knowledge/MODULES.md`.
-- Prefer deterministic retrieval (`git diff --name-only`, `grep`, the path map) over scanning.
-- **Do not** load the whole knowledge base, re-derive the architecture, or re-read unchanged
-  files "to confirm".
-- **Do not read `SPEC.md` whole** — 2408 lines, drifted, historical intent only. `grep` it.
-- Prefer running a test over reasoning about whether behaviour changed.
-
-### Before anything destructive
-
-`.are/rules/SAFETY_RULES.md` lists what is never done autonomously here: `just clean` /
-`reset` / `update` / `rebuild-packages`, git commits and history, `~/.authinfo.gpg`, anything under
-`~/workspace/second-brain/`, `terraform apply`, mutating `kubectl`, and widening the
-claude-loop's permissions. `lisp/init-claude-loop.el` is the only CRITICAL area — it runs a
-headless agent with `--permission-mode acceptEdits` and an operator-supplied shell command.
-
-### Known open items (do not rediscover these)
-
-`.are/memory/FAILURE_INDEX.md` has the full list. The live ones:
-two checkouts of this repo exist and the docs below point at the stale one (FAIL-0001).
-
-FAIL-0005 is **closed in this checkout** (2026-08-25): `core.hooksPath` is `.githooks`, so
-every commit here is gated, and `.github/workflows/ci.yml` gates PRs to master. The hook
-runs **`just are-verify fast`** (~4 s), not `full` — it loads no packages on purpose, so a
-partially built elpaca cannot block an unrelated commit. Budget seconds for a commit, and
-do **not** read a green hook as module health: run `just are-verify relevant` or `full`
-yourself before pushing anything that could affect startup or load order (FAIL-0012). The
-cause is permanent, though — `core.hooksPath` is
-per-clone and cannot be committed, so a fresh clone starts ungated until someone runs
-`just install-hooks`. `are-audit`'s `hooks-installed` check warns when that is so; read it
-rather than assuming either state.
+### Core Guidelines
+- **Verify with tests**: Always run tests before declaring changes complete (`just lint`, `just compile`, `just test`).
+- **Preserve existing behavior**: Maintain existing comments, docstrings, and established architectural patterns.
+- **Safety**: Never execute destructive operations autonomously (`just clean`, `just reset`, `just rebuild-packages`, `rm -rf`) or touch private data (`~/.authinfo.gpg`, `~/workspace/second-brain/`) without explicit user direction.
+- **Degrade gracefully**: Modules in `lisp/` should fail gracefully if an external tool/binary is missing, disabling only the affected feature rather than breaking overall Emacs startup.
 
 ## Commands
 
 ### Just Commands (Preferred)
 
-The recipes live in `just/*.just` (`emacs`, `test`, `are`, `deps`, `deps-arch`,
+The recipes live in `just/*.just` (`emacs`, `test`, `deps`, `deps-arch`,
 `deps-debian`, `tools`), imported **flat** by the root `justfile`. Every target is
-still `just <name>` with no module prefix — `import` was chosen over `mod` for exactly
-that reason (D-013), because these invocation strings are named by README.org, this
-file, `.githooks/pre-commit`, `scripts/are-verify.sh` and CI. Anything that needs the
-target list must read `just --summary`, never grep the justfile: `scripts/are-audit.sh`
-did, and a grep of one file would now check nothing and pass (L-034).
+still `just <name>` with no module prefix.
 
 ```bash
 # Run with this config
@@ -115,7 +47,7 @@ just lint
 just compile
 
 # Rebuild every package's .elc/.eln with the Emacs installed now — the fix after an
-# Emacs upgrade (FAIL-0015). Deletes only derived artifacts; sources, custom.el and
+# Emacs upgrade. Deletes only derived artifacts; sources, custom.el and
 # var/ are untouched. Operator-run, like clean; stop a daemon on that checkout first.
 just rebuild-packages
 
@@ -138,8 +70,7 @@ just install-deps
 
 # Report which dependency BINARIES this host actually has, with resolved paths.
 # The dependency lists in install-deps are statements about what should be present;
-# this is the only one about this machine (L-033, FAIL-0014). Informational: always
-# exits 0, and deliberately not wired into are-verify.
+# this is the only one about this machine. Informational: always exits 0.
 just check-deps
 ```
 
@@ -160,9 +91,6 @@ emacs --batch --eval "(load-file \"~/workspace/Ratatoskr-emacs/lisp/init-evil.el
 
 ## Repository Context & Navigation
 
-- **Primary source: `just are-context "<task>"`,** then the tables in
-  `.are/knowledge/MODULES.md`. That is the cheap, deterministic path and it is what the
-  ARE rules above require.
 - **`repomix-output.xml` is an optional, per-machine fallback.** It is a generated
   whole-repo pack (~133k tokens, 59 files) — useful when you genuinely need to see many
   files at once (a cross-cutting rename, an unfamiliar dependency web), never as a first
@@ -171,13 +99,12 @@ emacs --batch --eval "(load-file \"~/workspace/Ratatoskr-emacs/lisp/init-evil.el
   - Set it up once: `just install-repomix` (needs `node`/`npx`; no global install required).
   - Refresh after significant changes: `just repomix`.
   - Scope lives in `repomix.config.json`. It deliberately excludes `SPEC.md` (drifted —
-    grep it) and `.are/**` (its own retrieval path is `just are-context`), plus everything
-    `.gitignore` already covers.
+    grep it), plus everything `.gitignore` already covers.
 
 ## Per-machine configuration
 
 Two gitignored files, two different jobs. Do not merge them and do not hand-edit the wrong
-one (D-012 in `.are/memory/DECISIONS.md`):
+one (two files with distinct roles):
 
 | File | Written by | Contains |
 |---|---|---|
@@ -191,14 +118,11 @@ checkout needs. A new machine is `cp local.el.example local.el` plus filling in 
   before the modules, so their `defvar`s see it. Plain `setq` is correct there: `defvar` and
   `defcustom` both leave an already-bound value alone.
 - **Adding a value that must stay private means adding a commented line to
-  `local.el.example` in the same commit.** `scripts/are-audit.sh` (`local-example-in-sync`)
-  fails if a variable named in the template still carries a real value in the tracked
-  sources, and if the template names a `rata-` variable nothing defines.
+  `local.el.example` in the same commit.**
 - **A value the template names must not be the target of a use-package `:custom` clause.**
   `:custom` expands to `custom-theme-set-variables`, which runs when the *package* loads,
   after `local.el`, and overwrites a plain `setq` without a word. Route it through a
-  `rata-` variable the clause reads from (`rata-khoj-server-url` is the worked example);
-  the `local-example-in-sync` audit fails on the direct form (L-051).
+  `rata-` variable the clause reads from (`rata-khoj-server-url` is the worked example).
 - Tokens and passwords do **not** go here. They live in `~/.authinfo.gpg`, read lazily
   through `rata-auth-get` (`lisp/init-system.el:50`) so that startup never blocks on GPG.
 - `lisp/init-sql.el` is the worked example: its six Snowflake parameters are `nil` in git and
@@ -235,7 +159,7 @@ init-present → init-dashboard
 - `init-lang.el` — cross-cutting language infrastructure: tree-sitter (treesit-auto + grammar sources), dap-mode core, combobulate. Per-language config lives in dedicated `init-<lang>.el` files that load after this one.
 - `init-<lang>.el` — one file per language: `init-rust`, `init-go`, `init-python`, `init-cpp`, `init-cmake`, `init-terraform`, `init-just`, `init-docker`, `init-markdown`, `init-yaml`, `init-ansible`, `init-jupyter`, `init-helm`, `init-pkgbuild`. Each contains the `use-package` forms, mode-local keybindings, and helper functions for that one language.
 - `init-llm.el` — gptel, ellama, aidermacs and agent-shell under `SPC a i`. **The three
-  model tools are configured from one list, `rata-llm-providers`** (D-022): each entry is a
+  model tools are configured from one list, `rata-llm-providers`**: each entry is a
   plist with a `:name`, a `:protocol` (`ollama`, or `openai` for any OpenAI-compatible
   chat-completions server such as LiteLLM), a base `:url`, a `:models` list whose first
   entry is the default, and optionally an `:embedding-model` and an `:auth-host`. Pure
@@ -259,7 +183,7 @@ init-present → init-dashboard
   `rata-agent-shell-local-keys`. Upstream ships no evil keys at all, and its own
   one-letter keys (`n p r TAB + - 0`) are shadowed by evil's normal state.
   `rata-test-agent-shell-local-leader-keys` reads the same table, so a key added there is
-  tested and a command renamed upstream fails the suite (L-065).
+  tested and a command renamed upstream fails the suite.
 - `init-claude-loop.el` — drives the `claude` CLI through a `- [ ]` checklist file, one headless `claude -p` process per task. Pure Elisp (no external package): `make-process` + a filter that decodes `--output-format stream-json` events into the `*claude-loop*` buffer. The only module in the config with real async-process plumbing, and the only one with its own state machine, so it has conventions of its own:
   - **Control flow is a trampoline, not a callback chain.** Sentinels and timers only record an outcome and call `rata-claude-loop--later`; every transition then runs from a zero-delay timer at top level. Errors signalled inside a sentinel are demoted to a `*Messages*` line, and marking a checkbox calls `save-buffer` and `org-todo` (arbitrary hook code) — neither belongs in a process callback. `rata-claude-loop--guard` turns any error into a visible halt.
   - **Staleness is handled by `:epoch`**, an integer bumped on every spawn and every stop. Callbacks and timers capture the epoch they were created under and no-op on mismatch; one check covers the child, the stderr pipe, the timeout timer, the grace-period kill and the pending step timer. `:outcome` is write-once per attempt so a timeout's verdict survives the kill it causes.
@@ -321,8 +245,7 @@ init-present → init-dashboard
     denial exists *because* the agent tried the call, so it is evidence about what
     happened, where the status line is only a claim. The buffer prints the
     `--allowedTools` pattern that would have let it through, because the run has
-    already paid to discover it. See [`FAIL-0010`](.are/memory/failures/FAIL-0010.md)
-    and L-015.
+    already paid to discover it. See notes on tool permission denials below.
   - **The verify command is baselined before the first task** (`rata-claude-loop-verify-baseline`).
     A gate that is already red says nothing about a task, and every task would spend its
     retries being told to fix a break it inherited. The baseline's output is deliberately
@@ -343,13 +266,13 @@ init-present → init-dashboard
   — the claude-loop trampoline discipline — and a handler error lands on the entry as
   `error`, because agent-shell demotes a subscriber error to a `message`. **The panel is a
   side window that persp must never save:** persp stores each layout's window state,
-  side windows included, and restores it on switch (L-053), so the panel deletes itself
+  side windows included, and restores it on switch, so the panel deletes itself
   in `persp-before-deactivate-functions` (which runs before persp saves) and re-displays
   in `persp-activated-functions` while pinned; `q` unpins. No shackle rule for
   `*Agents*` (`rata-test-agent-center-no-shackle-rule`). **agent-shell is never
   required**: adoption of already-open shells waits on
   `rata-agent-center--agent-shell-loaded-p` (`featurep`, because `agent-shell-buffers`
-  is an autoload and `fboundp` would load it — L-052). Panel keys (normal state, via
+  is an autoload and `fboundp` would load it). Panel keys (normal state, via
   `evil-define-key*`): `RET` go (layout, then shell), `o` show, `]]`/`[[` next/previous
   row that needs you, `TAB`/`za` fold a layout (a folded-layouts set re-applied on every
   render — tabulated-list has no fold of its own), `c` new shell in the row's project,
@@ -380,7 +303,7 @@ init-present → init-dashboard
   `-D`, never `worktree remove --force`) is a second question. **Transcripts are copied
   out first:** agent-shell writes them inside the worktree, where `.agent-shell/` is
   ignored (via the shared `info/exclude`, which this module ensures), so `git worktree
-  remove` would delete them silently (L-061). The panel's group heading shows `repo ⎇
+  remove` would delete them silently. The panel's group heading shows `repo ⎇
   branch` through `rata-agent-center-project-label-functions`, computed once at
   registration. Tests: `rata-test-agent-worktree-*`, against throwaway repositories
   with `GIT_CONFIG_GLOBAL=/dev/null`; the shell start is stubbed.
@@ -399,7 +322,7 @@ init-present → init-dashboard
   `rata-test-agent-prompt-shipped-prompts-are-valid` fails on a shipped prompt that
   names an unknown placeholder or lacks its `<!-- description -->` line. Tests:
   `rata-test-agent-prompt-*`, with agent-shell stubbed; nothing starts an agent.
-- `init-elfeed-hn.el` — Hacker News inside elfeed's own entry buffer (D-023, plan
+- `init-elfeed-hn.el` — Hacker News inside elfeed's own entry buffer (plan
   `plans/hackernews-reader.md`). Owns no package. One function on `elfeed-show-update-hook`
   (added in `with-eval-after-load 'elfeed-show`, because elfeed's `defvar` of that hook
   carries its own two functions and an earlier `add-hook` would drop them) replaces an HN
@@ -410,7 +333,7 @@ init-present → init-dashboard
   so a blog post linking a discussion is left alone, and every non-HN entry is
   byte-identical. Four things are load-bearing. **`rata-elfeed-hn--retrieve` is the only
   network call**, through curl when it is on PATH (url.el does not fall back from an
-  unrouted IPv6 address, so articles timed out — FAIL-0024; shr's own image fetches are
+  unrouted IPv6 address, so articles timed out; shr's own image fetches are
   recorded during rendering and sent through it too), always answers from a timer with a result plist, never a signal; the
   harness overrides it to fail, and tests use `rata-test-hn--with-net` with fixtures under
   `tests/fixtures/hn/`. **Replies are guarded** (`rata-elfeed-hn--guard`): drawn only if the
@@ -427,10 +350,10 @@ init-present → init-dashboard
   **It needs elfeed's `main` branch** (`:branch "main"` in `init-elfeed.el`): upstream froze
   `master` at 2026-02-18 and only `main` has `elfeed-show-update-hook`. Without it the
   module raises a `display-warning` at `elfeed-show` load rather than binding a hook
-  nothing runs (FAIL-0026, L-064). Tests:
+  nothing runs. Tests:
   `rata-test-hn-*`, through the real `elfeed-show-entry` over an in-memory `elfeed-db`.
 - `init-mail.el` — email under `SPC a e`: mu4e reading a Maildir that `mbsync` fills from
-  Proton Mail Bridge, `smtpmail` sending through Bridge's SMTP port (D-021). Three things
+  Proton Mail Bridge, `smtpmail` sending through Bridge's SMTP port. Three things
   are structural. **mu4e is not an elpaca package**: its elisp is version-locked to the `mu`
   binary, so `rata-mail-mu4e-dir` finds it beside the binary (Homebrew's Cellar here,
   `/usr/share/emacs/site-lisp/mu4e` on Arch) and the `use-package` block is skipped when it
@@ -445,7 +368,7 @@ init-present → init-dashboard
   (`rata-mail-doctor`) reports each piece as present or missing, and every command it prints is
   derived from the host (`rata-mail-bridge-command`): on Arch `protonmail-bridge` on PATH is a Qt
   launcher that hangs on `--cli`, so the Go binary under `/usr/lib/protonmail/bridge/` is named
-  instead; Bridge 3.x writes no `cert.pem` until `cert export` (FAIL-0018). **Proton's traps are
+  instead; Bridge 3.x writes no `cert.pem` until `cert export`. **Proton's traps are
   settings, not lore**: Bridge files sent mail itself (`mu4e-sent-messages-behavior`
   `delete`), "All Mail" and "Labels/*" are the same messages again (excluded in the
   template), mbsync renames on move (`mu4e-change-filenames-when-moving`), and the cert
@@ -454,22 +377,21 @@ init-present → init-dashboard
   rather than letting mbsync fail in the update buffer. Nothing in `tests/` contacts
   Bridge or mu.
 - `init-jira.el` — `jira.el` issue browser under `SPC J`. A second *view* onto work tasks, not a
-  sync: nothing writes into the org-roam tree (see D-011 in `.are/memory/DECISIONS.md`). Two
+  sync: nothing writes into the org-roam tree (one-way sync only). Two
   things are deliberate. `jira-username`/`jira-token` are left unset, which is what makes
   `jira.el` fall back to `auth-source`; and `rata-jira-base-url` defaults to nil and is set in
   the gitignored `local.el`, because the instance hostname is corporate identity on a public
   remote. **The default query is narrowed to open work:** `rata-jira-excluded-statuses`
   reaches jira.el as a `--jql=` argument, injected by a `:filter-return` advice on
   `jira-issues--transient-default-value`, because `--status=` is a single equality and the
-  transient has no negation argument (D-016, L-040). It composes rather than replaces, so
+  transient has no negation argument. It composes rather than replaces, so
   `--myself` and `jira-issues-default-type` still come from upstream, and `C-x C-k` in the
   query menu returns to it. A status name the instance does not carry makes Jira reject the
   *whole* query with a 400, so the symptom is an empty list rather than an unfiltered one;
   `rata-test-jira-default-query-reaches-the-transient` asserts the argument the list actually
   runs with, because `advice-add` on a renamed private function succeeds silently.
   **Evil stays live in the three Jira buffers, and jira.el's own keys are mirrored
-  under the local leader `,`** (D-015, reversing L-017's recommendation on operator
-  instruction). Upstream does not support evil and its keymaps live in `tabulated-list-mode`
+  under the local leader `,`** (on operator instruction). Upstream does not support evil and its keymaps live in `tabulated-list-mode`
   / `magit-section-mode` children, which evil's normal state shadows; emacs state fixes that
   but costs `j`/`k`, `/` and the `SPC` leader inside the buffer. Three things make the
   mirror cheap enough to keep: it is built with `lookup-key` out of jira.el's own mode maps
@@ -483,9 +405,8 @@ init-present → init-dashboard
   `jira-issues.el`, and nothing requires the `jira` umbrella), so a `:config` body never runs
   at all — that is how the earlier `evil-set-initial-state` call stayed dead from the day it
   was written until 2026-09-08, leaving every documented key shadowed. See
-  [`FAIL-0016`](.are/memory/failures/FAIL-0016.md), L-039, D-015, and
   `rata-test-jira-buffers-keep-evil-and-mirror-keys`.
-  **Sprint membership is the one write this module adds on its own** (`, m`, D-017). The
+  **Sprint membership is the one write this module adds on its own** (`, m`). The
   team board is a Scrum board with a single never-closed sprint run as a kanban board, so
   "onto the board" means "into the active sprint", and jira.el only *reads* the Sprint
   field. The commands call the Agile REST API (`/rest/agile/1.0/`) through
@@ -497,7 +418,7 @@ init-present → init-dashboard
   session. Calls are synchronous and chunked at the API's 50-issue cap
   (`rata-jira-move-payloads`); every helper that shapes a request or a label is pure and
   tested.
-  **The list shows and groups by sprint** (D-018): a `:rata-sprint` column pushed onto
+  **The list shows and groups by sprint**: a `:rata-sprint` column pushed onto
   `jira-issues-fields`, and Emacs 30's `tabulated-list-groups` set from
   `jira-issues-mode-hook` to one heading per open sprint plus Backlog (`, m g` toggles;
   `rata-jira-group-by-sprint` is the default). Membership is "has a sprint that is not
@@ -505,17 +426,16 @@ init-present → init-dashboard
   history; `rata-jira-sprint-info` reads both the object form and the older Server/DC
   Java-toString form. Two upstream gaps are patched by advice rather than forks: jira.el
   formats a custom column's `(custom "Sprint")` parent with `%s` into the `fields`
-  request, so no custom column ever arrives (L-042) — `jira-table-field-parent` now
+  request, so no custom column ever arrives — `jira-table-field-parent` now
   resolves it through `jira-fields`; and on Server/DC the `field` endpoint has `id` but no
   `key`, so jira.el's `(NAME . key)` map is all nils — `jira-api-get-fields` is overridden
-  to fall back to `id` (FAIL-0017, which also revived the detail view's Sprint line), and
+  to fall back to `id` (reviving the detail view's Sprint line), and
   `jira-issues--api-get-issues` fetches the field list synchronously while it cannot
   resolve anything, so the first search of a session gets it too. tablist predates grouped tables: `tablist-sort`, `tablist-put-mark` and
   `tablist-filter-eval` each get a guard that applies only while `tabulated-list-groups`
   is non-nil. `rata-test-jira-issues-list-groups-by-sprint` prints a fixture list through
   the real mode and drives all three.
-  **Issues can be imported into `work_tasks.org`, one way and append-only** (D-019, which
-  narrows D-011 rather than reversing it). `, i` in the list or detail buffer appends the
+  **Issues can be imported into `work_tasks.org`, one way and append-only**. `, i` in the list or detail buffer appends the
   marked issues under `* Tasks` as `** TODO <summary> :work:jira:` headings whose
   `:JIRA:` property is the identity; an issue the file already carries is skipped, no
   existing heading is ever rewritten, nothing is sent to Jira, and there is no timer.
@@ -539,8 +459,8 @@ init-present → init-dashboard
   `org-after-todo-state-change-hook` moves a task across the open/finished boundary when
   its done-ness changes, in `hastodo` files only and never for a change inside the open
   block. It moves with `org-move-subtree-down`, which reinstalls markers, so an agenda
-  line's marker follows the entry (D-020). Tests drive `org-todo` for real in a temp buffer.
-  **The org-roam buffer hands `n 0 - ^` back to evil** (L-063): magit-section's
+  line's marker follows the entry. Tests drive `org-todo` for real in a temp buffer.
+  **The org-roam buffer hands `n 0 - ^` back to evil**: magit-section's
   per-section `keymap` text property outranks evil's maps, so `n` after `/` moved to the
   next section. `rata-org-roam-evil-unshadowed-keys` rebinds them in `org-roam-mode-map` as
   `menu-item`s whose `:filter` yields nil outside emacs state;
@@ -554,7 +474,7 @@ init-present → init-dashboard
   before this module the agenda's "Blog Posts" group and nothing else knew the name
   `blog`, so it matched nothing and rendered as absence.
   `rata-test-blog-tag-matches-agenda-group` and
-  `rata-test-blog-capture-template-tags-and-names` now bind both ends (L-029). **`org-hugo-base-dir` is set from `rata-hugo-dir`**, so a post that omits
+  `rata-test-blog-capture-template-tags-and-names` now bind both ends. **`org-hugo-base-dir` is set from `rata-hugo-dir`**, so a post that omits
   `#+hugo_base_dir:` still lands in the right site while one that sets it still wins —
   before, path resolution rode entirely on a per-file keyword that two different templates
   spelled differently. **Preview liveness is `process-live-p`, never the buffer:** hugo
@@ -587,7 +507,7 @@ init-present → init-dashboard
   approval; it shadows the risotto module's placeholder, which `layouts/partials/head.html`
   already links). That path is off-limits autonomously — the module still cannot restyle its
   own output without asking, and the per-speaker `--me` / `--skeptic` / `--newcomer` classes
-  are a contract with `rata-dialogic-characters` that nothing checks. See L-027 for the regexp trap this module was built through.
+  are a contract with `rata-dialogic-characters` that nothing checks. 
 - `init-present.el` — reveal.js slide export via `org-re-reveal` under `SPC o p`. Decks are org-roam nodes in the flat roam root, identified by the `rata-reveal-deck-tag` (`:presentation:`) filetag rather than by directory. New decks come from the `presentation` org-roam capture template in `init-org.el` (key `r`) rather than a bespoke command; `rata-reveal-add-header` converts an existing note in place, mirroring `rata-toggle-hastodo-filetag`. `rata-reveal-export-all` finds them with an `org-roam-db-query` mirroring `rata-org-roam-agenda-files` in `init-org.el`. HTML output is redirected to `rata-reveal-export-dir` (outside org-roam) by shadowing `org-export-output-file-name`'s PUB-DIR argument, so no generated file lands in the note tree. Two `ox-html` advices make export non-interactive in this config: one suppresses `set-auto-mode` in `org-html-final-function` (it activates `mhtml-mode`, whose submodes trigger treesit-auto), the other binds `treesit-auto-install` to nil around `org-html-fontify-code` (src-block fontification otherwise prompts to install a missing grammar mid-export). Keybindings sit at top level, not in the deferred `use-package :config`, because `:after (ox general)` would leave them dead until the first manual export. reveal.js assets come from a CDN by default; `rata-reveal-install-local` clones a local copy and `rata-reveal-toggle-root` switches between them for offline presenting. Reuses the `simple-httpd` recipe declared in `init-org.el` to serve decks over HTTP.
 
 **Error handling:** `rata-load-module` wraps each require in `condition-case`. Failed modules are logged to `rata--failed-modules` and reported in the `*init-errors*` buffer at startup. With `--debug-init`, errors propagate for full backtraces. Alternatively, use `when (file-exists-p ...)` for optional file loading and provide fallbacks for external dependencies.
@@ -620,8 +540,7 @@ init-present → init-dashboard
   module loads, so a leader key written there does not exist until something happens to pull
   the package in — and for a package reached only through its own keybinding, that is never.
   `:commands` autoloads make the command callable from `M-x`; they do nothing for the key.
-  This cost `SPC p f` entirely and left 86 other leader keys dead at startup — see
-  [`FAIL-0009`](.are/memory/failures/FAIL-0009.md) and L-011 in `.are/memory/LESSONS.md`.
+  This cost `SPC p f` entirely and left 86 other leader keys dead at startup — see note below.
   The one exception is a binding scoped with `:keymaps` to a mode whose activation loads the
   package anyway (the local-leader `,`/`m`-prefix bindings in the `init-<lang>.el` files).
 - Regression check: `rata-test-keybindings-live-after-init` in `tests/run-tests.el` resolves a
@@ -635,8 +554,7 @@ init-present → init-dashboard
   leaving every jira.el key shadowed by evil. `(symbol-function 'the-command)` after a full
   init tells you which file the key really loads. Anything consulted by *someone else* later —
   `evil-set-initial-state`, `auto-mode-alist`, `shackle-rules`, leader keys — belongs at top
-  level; only the package's own runtime state belongs in `:config`. See
-  [`FAIL-0016`](.are/memory/failures/FAIL-0016.md) and L-039.
+  level; only the package's own runtime state belongs in `:config`. 
 
 ```elisp
 (general-create-definer rata-leader
@@ -663,9 +581,7 @@ init-present → init-dashboard
   package there.** `eval-when-compile` is plain `progn` in interpreted code, and the modules
   in `lisp/` are loaded as source, so a "compile-time" require runs on every startup; requiring
   org that early pulls Emacs's built-in Org before elpaca activates the newer one and every org
-  package then warns about a version mismatch. `lisp/init-present.el` is the model. See
-  [`FAIL-0012`](.are/memory/failures/FAIL-0012.md) and L-028. `just batch-strict` (inside
-  `are-verify full`) fails on the resulting startup warnings
+  package then warns about a version mismatch. `lisp/init-present.el` is the model. `just batch-strict` fails on the resulting startup warnings.
 
 ### UI/UX Principles
 - Minimalist: Disable toolbars, scrollbars, menu bars by default

@@ -9,9 +9,7 @@
 # `lisp/init-dialogic.el' carried `(eval-when-compile (require (quote org)))',
 # which is a *load-time* require for an interpreted file, so init pulled Emacs's
 # built-in Org before elpaca activated the newer one. Every org package then
-# warned about the version mismatch, the text was printed in the middle of
-# `just are-verify full', and the report still said PASS on batch-startup
-# because the exit code was 0.
+# warned about the version mismatch, but the overall batch command still exited 0.
 #
 # So this wrapper reads the output as well as the status. Patterns are the class
 # of failure, not the one instance: elpaca warns "<pkg> loaded before Elpaca
@@ -51,7 +49,7 @@ A module required a package at load time instead of deferring it. Look for a
 `require' that runs when the module is *loaded* — including one inside
 `eval-when-compile', which is plain `progn' in an interpreted file, and the
 modules in lisp/ are loaded as source. Declare the symbols with `defvar' /
-`declare-function' instead of requiring the feature. See FAIL-0012 and L-028.
+`declare-function' instead of requiring the feature.
 EOF
     exit 1
 fi

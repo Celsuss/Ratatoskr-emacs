@@ -34,7 +34,6 @@
     "useDefaultPatterns": true,
     "customPatterns": [
       "SPEC.md",
-      ".are/**",
       "logo.png",
       "snippets/**",
       "feeds.org",

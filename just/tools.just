@@ -1,8 +1,7 @@
-# just/tools.just — repomix (packed repo context for coding agents).
+# just/tools.just — development tools and git configuration.
 #
 # repomix-output.xml is a generated artifact: gitignored, per-machine, and
-# regenerated on demand. It is a *navigation* aid — the authoritative map of
-# this config is .are/knowledge/MODULES.md plus `just are-context'.
+# regenerated on demand.
 
 # Set up repomix on this machine (one-time): check prerequisites, then first pack
 install-repomix:
@@ -44,3 +43,8 @@ repomix:
         echo "FAIL: repomix unavailable. Run 'just install-repomix' for the prerequisites." >&2
         exit 1
     fi
+
+# Configure git to use .githooks/ for hooks (one-time setup)
+install-hooks:
+    git config core.hooksPath .githooks
+    @echo "Git hooks installed from .githooks/"

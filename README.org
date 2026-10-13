@@ -224,35 +224,9 @@ target is still =just <name>= with no module prefix.
 | =just install-deps=     | Install system dependencies (detects the OS) |
 | =just check-deps=       | Report which dependency binaries are present |
 | =just install-hooks=    | Install git pre-commit hook (one-time)       |
-| =just are=              | Show the ARE entry point and commands        |
 | =just docs-build=       | Build the documentation site (mdBook + pandoc) |
 | =just docs-serve=       | Build and serve the site on localhost:3000   |
 | =just docs-clean=       | Delete the generated site                    |
-| =just are-context=      | Generate task context from git + the ARE map |
-| =just are-verify LEVEL= | Risk-based verification: fast/relevant/full  |
-| =just are-audit=        | Repo-wide reliability audit                  |
-
-** Reliability (ARE)
-
-This config carries an [[file:.are/INDEX.md][Autonomous Reliability Engineering]] layer: a small knowledge base,
-a failure log, risk rules, and three bash scripts that compose the =just= targets above
-into risk-based verification levels. It adds no dependency and duplicates nothing —
-=AGENTS.md= still owns conventions, the =justfile= still owns commands, and =tests/=
-still owns the truth.
-
-Start at =.are/INDEX.md=. Before changing a module, run =just are-context "what you are
-doing"=; it prints the risk tier and the exact knowledge worth reading. Verification
-levels, and what each one does *not* prove, are in =.are/knowledge/TESTING_STRATEGY.md=.
-
-#+begin_src sh
-  just are-verify fast       # ~4s   — lint + claude-loop e2e + audit, no packages needed
-  just are-verify relevant   # ~2min — adds byte-compile + the ERT suite
-  just are-verify full       # ~3min — adds batch startup; what the pre-commit hook runs
-#+end_src
-
-Note: the pre-commit hook is not active until you run =just install-hooks=. GitHub Actions
-also runs the verification levels on pull requests and pushes to =master=
-(=.github/workflows/ci.yml=). See =.are/memory/FAILURE_INDEX.md=.
 
 ** Architecture
 

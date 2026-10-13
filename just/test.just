@@ -26,11 +26,8 @@ test-work-agenda:
 
 # Runs real processes and timers, so it is kept out of `test'.
 # Drive the claude-loop state machine against a stub CLI (no API calls).
-# It IS in `are-verify fast': it needs no packages and takes 3s. See FAIL-0004.
 test-claude-loop:
     RATA_ROOT={{init_dir}} {{emacs_bin}} -Q --batch -l tests/claude-loop-e2e.el
 
 # Run all tests (lint + compile + startup + ERT)
-# Left exactly as it was on purpose — README, AGENTS.md and habit refer to it.
-# The pre-commit gate runs `are-verify full', which is a superset. See DECISIONS D-004.
 test: lint compile batch test-ert test-work-agenda

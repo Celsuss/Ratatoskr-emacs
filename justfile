@@ -8,13 +8,12 @@
 #
 #   just/emacs.just        run, load, compile, clean
 #   just/test.just         lint and the test suites
-#   just/are.just          ARE entry points (.are/INDEX.md)
 #   just/deps.just         install-deps dispatcher, check-deps
 #   just/deps-arch.just    pacman + yay
 #   just/deps-debian.just  apt-get + language toolchains
-#   just/tools.just        repomix
+#   just/tools.just        repomix, install-hooks
 #   just/docs.just         mdBook documentation site (docs-site/)
-
+#
 # Configuration
 # Emacs binary: set EMACS_BIN to override per machine; otherwise the first
 # existing binary wins (Arch: /usr/bin/emacs, Ubuntu snap: /snap/bin/emacs),
@@ -37,7 +36,6 @@ trash_files := "custom.el history"
 
 import 'just/emacs.just'
 import 'just/test.just'
-import 'just/are.just'
 import 'just/deps.just'
 import 'just/deps-arch.just'
 import 'just/deps-debian.just'

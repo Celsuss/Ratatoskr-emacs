@@ -12,8 +12,7 @@
 ;; THIS FILE IS THE CHECKLIST.  It is committed precisely so that a new machine
 ;; does not have to remember what to recreate.  When you add a value that must
 ;; stay off the public remote, add a commented line for it here in the same
-;; commit — `just are-audit' fails if a variable named below still carries a real
-;; value in the tracked sources, and if a name below does not exist at all.
+;; commit so that templates and source definitions stay in sync.
 ;;
 ;; What belongs here: instance hostnames, corporate identity, anything specific
 ;; to one machine.  What does NOT: passwords and tokens (those live in

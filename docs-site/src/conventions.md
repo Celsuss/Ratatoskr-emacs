@@ -29,5 +29,4 @@ The authoritative guide is [`AGENTS.md`](https://github.com/Celsuss/Ratatoskr-em
 just lint                  # conventions, fast
 just check lisp/init-x.el  # byte-compile one file
 just test                  # lint + compile + startup
-just are-verify relevant   # risk-based verification, see Reliability (ARE)
 ```
