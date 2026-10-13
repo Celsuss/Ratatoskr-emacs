@@ -114,8 +114,7 @@ _deps-rustup:
 check-deps:
     #!/usr/bin/env bash
     # Informational: always exits 0. A laptop without terraform is not a broken
-    # checkout, and ARE reports integrations as NOT TESTED by design — this is not
-    # wired into `are-verify'.
+    # checkout.
     set -uo pipefail
 
     # binary|feature that degrades without it
