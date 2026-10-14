@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: _ready
+# key: ready
+# --
+func _ready() -> void:
+    $0

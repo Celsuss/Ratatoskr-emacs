@@ -1,6 +1,6 @@
 # Plan — AI control center (`init-agent-center.el`)
 
-Status: **phases 1–4 done** (written and implemented 2026-09-30; uncommitted).
+Status: **phases 1–6 done** (phases 1–4 2026-09-30; phases 5–6 2026-10-14).
 Each `## Phase N` below is one unit of work, done in interactive Claude Code.
 **This file is the progress record:** a phase is closed by appending ` [done]` to its
 heading, or ` [blocked: <reason>]` when it needs the operator. The first heading
@@ -172,6 +172,9 @@ In `*Agents*` (normal state):
 | `]]` / `[[` | next / previous row that needs attention (`needs-input`, `error`, `done`) |
 | `c` | new agent-shell in the row's layout and project |
 | `K` | interrupt the row's shell (`agent-shell-interrupt`, confirms) |
+| `a` | allow pending permission request for the row's shell |
+| `A` | always allow pending permission request |
+| `d` | deny pending permission request and interrupt the shell |
 | `g r` | force refresh |
 | `q` | close the side window (unpins) |
 
@@ -260,16 +263,26 @@ re-check `init-llm.el`, `init-khoj.el`, `init-claude-loop.el` before binding.
   README.org keybinding tables.
 - Verify: `just are-verify full`.
 
+## Phase 5: Answer permission requests from panel [done]
+
+2026-10-14 — `just test-ert`: lint PASS, compile PASS, ert PASS (6 new `rata-test-agent-center-*`, total 228 passing); live agent-shell path NOT TESTED.
+
+- `rata-agent-center--pending-permission`: extracts pending tool-call, request-id, actions, and client from shell buffer's `agent-shell--state`.
+- `rata-agent-center--resolve-permission-action`: pure resolution of `allow_once`, `allow_always`, `reject_once`.
+- `rata-agent-center--respond-permission`: validates pending request, executes `agent-shell--send-permission-response`, interrupts on `deny`, and reports result in message.
+- Commands `rata-agent-center-allow` (`a`), `rata-agent-center-allow-always` (`A`), `rata-agent-center-deny` (`d`) bound in `rata-agent-center-mode-map`.
+- Extended `rata-agent-center--next-activity` to handle `'permission-request` events so the pending tool call shows immediately under `needs-input` rows.
+
+## Phase 6: Throttled activity line (A2) [done]
+
+2026-10-08 — commit 9a22468: lint PASS, compile PASS, ert PASS (5 `rata-test-agent-center-*` activity tests); live agent-shell path NOT TESTED.
+
+- Show dim second line under row naming the tool call (`Bash: just test`) or the start of the latest agent message chunk (`agent-message-chunk`).
+- `rata-agent-center-show-activity` custom toggle (default `t`), `rata-agent-center-activity-interval` (default 1.0s throttle).
+- Initial activity populated on adoption of already-blocked shells.
+
 ## Later (not planned in detail)
 
-- Answer a permission request from the panel (`a` allow / `A` always / `d` deny)
-  without visiting the shell. agent-shell has permission-response internals
-  (`agent-shell--send-permission-response`) but no public command taking a buffer;
-  needs an upstream look first.
-- Show the latest agent message line under each row (from `agent-message-chunk`,
-  throttled).
-- Orca-style worktree-per-task: `c` offers a new git worktree (agent-shell has
-  `agent-shell-worktree.el`) and a layout named after it.
 - Include claude-loop runs as rows (it already has its own state machine; read it,
   don't duplicate it).
 

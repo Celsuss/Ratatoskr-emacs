@@ -150,6 +150,10 @@ check-deps:
         "pi-acp|agent-shell, SPC a i c p"
         "mu|init-mail.el (mu4e indexer; the mu4e elisp ships beside it)"
         "mbsync|init-mail.el fetch (isync >= 1.5)"
+        "clangd|init-cpp.el C++ LSP (code intelligence)"
+        "scons|init-gamedev.el C++ GDExtension compilation"
+        "ninja|init-cmake.el CMake build generator"
+        "gdb|init-cpp.el C/C++ native debugger"
     )
 
     present=0
@@ -167,6 +171,32 @@ check-deps:
             missing=$((missing + 1))
         fi
     done
+
+    # Godot may be installed via Steam or Flatpak instead of standard PATH; inspect known locations.
+    if path="$(command -v godot 2>/dev/null)"; then
+        printf '  %-18s %s\n' "godot" "$path"
+        present=$((present + 1))
+    else
+        steam_godot=""
+        for p in "$HOME/.local/share/Steam/steamapps/common/Godot Engine/godot.x11.opt.tools.64" \
+                 "$HOME/.steam/steam/steamapps/common/Godot Engine/godot.x11.opt.tools.64" \
+                 "$HOME/.local/share/Steam/steamapps/common/Godot Engine/godot.x86_64"; do
+            if [ -x "$p" ]; then
+                steam_godot="$p"
+                break
+            fi
+        done
+        if [ -n "$steam_godot" ]; then
+            printf '  %-18s %s\n' "godot" "Steam: $steam_godot"
+            present=$((present + 1))
+        elif flatpak info org.godotengine.Godot &>/dev/null; then
+            printf '  %-18s %s\n' "godot" "flatpak: org.godotengine.Godot"
+            present=$((present + 1))
+        else
+            printf '  %-18s MISSING — %s\n' "godot" "init-gamedev.el editor and runner (or install via Steam/pacman)"
+            missing=$((missing + 1))
+        fi
+    fi
 
     # rust-analyzer is commonly installed as a rustup component that is reachable
     # through the toolchain but not on PATH; say so rather than reporting absence.

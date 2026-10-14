@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: _process
+# key: process
+# --
+func _process(delta: float) -> void:
+    $0

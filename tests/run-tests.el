@@ -4806,6 +4806,145 @@ Each binding is (VAR LAYOUT STATE SINCE); the buffers are killed after."
                 (should (= (length (funcall lines)) 6))))
           (kill-buffer panel))))))
 
+;;; --- init-agent-center: answering permission requests (phase 5) ---
+
+(ert-deftest rata-test-agent-center-pending-permission ()
+  "Extracts pending permission data from buffer's `agent-shell--state'."
+  (with-temp-buffer
+    (let ((buf (current-buffer)))
+      ;; No state
+      (should-not (rata-agent-center--pending-permission buf))
+      ;; State with no pending tool calls
+      (setq-local agent-shell--state
+                  '((:client . mock-client)
+                    (:tool-calls . (("t1" . ((:title . "read") (:status . "completed")))))))
+      (should-not (rata-agent-center--pending-permission buf))
+      ;; State with pending permission
+      (setq-local agent-shell--state
+                  '((:client . mock-client)
+                    (:tool-calls . (("t2" . ((:title . "bash")
+                                             (:permission-request-id . 42)
+                                             (:permission-actions . (((:kind . "allow_once")
+                                                                      (:option-id . "opt-1")
+                                                                      (:char . "y"))
+                                                                     ((:kind . "reject_once")
+                                                                      (:option-id . "opt-2")
+                                                                      (:char . "n"))))))
+                                  ("t1" . ((:title . "read") (:status . "completed")))))))
+      (let ((pending (rata-agent-center--pending-permission buf)))
+        (should pending)
+        (should (equal (map-elt pending :tool-call-id) "t2"))
+        (should (equal (map-elt pending :request-id) 42))
+        (should (equal (map-elt pending :client) 'mock-client))
+        (should (= (length (map-elt pending :actions)) 2))))))
+
+(ert-deftest rata-test-agent-center-resolve-permission-action ()
+  "Resolves choice to the correct action alist in actions list."
+  (let ((actions '(((:kind . "allow_once") (:option-id . "opt-allow") (:char . "y") (:option . "Allow"))
+                   ((:kind . "allow_always") (:option-id . "opt-always") (:char . "!") (:option . "Always Allow"))
+                   ((:kind . "reject_once") (:option-id . "opt-reject") (:char . "n") (:option . "Reject")))))
+    (should (equal (map-elt (rata-agent-center--resolve-permission-action actions 'allow) :option-id)
+                   "opt-allow"))
+    (should (equal (map-elt (rata-agent-center--resolve-permission-action actions 'always) :option-id)
+                   "opt-always"))
+    (should (equal (map-elt (rata-agent-center--resolve-permission-action actions 'deny) :option-id)
+                   "opt-reject"))
+    ;; When always is not available
+    (let ((no-always (remove (nth 1 actions) actions)))
+      (should-not (rata-agent-center--resolve-permission-action no-always 'always))
+      (should (rata-agent-center--resolve-permission-action no-always 'allow)))))
+
+(ert-deftest rata-test-agent-center-respond-permission-calls-send ()
+  "Answering permission delegates to `agent-shell--send-permission-response'."
+  (rata-test-agent-center--with-registry
+    (with-temp-buffer
+      (let* ((buf (current-buffer))
+             (called-args nil)
+             (interrupted nil))
+        (rata-agent-center--add-entry buf :state 'needs-input :title "My Agent")
+        (setq-local agent-shell--state
+                    `((:client . mock-client)
+                      (:buffer . ,buf)
+                      (:tool-calls . (("t1" . ((:title . "`just test`")
+                                               (:kind . "execute")
+                                               (:permission-request-id . 99)
+                                               (:permission-actions . (((:kind . "allow_once")
+                                                                        (:option-id . "opt-allow")
+                                                                        (:char . "y"))
+                                                                       ((:kind . "allow_always")
+                                                                        (:option-id . "opt-always")
+                                                                        (:char . "!"))
+                                                                       ((:kind . "reject_once")
+                                                                        (:option-id . "opt-reject")
+                                                                        (:char . "n"))))))))))
+        (cl-letf (((symbol-function 'agent-shell--send-permission-response)
+                   (lambda (&rest args) (setq called-args args)))
+                  ((symbol-function 'agent-shell-interrupt)
+                   (lambda (&rest _) (setq interrupted t))))
+          ;; Test allow
+          (rata-agent-center--respond-permission buf 'allow)
+          (should (equal (plist-get called-args :client) 'mock-client))
+          (should (equal (plist-get called-args :request-id) 99))
+          (should (equal (plist-get called-args :option-id) "opt-allow"))
+          (should-not (plist-get called-args :cancelled))
+          (should-not interrupted)
+          ;; Test always
+          (setq called-args nil interrupted nil)
+          (rata-agent-center--respond-permission buf 'always)
+          (should (equal (plist-get called-args :option-id) "opt-always"))
+          (should-not interrupted)
+          ;; Test deny interrupts
+          (setq called-args nil interrupted nil)
+          (rata-agent-center--respond-permission buf 'deny)
+          (should (equal (plist-get called-args :option-id) "opt-reject"))
+          (should interrupted))))))
+
+(ert-deftest rata-test-agent-center-respond-permission-errors ()
+  "Errors cleanly when shell is not in needs-input or option missing."
+  (rata-test-agent-center--with-registry
+    (with-temp-buffer
+      (let ((buf (current-buffer)))
+        (rata-agent-center--add-entry buf :state 'ready :title "Idle Agent")
+        ;; No pending permission
+        (should-error (rata-agent-center--respond-permission buf 'allow) :type 'user-error)
+        ;; Has pending permission but no Always Allow
+        (setq-local agent-shell--state
+                    `((:client . mock-client)
+                      (:buffer . ,buf)
+                      (:tool-calls . (("t1" . ((:title . "edit")
+                                               (:permission-request-id . 10)
+                                               (:permission-actions . (((:kind . "allow_once")
+                                                                        (:option-id . "opt-allow"))))))))))
+        (should-error (rata-agent-center--respond-permission buf 'always) :type 'user-error)))))
+
+(ert-deftest rata-test-agent-center-permission-keys ()
+  "a, A, and d are bound to permission commands in normal state."
+  (let ((buf (get-buffer-create "*rata-test-agents-perm*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (rata-agent-center-mode)
+          (should (eq (key-binding (kbd "a")) 'rata-agent-center-allow))
+          (should (eq (key-binding (kbd "A")) 'rata-agent-center-allow-always))
+          (should (eq (key-binding (kbd "d")) 'rata-agent-center-deny)))
+      (kill-buffer buf))))
+
+(ert-deftest rata-test-agent-center-permission-request-sets-activity ()
+  "A `permission-request' event updates the activity line with the tool call."
+  (rata-test-agent-center--with-registry
+    (with-temp-buffer
+      (let* ((buf (current-buffer))
+             (ev #'rata-test-agent-center--ev)
+             (handler (progn (rata-agent-center--add-entry buf :state 'working)
+                             (rata-agent-center--make-handler buf))))
+        (funcall handler (funcall ev 'permission-request
+                                  :request-id 1
+                                  :tool-call-id "t1"
+                                  :tool-call '((:kind . "execute")
+                                               (:title . "`rm -rf target`")
+                                               (:command . "rm -rf target"))))
+        (should (equal (plist-get (rata-agent-center--entry buf) :state) 'needs-input))
+        (should (equal (plist-get (rata-agent-center--entry buf) :activity) "Bash: rm -rf target"))))))
+
 ;;; --- init-agent-worktree: one worktree per task (B6, plans/ai-agent-powerhouse.md) ---
 ;; Every git call runs against a throwaway repository under `temporary-file-directory'
 ;; with the user's git config shut out; nothing starts an agent.
@@ -5215,7 +5354,340 @@ is nil, and the diff silently widens to the project) fails here."
     (should (eq status 0))))
 
 ;;; ============================================================
+;;; Agent Review (init-agent-review.el)
+;;; ============================================================
+
+(require 'init-agent-review nil t)
+
+(ert-deftest rata-test-agent-review-format-prompt ()
+  "Formatting review directives into a Markdown prompt for the agent."
+  (should-error (rata-agent-review-format-prompt "agent/test" "main" nil))
+  (let* ((directives
+          '((:id 1 :file "src/main.rs" :line 42 :hunk nil :comment "Add error handling")
+            (:id 2 :file "src/lib.rs" :line 10 :hunk "@@ -10,3 +10,4 @@\n+foo\n" :comment "Refactor this")))
+         (prompt (rata-agent-review-format-prompt "agent/test" "main" directives)))
+    (should (string-search "## Code Review Feedback for `agent/test` (against `main`)" prompt))
+    (should (string-search "### Directive 1: `src/main.rs` (Line 42)" prompt))
+    (should (string-search "**Feedback**: Add error handling" prompt))
+    (should (string-search "### Directive 2: `src/lib.rs` (Line 10)" prompt))
+    (should (string-search "**Feedback**: Refactor this" prompt))
+    (should (string-search "```diff\n@@ -10,3 +10,4 @@\n+foo\n```" prompt))))
+
+(ert-deftest rata-test-agent-review-directive-crud ()
+  "In-memory directive CRUD operations."
+  (with-temp-buffer
+    (setq-local rata-agent-review--directives nil)
+    (setq-local rata-agent-review--next-id 1)
+    (let ((d1 (rata-agent-review--add-directive "a.el" 10 nil "first comment"))
+          (d2 (rata-agent-review--add-directive "b.el" nil "hunk" "second comment")))
+      (should (equal (plist-get d1 :id) 1))
+      (should (equal (plist-get d2 :id) 2))
+      (should (= (length rata-agent-review--directives) 2))
+      (should (rata-agent-review--delete-directive-by-id 1))
+      (should (= (length rata-agent-review--directives) 1))
+      (should (equal (plist-get (car rata-agent-review--directives) :id) 2))
+      (rata-agent-review--clear-directives)
+      (should-not rata-agent-review--directives))))
+
+(ert-deftest rata-test-agent-review-mode-derivation ()
+  "`rata-agent-review-mode' derives from `magit-diff-mode'."
+  (should (provided-mode-derived-p 'rata-agent-review-mode 'magit-diff-mode)))
+
+(ert-deftest rata-test-agent-review-open-in-repo ()
+  "Opening an Agent Review buffer sets up sections, range, and dispatch."
+  (rata-test-agent-worktree--with-repo
+    (rata-test-agent-worktree--answering nil
+      (let* ((wt (rata-agent-worktree-create repo "agent/test-review"))
+             (f (expand-file-name "f.txt" wt)))
+        ;; Commit a change in the worktree
+        (write-region "updated content\n" nil f)
+        (rata-test-agent-worktree--git wt "add" "f.txt")
+        (rata-test-agent-worktree--git wt "commit" "-q" "-m" "worktree change")
+        ;; Also create an untracked file
+        (write-region "untracked content\n" nil (expand-file-name "new.txt" wt))
+        ;; Open review buffer
+        (let ((buf (rata-agent-review-open wt))
+              inserted-text)
+          (unwind-protect
+              (with-current-buffer buf
+                (should (eq major-mode 'rata-agent-review-mode))
+                (should (equal (buffer-name buf) "*Agent Review: agent/test-review*"))
+                (should (equal rata-agent-review--branch "agent/test-review"))
+                (should (equal rata-agent-review--base "main"))
+                (should (string-search "Agent Review: agent/test-review" (buffer-string)))
+                (should (string-search "f.txt" (buffer-string)))
+                (should (string-search "new.txt" (buffer-string)))
+                ;; Add a directive
+                (rata-agent-review--add-directive "f.txt" 1 nil "Check this edit")
+                (should (= 1 (length rata-agent-review--directives)))
+                ;; Send directives with stubbed agent-shell-insert
+                (cl-letf (((symbol-function 'agent-shell-insert)
+                           (lambda (&rest args)
+                             (setq inserted-text (plist-get args :text)))))
+                  (rata-agent-review-send)
+                  (should inserted-text)
+                  (should (string-search "Check this edit" inserted-text))
+                  (should-not rata-agent-review--directives)))
+            (when (buffer-live-p buf)
+              (kill-buffer buf))))))))
+
+(ert-deftest rata-test-agent-review-keys ()
+  "Keys for Agent Review: leader SPC a i r and *Agents* panel `r'."
+  (should (eq (rata-test--leader-lookup "SPC a i r") 'rata-agent-review))
+  (let ((buf (get-buffer-create "*rata-test-agents-review*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (rata-agent-center-mode)
+          (should (eq (key-binding (kbd "r")) 'rata-agent-review-from-panel)))
+      (kill-buffer buf))))
+
+(ert-deftest rata-test-agent-review-shackle-rule ()
+  "shackle must route *Agent Review:* to the same window and select it."
+  (let ((rule (seq-find (lambda (r)
+                          (and (stringp (car r))
+                               (string-match-p (car r) "*Agent Review: agent/feat*")))
+                        shackle-rules)))
+    (should rule)
+    (should (plist-get (cdr rule) :same))
+    (should (plist-get (cdr rule) :select))))
+
+(ert-deftest rata-test-agent-review-send-queued ()
+  "When the agent shell is busy, `rata-agent-review-send' delegates to prompt-queue."
+  (let ((shell (generate-new-buffer " *rata-test-review-shell*"))
+        queued)
+    (unwind-protect
+        (with-temp-buffer
+          (setq-local rata-agent-review--branch "agent/feat")
+          (setq-local rata-agent-review--base "main")
+          (setq-local rata-agent-review--worktree "/tmp/mock")
+          (setq-local rata-agent-review--shell-buffer shell)
+          (rata-agent-review--add-directive "foo.el" 12 nil "fix this")
+          (cl-letf (((symbol-function 'shell-maker-busy) (lambda () t))
+                    ((symbol-function 'agent-shell--prompt-queue-read)
+                     (lambda (&rest args) (plist-get args :initial)))
+                    ((symbol-function 'agent-shell-prompt-queue)
+                     (lambda (prompt) (push prompt queued))))
+            (rata-agent-review-send)
+            (should (= 1 (length queued)))
+            (should (string-search "fix this" (car queued)))
+            (should-not rata-agent-review--directives)))
+      (kill-buffer shell))))
+
+(ert-deftest rata-test-agent-review-comment-command ()
+  "Calling `rata-agent-review-comment' prompts and adds a directive."
+  (with-temp-buffer
+    (setq-local rata-agent-review--directives nil)
+    (setq-local rata-agent-review--next-id 1)
+    (cl-letf (((symbol-function 'read-string)
+               (let ((calls 0))
+                 (lambda (&rest _)
+                   (setq calls (1+ calls))
+                   (if (= calls 1) "lib/auth.el" "Review note"))))
+              ((symbol-function 'magit-refresh) #'ignore)
+              ((symbol-function 'rata-agent-review--context-at-point)
+               (lambda () (list :file nil :line nil :hunk nil))))
+      (rata-agent-review-comment)
+      (should (= 1 (length rata-agent-review--directives)))
+      (let ((d (car rata-agent-review--directives)))
+        (should (equal (plist-get d :file) "lib/auth.el"))
+        (should (equal (plist-get d :comment) "Review note"))))))
+
+(ert-deftest rata-test-agent-review-delete-directive-command ()
+  "Calling `rata-agent-review-delete-directive' removes the directive."
+  (with-temp-buffer
+    (setq-local rata-agent-review--directives nil)
+    (setq-local rata-agent-review--next-id 1)
+    (rata-agent-review--add-directive "a.el" 1 nil "first")
+    (cl-letf (((symbol-function 'magit-refresh) #'ignore))
+      (rata-agent-review-delete-directive 1)
+      (should-not rata-agent-review--directives))))
+
+(ert-deftest rata-test-agent-review-quit ()
+  "Pressing `q' quits review buffer and returns to origin buffer without deleting window."
+  (let* ((orig (get-buffer-create "*rata-test-review-orig*"))
+         (win (selected-window)))
+    (unwind-protect
+        (with-selected-window win
+          (switch-to-buffer orig)
+          (rata-test-agent-worktree--with-repo
+            (rata-test-agent-worktree--answering nil
+              (let* ((wt (rata-agent-worktree-create repo "agent/test-quit"))
+                     (buf (rata-agent-review-open wt orig)))
+                (unwind-protect
+                    (progn
+                      (switch-to-buffer buf)
+                      (should (eq (current-buffer) buf))
+                      (rata-agent-review-quit)
+                      (should (eq (window-buffer win) orig))
+                      (should (window-live-p win)))
+                  (when (buffer-live-p buf)
+                    (kill-buffer buf)))))))
+      (when (buffer-live-p orig)
+        (kill-buffer orig)))))
+
+;;; ============================================================
+;;; Tests: Godot 4 & C++ GDExtension (init-gamedev.el)
+;;; ============================================================
+
+(ert-deftest rata-test-godot-executable-resolution ()
+  "Resolves Godot executable via custom setting, Steam fallback, or PATH."
+  ;; 1. Absolute path to an executable file wins
+  (let ((rata-godot-executable "/bin/sh"))
+    (should (equal (rata-godot-executable-path) "/bin/sh")))
+  ;; 2. Executable on PATH is resolved
+  (let ((rata-godot-executable "git"))
+    (should (equal (rata-godot-executable-path) (executable-find "git"))))
+  ;; 3. Known paths fallback when executable is "godot" and not on PATH
+  (let* ((temp-dir (make-temp-file "rata-godot-test" t))
+         (fake-steam-bin (expand-file-name "fake-godot" temp-dir)))
+    (unwind-protect
+        (progn
+          (write-region "" nil fake-steam-bin)
+          (set-file-modes fake-steam-bin #o755)
+          (let ((rata-godot-executable "godot")
+                (rata-godot-known-paths (list fake-steam-bin)))
+            (cl-letf (((symbol-function 'executable-find)
+                       (lambda (cmd) (unless (equal cmd "godot") (funcall 'executable-find cmd)))))
+              (should (equal (rata-godot-executable-path) fake-steam-bin)))))
+      (delete-directory temp-dir t))))
+
+(ert-deftest rata-test-godot-project-root-detection ()
+  "Detects project.godot in parent directories and GDExtension subdirectories."
+  (let* ((temp-dir (make-temp-file "rata-godot-proj" t))
+         (game-dir (expand-file-name "project" temp-dir))
+         (src-dir (expand-file-name "src" temp-dir))
+         (godot-file (expand-file-name "project.godot" game-dir))
+         (git-dir (expand-file-name ".git" temp-dir)))
+    (unwind-protect
+        (progn
+          (make-directory game-dir t)
+          (make-directory src-dir t)
+          (make-directory git-dir t)
+          (write-region "" nil godot-file)
+          ;; Direct lookup from within project directory
+          (should (equal (file-name-as-directory (rata-godot-project-root game-dir))
+                         (file-name-as-directory game-dir)))
+          ;; Cross-directory lookup from C++ src/ via Git root
+          (should (equal (file-name-as-directory (rata-godot-project-root src-dir))
+                         (file-name-as-directory game-dir))))
+      (delete-directory temp-dir t))))
+
+(ert-deftest rata-test-godot-extension-root-and-build-command ()
+  "Detects GDExtension root and selects correct default build command."
+  (let* ((temp-dir (make-temp-file "rata-godot-ext" t))
+         (scons-file (expand-file-name "SConstruct" temp-dir))
+         (cmake-file (expand-file-name "CMakeLists.txt" temp-dir)))
+    (unwind-protect
+        (progn
+          ;; SConstruct present
+          (write-region "" nil scons-file)
+          (should (equal (rata-godot-extension-root temp-dir) (file-name-as-directory temp-dir)))
+          (should (string-match-p "scons" (rata-godot-default-build-command temp-dir)))
+          (delete-file scons-file)
+          ;; CMakeLists.txt present
+          (write-region "" nil cmake-file)
+          (should (string-match-p "cmake" (rata-godot-default-build-command temp-dir)))
+          (delete-file cmake-file)
+          ;; Custom override wins
+          (let ((rata-godot-build-command "ninja -C build"))
+            (cl-letf (((symbol-function 'rata-godot-extension-root) (lambda (&rest _) temp-dir))
+                      ((symbol-function 'compile) (lambda (cmd) cmd)))
+              (should (equal (rata-godot-build-extension) "ninja -C build")))))
+      (delete-directory temp-dir t))))
+
+(ert-deftest rata-test-godot-scene-dwim-resolution ()
+  "Resolves scene file from current buffer, companion .tscn, or falls back to nil."
+  (let* ((temp-dir (make-temp-file "rata-godot-scene" t))
+         (cpp-file (expand-file-name "player.cpp" temp-dir))
+         (tscn-file (expand-file-name "player.tscn" temp-dir)))
+    (unwind-protect
+        (progn
+          (write-region "" nil cpp-file)
+          (write-region "" nil tscn-file)
+          ;; Visiting the .tscn buffer directly
+          (with-current-buffer (find-file-noselect tscn-file)
+            (should (equal (rata-godot-resolve-scene-file nil) tscn-file))
+            (kill-buffer))
+          ;; Visiting player.cpp with companion player.tscn in the same directory
+          (with-current-buffer (find-file-noselect cpp-file)
+            (should (equal (rata-godot-resolve-scene-file nil) tscn-file))
+            (kill-buffer)))
+      (delete-directory temp-dir t))))
+
+;;; ============================================================
+;;; C++ and CMake tests
+;;; ============================================================
+
+(ert-deftest rata-test-cmake-generator-selection ()
+  "rata-cmake-generator defaults to Ninja if ninja is on PATH, else Unix Makefiles."
+  (should (member rata-cmake-generator '("Ninja" "Unix Makefiles")))
+  (if (executable-find "ninja")
+      (should (string= rata-cmake-generator "Ninja"))
+    (should (string= rata-cmake-generator "Unix Makefiles"))))
+
+(ert-deftest rata-test-cmake-configure-command ()
+  "rata-cmake-configure passes -DCMAKE_EXPORT_COMPILE_COMMANDS=ON and symlinks."
+  (let ((temp-dir (make-temp-file "rata-cmake-conf" t)))
+    (unwind-protect
+        (let ((rata-cmake-build-directory "build")
+              (rata-cmake-generator "Ninja"))
+          (cl-letf (((symbol-function 'rata-cmake-project-root) (lambda () temp-dir))
+                    ((symbol-function 'compile) (lambda (cmd) cmd)))
+            (let ((cmd (rata-cmake-configure "-DFOO=BAR")))
+              (should (string-match-p "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON" cmd))
+              (should (string-match-p "-G Ninja" cmd))
+              (should (string-match-p "-DFOO=BAR" cmd))
+              (should (string-match-p "create_symlink" cmd)))))
+      (delete-directory temp-dir t))))
+
+(ert-deftest rata-test-cmake-find-executables ()
+  "rata-cmake--find-executables finds executables and filters out CMake internals."
+  (let* ((temp-dir (make-temp-file "rata-cmake-execs" t))
+         (game-bin (expand-file-name "mygame" temp-dir))
+         (obj-file (expand-file-name "main.o" temp-dir))
+         (cmake-dir (expand-file-name "CMakeFiles" temp-dir))
+         (cmake-internal (expand-file-name "test" cmake-dir)))
+    (unwind-protect
+        (progn
+          (make-directory cmake-dir t)
+          (write-region "" nil game-bin)
+          (set-file-modes game-bin #o755)
+          (write-region "" nil obj-file)
+          (set-file-modes obj-file #o755)
+          (write-region "" nil cmake-internal)
+          (set-file-modes cmake-internal #o755)
+          (let ((found (rata-cmake--find-executables temp-dir)))
+            (should (member game-bin found))
+            (should-not (member obj-file found))
+            (should-not (member cmake-internal found))))
+      (delete-directory temp-dir t))))
+
+(ert-deftest rata-test-cpp-file-associations ()
+  "C++ header and inline files are mapped to c++-ts-mode."
+  (dolist (ext '("game.h" "game.hpp" "game.hxx" "game.inl" "game.tpp"))
+    (should (eq (assoc-default ext auto-mode-alist #'string-match-p)
+                'c++-ts-mode))))
+
+(ert-deftest rata-test-gamedev-glsl-file-associations ()
+  "Raylib/OpenGL shader files are mapped to glsl-mode."
+  (dolist (ext '("shader.vs" "shader.fs" "shader.vert" "shader.frag" "shader.glsl"))
+    (should (eq (assoc-default ext auto-mode-alist #'string-match-p)
+                'glsl-mode))))
+
+(ert-deftest rata-test-cpp-build-dispatch ()
+  "rata-cpp-build dispatches to rata-godot-build-extension when inside Godot, else rata-cmake-build."
+  (cl-letf (((symbol-function 'rata-godot-project-p) (lambda () t))
+            ((symbol-function 'rata-godot-build-extension) (lambda () 'godot-build))
+            ((symbol-function 'rata-cmake-build) (lambda () 'cmake-build)))
+    (should (eq (rata-cpp-build) 'godot-build)))
+  (cl-letf (((symbol-function 'rata-godot-project-p) (lambda () nil))
+            ((symbol-function 'rata-godot-build-extension) (lambda () 'godot-build))
+            ((symbol-function 'rata-cmake-build) (lambda () 'cmake-build)))
+    (should (eq (rata-cpp-build) 'cmake-build))))
+
+;;; ============================================================
 ;;; Run all tests
 ;;; ============================================================
 
 (ert-run-tests-batch-and-exit)
+
