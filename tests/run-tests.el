@@ -5526,7 +5526,97 @@ is nil, and the diff silently widens to the project) fails here."
         (kill-buffer orig)))))
 
 ;;; ============================================================
+;;; Tests: Godot 4 & C++ GDExtension (init-gamedev.el)
+;;; ============================================================
+
+(ert-deftest rata-test-godot-executable-resolution ()
+  "Resolves Godot executable via custom setting, Steam fallback, or PATH."
+  ;; 1. Absolute path to an executable file wins
+  (let ((rata-godot-executable "/bin/sh"))
+    (should (equal (rata-godot-executable-path) "/bin/sh")))
+  ;; 2. Executable on PATH is resolved
+  (let ((rata-godot-executable "git"))
+    (should (equal (rata-godot-executable-path) (executable-find "git"))))
+  ;; 3. Known paths fallback when executable is "godot" and not on PATH
+  (let* ((temp-dir (make-temp-file "rata-godot-test" t))
+         (fake-steam-bin (expand-file-name "fake-godot" temp-dir)))
+    (unwind-protect
+        (progn
+          (write-region "" nil fake-steam-bin)
+          (set-file-modes fake-steam-bin #o755)
+          (let ((rata-godot-executable "godot")
+                (rata-godot-known-paths (list fake-steam-bin)))
+            (cl-letf (((symbol-function 'executable-find)
+                       (lambda (cmd) (unless (equal cmd "godot") (funcall 'executable-find cmd)))))
+              (should (equal (rata-godot-executable-path) fake-steam-bin)))))
+      (delete-directory temp-dir t))))
+
+(ert-deftest rata-test-godot-project-root-detection ()
+  "Detects project.godot in parent directories and GDExtension subdirectories."
+  (let* ((temp-dir (make-temp-file "rata-godot-proj" t))
+         (game-dir (expand-file-name "project" temp-dir))
+         (src-dir (expand-file-name "src" temp-dir))
+         (godot-file (expand-file-name "project.godot" game-dir))
+         (git-dir (expand-file-name ".git" temp-dir)))
+    (unwind-protect
+        (progn
+          (make-directory game-dir t)
+          (make-directory src-dir t)
+          (make-directory git-dir t)
+          (write-region "" nil godot-file)
+          ;; Direct lookup from within project directory
+          (should (equal (file-name-as-directory (rata-godot-project-root game-dir))
+                         (file-name-as-directory game-dir)))
+          ;; Cross-directory lookup from C++ src/ via Git root
+          (should (equal (file-name-as-directory (rata-godot-project-root src-dir))
+                         (file-name-as-directory game-dir))))
+      (delete-directory temp-dir t))))
+
+(ert-deftest rata-test-godot-extension-root-and-build-command ()
+  "Detects GDExtension root and selects correct default build command."
+  (let* ((temp-dir (make-temp-file "rata-godot-ext" t))
+         (scons-file (expand-file-name "SConstruct" temp-dir))
+         (cmake-file (expand-file-name "CMakeLists.txt" temp-dir)))
+    (unwind-protect
+        (progn
+          ;; SConstruct present
+          (write-region "" nil scons-file)
+          (should (equal (rata-godot-extension-root temp-dir) (file-name-as-directory temp-dir)))
+          (should (string-match-p "scons" (rata-godot-default-build-command temp-dir)))
+          (delete-file scons-file)
+          ;; CMakeLists.txt present
+          (write-region "" nil cmake-file)
+          (should (string-match-p "cmake" (rata-godot-default-build-command temp-dir)))
+          (delete-file cmake-file)
+          ;; Custom override wins
+          (let ((rata-godot-build-command "ninja -C build"))
+            (cl-letf (((symbol-function 'rata-godot-extension-root) (lambda (&rest _) temp-dir))
+                      ((symbol-function 'compile) (lambda (cmd) cmd)))
+              (should (equal (rata-godot-build-extension) "ninja -C build")))))
+      (delete-directory temp-dir t))))
+
+(ert-deftest rata-test-godot-scene-dwim-resolution ()
+  "Resolves scene file from current buffer, companion .tscn, or falls back to nil."
+  (let* ((temp-dir (make-temp-file "rata-godot-scene" t))
+         (cpp-file (expand-file-name "player.cpp" temp-dir))
+         (tscn-file (expand-file-name "player.tscn" temp-dir)))
+    (unwind-protect
+        (progn
+          (write-region "" nil cpp-file)
+          (write-region "" nil tscn-file)
+          ;; Visiting the .tscn buffer directly
+          (with-current-buffer (find-file-noselect tscn-file)
+            (should (equal (rata-godot-resolve-scene-file nil) tscn-file))
+            (kill-buffer))
+          ;; Visiting player.cpp with companion player.tscn in the same directory
+          (with-current-buffer (find-file-noselect cpp-file)
+            (should (equal (rata-godot-resolve-scene-file nil) tscn-file))
+            (kill-buffer)))
+      (delete-directory temp-dir t))))
+
+;;; ============================================================
 ;;; Run all tests
 ;;; ============================================================
 
 (ert-run-tests-batch-and-exit)
+

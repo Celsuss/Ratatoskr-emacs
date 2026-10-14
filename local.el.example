@@ -104,3 +104,14 @@
 ;; `rata-' variable, not `khoj-server-url' itself: the module hands that one to
 ;; use-package :custom, which overwrites a plain setq when khoj loads (L-051).
 ;; (setq rata-khoj-server-url "http://khoj.homelab.local")
+
+;; --- Game Development / Godot 4 (lisp/init-gamedev.el) ---
+;; Path to the Godot binary.  Unset, it automatically discovers Godot on PATH,
+;; standard Steam installation directories, or Flatpak.  Set this if you use a
+;; custom Godot binary or source build:
+;; (setq rata-godot-executable "/path/to/godot")
+;;
+;; Optional custom build command for C++ GDExtension.  Unset, it detects
+;; SConstruct (scons platform=linux compiledb=yes), CMakeLists.txt, or justfile:
+;; (setq rata-godot-build-command "scons platform=linux dev_build=yes compiledb=yes -j8")
+

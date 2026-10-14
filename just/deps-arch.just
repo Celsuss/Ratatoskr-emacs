@@ -15,7 +15,7 @@ install-deps-arch:
         # Language servers & formatters
         python-black prettier gopls pyright go-tools
         # Dev tools
-        rustup python-pytest terraform kubectl docker hugo delve
+        rustup python-pytest terraform kubectl docker hugo delve scons
         # SQL client (ejc-sql drives JDBC via a Clojure nREPL)
         jdk-openjdk leiningen
         # Org LaTeX math preview (latex + dvisvgm + org preamble packages:

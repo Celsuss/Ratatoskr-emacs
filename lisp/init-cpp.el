@@ -16,8 +16,9 @@
   (setf (alist-get 'c++-ts-mode apheleia-mode-alist) 'clang-format)
   (setf (alist-get 'c-ts-mode apheleia-mode-alist) 'clang-format))
 
-;; --- DAP / LLDB (C++ debugging) ---
+;; --- DAP / LLDB / GDB (C++ debugging) ---
 (with-eval-after-load 'dap-mode
-  (require 'dap-lldb))
+  (require 'dap-lldb nil t)
+  (require 'dap-gdb-lldb nil t))
 
 (provide 'init-cpp)
