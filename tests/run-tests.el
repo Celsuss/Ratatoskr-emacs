@@ -5615,6 +5615,77 @@ is nil, and the diff silently widens to the project) fails here."
       (delete-directory temp-dir t))))
 
 ;;; ============================================================
+;;; C++ and CMake tests
+;;; ============================================================
+
+(ert-deftest rata-test-cmake-generator-selection ()
+  "rata-cmake-generator defaults to Ninja if ninja is on PATH, else Unix Makefiles."
+  (should (member rata-cmake-generator '("Ninja" "Unix Makefiles")))
+  (if (executable-find "ninja")
+      (should (string= rata-cmake-generator "Ninja"))
+    (should (string= rata-cmake-generator "Unix Makefiles"))))
+
+(ert-deftest rata-test-cmake-configure-command ()
+  "rata-cmake-configure passes -DCMAKE_EXPORT_COMPILE_COMMANDS=ON and symlinks."
+  (let ((temp-dir (make-temp-file "rata-cmake-conf" t)))
+    (unwind-protect
+        (let ((rata-cmake-build-directory "build")
+              (rata-cmake-generator "Ninja"))
+          (cl-letf (((symbol-function 'rata-cmake-project-root) (lambda () temp-dir))
+                    ((symbol-function 'compile) (lambda (cmd) cmd)))
+            (let ((cmd (rata-cmake-configure "-DFOO=BAR")))
+              (should (string-match-p "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON" cmd))
+              (should (string-match-p "-G Ninja" cmd))
+              (should (string-match-p "-DFOO=BAR" cmd))
+              (should (string-match-p "create_symlink" cmd)))))
+      (delete-directory temp-dir t))))
+
+(ert-deftest rata-test-cmake-find-executables ()
+  "rata-cmake--find-executables finds executables and filters out CMake internals."
+  (let* ((temp-dir (make-temp-file "rata-cmake-execs" t))
+         (game-bin (expand-file-name "mygame" temp-dir))
+         (obj-file (expand-file-name "main.o" temp-dir))
+         (cmake-dir (expand-file-name "CMakeFiles" temp-dir))
+         (cmake-internal (expand-file-name "test" cmake-dir)))
+    (unwind-protect
+        (progn
+          (make-directory cmake-dir t)
+          (write-region "" nil game-bin)
+          (set-file-modes game-bin #o755)
+          (write-region "" nil obj-file)
+          (set-file-modes obj-file #o755)
+          (write-region "" nil cmake-internal)
+          (set-file-modes cmake-internal #o755)
+          (let ((found (rata-cmake--find-executables temp-dir)))
+            (should (member game-bin found))
+            (should-not (member obj-file found))
+            (should-not (member cmake-internal found))))
+      (delete-directory temp-dir t))))
+
+(ert-deftest rata-test-cpp-file-associations ()
+  "C++ header and inline files are mapped to c++-ts-mode."
+  (dolist (ext '("game.h" "game.hpp" "game.hxx" "game.inl" "game.tpp"))
+    (should (eq (assoc-default ext auto-mode-alist #'string-match-p)
+                'c++-ts-mode))))
+
+(ert-deftest rata-test-gamedev-glsl-file-associations ()
+  "Raylib/OpenGL shader files are mapped to glsl-mode."
+  (dolist (ext '("shader.vs" "shader.fs" "shader.vert" "shader.frag" "shader.glsl"))
+    (should (eq (assoc-default ext auto-mode-alist #'string-match-p)
+                'glsl-mode))))
+
+(ert-deftest rata-test-cpp-build-dispatch ()
+  "rata-cpp-build dispatches to rata-godot-build-extension when inside Godot, else rata-cmake-build."
+  (cl-letf (((symbol-function 'rata-godot-project-p) (lambda () t))
+            ((symbol-function 'rata-godot-build-extension) (lambda () 'godot-build))
+            ((symbol-function 'rata-cmake-build) (lambda () 'cmake-build)))
+    (should (eq (rata-cpp-build) 'godot-build)))
+  (cl-letf (((symbol-function 'rata-godot-project-p) (lambda () nil))
+            ((symbol-function 'rata-godot-build-extension) (lambda () 'godot-build))
+            ((symbol-function 'rata-cmake-build) (lambda () 'cmake-build)))
+    (should (eq (rata-cpp-build) 'cmake-build))))
+
+;;; ============================================================
 ;;; Run all tests
 ;;; ============================================================
 

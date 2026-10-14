@@ -211,7 +211,9 @@ With prefix ARG (C-u), prompt to choose a scene file."
 (add-to-list 'auto-mode-alist '("project\\.godot\\'" . conf-toml-mode))
 
 (use-package glsl-mode
-  :mode ("\\.gdshader\\'" "\\.shader\\'"))
+  :mode ("\\.gdshader\\'" "\\.shader\\'"
+         "\\.vert\\'" "\\.frag\\'" "\\.glsl\\'"
+         "\\.vs\\'" "\\.fs\\'"))
 
 ;; --- GDScript (for scripts, tools, and glue) ---
 (eval-when-compile
@@ -243,8 +245,7 @@ With prefix ARG (C-u), prompt to choose a scene file."
     "mgr"  '(rata-godot-run-project      :which-key "run project")
     "mgs"  '(rata-godot-run-scene        :which-key "run scene")
     "mgb"  '(rata-godot-build-extension  :which-key "build extension")
-    "mgd"  '(rata-godot-debug-cpp        :which-key "debug C++")
-    "mb"   '(rata-godot-build-extension  :which-key "build extension"))
+    "mgd"  '(rata-godot-debug-cpp        :which-key "debug C++"))
 
   (rata-leader
     :states '(normal visual)

@@ -150,8 +150,10 @@ check-deps:
         "pi-acp|agent-shell, SPC a i c p"
         "mu|init-mail.el (mu4e indexer; the mu4e elisp ships beside it)"
         "mbsync|init-mail.el fetch (isync >= 1.5)"
-        "clangd|init-cpp.el C++ LSP (GDExtension code intelligence)"
+        "clangd|init-cpp.el C++ LSP (code intelligence)"
         "scons|init-gamedev.el C++ GDExtension compilation"
+        "ninja|init-cmake.el CMake build generator"
+        "gdb|init-cpp.el C/C++ native debugger"
     )
 
     present=0
