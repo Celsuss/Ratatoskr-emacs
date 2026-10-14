@@ -4806,6 +4806,145 @@ Each binding is (VAR LAYOUT STATE SINCE); the buffers are killed after."
                 (should (= (length (funcall lines)) 6))))
           (kill-buffer panel))))))
 
+;;; --- init-agent-center: answering permission requests (phase 5) ---
+
+(ert-deftest rata-test-agent-center-pending-permission ()
+  "Extracts pending permission data from buffer's `agent-shell--state'."
+  (with-temp-buffer
+    (let ((buf (current-buffer)))
+      ;; No state
+      (should-not (rata-agent-center--pending-permission buf))
+      ;; State with no pending tool calls
+      (setq-local agent-shell--state
+                  '((:client . mock-client)
+                    (:tool-calls . (("t1" . ((:title . "read") (:status . "completed")))))))
+      (should-not (rata-agent-center--pending-permission buf))
+      ;; State with pending permission
+      (setq-local agent-shell--state
+                  '((:client . mock-client)
+                    (:tool-calls . (("t2" . ((:title . "bash")
+                                             (:permission-request-id . 42)
+                                             (:permission-actions . (((:kind . "allow_once")
+                                                                      (:option-id . "opt-1")
+                                                                      (:char . "y"))
+                                                                     ((:kind . "reject_once")
+                                                                      (:option-id . "opt-2")
+                                                                      (:char . "n"))))))
+                                  ("t1" . ((:title . "read") (:status . "completed")))))))
+      (let ((pending (rata-agent-center--pending-permission buf)))
+        (should pending)
+        (should (equal (map-elt pending :tool-call-id) "t2"))
+        (should (equal (map-elt pending :request-id) 42))
+        (should (equal (map-elt pending :client) 'mock-client))
+        (should (= (length (map-elt pending :actions)) 2))))))
+
+(ert-deftest rata-test-agent-center-resolve-permission-action ()
+  "Resolves choice to the correct action alist in actions list."
+  (let ((actions '(((:kind . "allow_once") (:option-id . "opt-allow") (:char . "y") (:option . "Allow"))
+                   ((:kind . "allow_always") (:option-id . "opt-always") (:char . "!") (:option . "Always Allow"))
+                   ((:kind . "reject_once") (:option-id . "opt-reject") (:char . "n") (:option . "Reject")))))
+    (should (equal (map-elt (rata-agent-center--resolve-permission-action actions 'allow) :option-id)
+                   "opt-allow"))
+    (should (equal (map-elt (rata-agent-center--resolve-permission-action actions 'always) :option-id)
+                   "opt-always"))
+    (should (equal (map-elt (rata-agent-center--resolve-permission-action actions 'deny) :option-id)
+                   "opt-reject"))
+    ;; When always is not available
+    (let ((no-always (remove (nth 1 actions) actions)))
+      (should-not (rata-agent-center--resolve-permission-action no-always 'always))
+      (should (rata-agent-center--resolve-permission-action no-always 'allow)))))
+
+(ert-deftest rata-test-agent-center-respond-permission-calls-send ()
+  "Answering permission delegates to `agent-shell--send-permission-response'."
+  (rata-test-agent-center--with-registry
+    (with-temp-buffer
+      (let* ((buf (current-buffer))
+             (called-args nil)
+             (interrupted nil))
+        (rata-agent-center--add-entry buf :state 'needs-input :title "My Agent")
+        (setq-local agent-shell--state
+                    `((:client . mock-client)
+                      (:buffer . ,buf)
+                      (:tool-calls . (("t1" . ((:title . "`just test`")
+                                               (:kind . "execute")
+                                               (:permission-request-id . 99)
+                                               (:permission-actions . (((:kind . "allow_once")
+                                                                        (:option-id . "opt-allow")
+                                                                        (:char . "y"))
+                                                                       ((:kind . "allow_always")
+                                                                        (:option-id . "opt-always")
+                                                                        (:char . "!"))
+                                                                       ((:kind . "reject_once")
+                                                                        (:option-id . "opt-reject")
+                                                                        (:char . "n"))))))))))
+        (cl-letf (((symbol-function 'agent-shell--send-permission-response)
+                   (lambda (&rest args) (setq called-args args)))
+                  ((symbol-function 'agent-shell-interrupt)
+                   (lambda (&rest _) (setq interrupted t))))
+          ;; Test allow
+          (rata-agent-center--respond-permission buf 'allow)
+          (should (equal (plist-get called-args :client) 'mock-client))
+          (should (equal (plist-get called-args :request-id) 99))
+          (should (equal (plist-get called-args :option-id) "opt-allow"))
+          (should-not (plist-get called-args :cancelled))
+          (should-not interrupted)
+          ;; Test always
+          (setq called-args nil interrupted nil)
+          (rata-agent-center--respond-permission buf 'always)
+          (should (equal (plist-get called-args :option-id) "opt-always"))
+          (should-not interrupted)
+          ;; Test deny interrupts
+          (setq called-args nil interrupted nil)
+          (rata-agent-center--respond-permission buf 'deny)
+          (should (equal (plist-get called-args :option-id) "opt-reject"))
+          (should interrupted))))))
+
+(ert-deftest rata-test-agent-center-respond-permission-errors ()
+  "Errors cleanly when shell is not in needs-input or option missing."
+  (rata-test-agent-center--with-registry
+    (with-temp-buffer
+      (let ((buf (current-buffer)))
+        (rata-agent-center--add-entry buf :state 'ready :title "Idle Agent")
+        ;; No pending permission
+        (should-error (rata-agent-center--respond-permission buf 'allow) :type 'user-error)
+        ;; Has pending permission but no Always Allow
+        (setq-local agent-shell--state
+                    `((:client . mock-client)
+                      (:buffer . ,buf)
+                      (:tool-calls . (("t1" . ((:title . "edit")
+                                               (:permission-request-id . 10)
+                                               (:permission-actions . (((:kind . "allow_once")
+                                                                        (:option-id . "opt-allow"))))))))))
+        (should-error (rata-agent-center--respond-permission buf 'always) :type 'user-error)))))
+
+(ert-deftest rata-test-agent-center-permission-keys ()
+  "a, A, and d are bound to permission commands in normal state."
+  (let ((buf (get-buffer-create "*rata-test-agents-perm*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (rata-agent-center-mode)
+          (should (eq (key-binding (kbd "a")) 'rata-agent-center-allow))
+          (should (eq (key-binding (kbd "A")) 'rata-agent-center-allow-always))
+          (should (eq (key-binding (kbd "d")) 'rata-agent-center-deny)))
+      (kill-buffer buf))))
+
+(ert-deftest rata-test-agent-center-permission-request-sets-activity ()
+  "A `permission-request' event updates the activity line with the tool call."
+  (rata-test-agent-center--with-registry
+    (with-temp-buffer
+      (let* ((buf (current-buffer))
+             (ev #'rata-test-agent-center--ev)
+             (handler (progn (rata-agent-center--add-entry buf :state 'working)
+                             (rata-agent-center--make-handler buf))))
+        (funcall handler (funcall ev 'permission-request
+                                  :request-id 1
+                                  :tool-call-id "t1"
+                                  :tool-call '((:kind . "execute")
+                                               (:title . "`rm -rf target`")
+                                               (:command . "rm -rf target"))))
+        (should (equal (plist-get (rata-agent-center--entry buf) :state) 'needs-input))
+        (should (equal (plist-get (rata-agent-center--entry buf) :activity) "Bash: rm -rf target"))))))
+
 ;;; --- init-agent-worktree: one worktree per task (B6, plans/ai-agent-powerhouse.md) ---
 ;; Every git call runs against a throwaway repository under `temporary-file-directory'
 ;; with the user's git config shut out; nothing starts an agent.

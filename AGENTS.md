@@ -276,7 +276,8 @@ init-present → init-dashboard
   `evil-define-key*`): `RET` go (layout, then shell), `o` show, `]]`/`[[` next/previous
   row that needs you, `TAB`/`za` fold a layout (a folded-layouts set re-applied on every
   render — tabulated-list has no fold of its own), `c` new shell in the row's project,
-  `K` interrupt, `g r` refresh, `q` close. **A dim activity line under a row** (A2,
+  `K` interrupt, `a`/`A`/`d` allow/always/deny permission without visiting the shell,
+  `g r` refresh, `q` close. **A dim activity line under a row** (A2,
   `rata-agent-center-show-activity`) shows the latest tool call or the start of the
   latest agent message. It is a second printed line, not a column, via
   `tabulated-list-printer`: that is only safe because the panel has no sort key, so
