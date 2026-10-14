@@ -145,7 +145,7 @@ init-cmake → init-terraform → init-just → init-docker → init-markdown �
 init-yaml → init-ansible → init-jupyter → init-helm → init-pkgbuild →
 init-casual → init-sql → init-k8s → init-gamedev → init-snippets →
 init-llm → init-claude-loop → init-khoj → init-irc → init-elfeed → init-elfeed-hn → init-mail → init-jira →
-init-persp → init-agent-center → init-agent-worktree → init-agent-prompts → init-org → init-blog → init-dialogic →
+init-persp → init-agent-center → init-agent-worktree → init-agent-prompts → init-agent-review → init-org → init-blog → init-dialogic →
 init-present → init-dashboard
 ```
 
@@ -322,6 +322,16 @@ init-present → init-dashboard
   `rata-test-agent-prompt-shipped-prompts-are-valid` fails on a shipped prompt that
   names an unknown placeholder or lacks its `<!-- description -->` line. Tests:
   `rata-test-agent-prompt-*`, with agent-shell stubbed; nothing starts an agent.
+- `init-agent-review.el` — an interactive multi-file diff and review hub for agent worktrees (Pillar I §1 in
+  `plans/ai-agent-powerhouse.md`). `SPC a i r` or `r` on a row in `*Agents*` opens a dedicated review cockpit
+  `*Agent Review: <branch>*` for `base...HEAD`. Derives from `magit-diff-mode` to inherit Magit's diff
+  navigation, syntax highlighting, hunk jumping, folding (`TAB`), and Ediff (`e` via `magit-ediff-dwim`),
+  while prepending custom sections for worktree metadata and pending review directives. Staging directives
+  (`c` to add, `d` to delete) is completely in-memory (buffer-local) and non-destructive. `s` / `C-c C-c`
+  formats directives into a Markdown review prompt and dispatches them to the worktree's `agent-shell` (or
+  enqueues via `agent-shell-prompt-queue` when busy). `a` jumps to the shell; `f` finishes and cleans up the
+  worktree via `rata-agent-worktree-finish-at`. Shackle routes review buffers with `:same t :select t`.
+  Tests: `rata-test-agent-review-*` in `tests/run-tests.el`.
 - `init-elfeed-hn.el` — Hacker News inside elfeed's own entry buffer (plan
   `plans/hackernews-reader.md`). Owns no package. One function on `elfeed-show-update-hook`
   (added in `with-eval-after-load 'elfeed-show`, because elfeed's `defvar` of that hook

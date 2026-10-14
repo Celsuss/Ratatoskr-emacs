@@ -91,7 +91,8 @@
           ("*lsp-help*"        :align right :size 0.4 :popup t :select t)
           ("*ejc-sql-output*"  :align below :size 0.4 :popup t)
           ("*claude-loop*"     :align right :size 0.45 :popup t :select nil)
-          ("*Messages*"        :align below :size 0.25 :popup t))))
+          ("*Messages*"        :align below :size 0.25 :popup t)
+          ("^\\*Agent Review:" :regexp t :same t :select t))))
 
 ;; --- Popper (popup management) ---
 ;; Delineation with shackle: shackle owns PLACEMENT (where a popup lands),

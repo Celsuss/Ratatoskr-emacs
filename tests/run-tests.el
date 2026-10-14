@@ -5215,6 +5215,178 @@ is nil, and the diff silently widens to the project) fails here."
     (should (eq status 0))))
 
 ;;; ============================================================
+;;; Agent Review (init-agent-review.el)
+;;; ============================================================
+
+(require 'init-agent-review nil t)
+
+(ert-deftest rata-test-agent-review-format-prompt ()
+  "Formatting review directives into a Markdown prompt for the agent."
+  (should-error (rata-agent-review-format-prompt "agent/test" "main" nil))
+  (let* ((directives
+          '((:id 1 :file "src/main.rs" :line 42 :hunk nil :comment "Add error handling")
+            (:id 2 :file "src/lib.rs" :line 10 :hunk "@@ -10,3 +10,4 @@\n+foo\n" :comment "Refactor this")))
+         (prompt (rata-agent-review-format-prompt "agent/test" "main" directives)))
+    (should (string-search "## Code Review Feedback for `agent/test` (against `main`)" prompt))
+    (should (string-search "### Directive 1: `src/main.rs` (Line 42)" prompt))
+    (should (string-search "**Feedback**: Add error handling" prompt))
+    (should (string-search "### Directive 2: `src/lib.rs` (Line 10)" prompt))
+    (should (string-search "**Feedback**: Refactor this" prompt))
+    (should (string-search "```diff\n@@ -10,3 +10,4 @@\n+foo\n```" prompt))))
+
+(ert-deftest rata-test-agent-review-directive-crud ()
+  "In-memory directive CRUD operations."
+  (with-temp-buffer
+    (setq-local rata-agent-review--directives nil)
+    (setq-local rata-agent-review--next-id 1)
+    (let ((d1 (rata-agent-review--add-directive "a.el" 10 nil "first comment"))
+          (d2 (rata-agent-review--add-directive "b.el" nil "hunk" "second comment")))
+      (should (equal (plist-get d1 :id) 1))
+      (should (equal (plist-get d2 :id) 2))
+      (should (= (length rata-agent-review--directives) 2))
+      (should (rata-agent-review--delete-directive-by-id 1))
+      (should (= (length rata-agent-review--directives) 1))
+      (should (equal (plist-get (car rata-agent-review--directives) :id) 2))
+      (rata-agent-review--clear-directives)
+      (should-not rata-agent-review--directives))))
+
+(ert-deftest rata-test-agent-review-mode-derivation ()
+  "`rata-agent-review-mode' derives from `magit-diff-mode'."
+  (should (provided-mode-derived-p 'rata-agent-review-mode 'magit-diff-mode)))
+
+(ert-deftest rata-test-agent-review-open-in-repo ()
+  "Opening an Agent Review buffer sets up sections, range, and dispatch."
+  (rata-test-agent-worktree--with-repo
+    (rata-test-agent-worktree--answering nil
+      (let* ((wt (rata-agent-worktree-create repo "agent/test-review"))
+             (f (expand-file-name "f.txt" wt)))
+        ;; Commit a change in the worktree
+        (write-region "updated content\n" nil f)
+        (rata-test-agent-worktree--git wt "add" "f.txt")
+        (rata-test-agent-worktree--git wt "commit" "-q" "-m" "worktree change")
+        ;; Also create an untracked file
+        (write-region "untracked content\n" nil (expand-file-name "new.txt" wt))
+        ;; Open review buffer
+        (let ((buf (rata-agent-review-open wt))
+              inserted-text)
+          (unwind-protect
+              (with-current-buffer buf
+                (should (eq major-mode 'rata-agent-review-mode))
+                (should (equal (buffer-name buf) "*Agent Review: agent/test-review*"))
+                (should (equal rata-agent-review--branch "agent/test-review"))
+                (should (equal rata-agent-review--base "main"))
+                (should (string-search "Agent Review: agent/test-review" (buffer-string)))
+                (should (string-search "f.txt" (buffer-string)))
+                (should (string-search "new.txt" (buffer-string)))
+                ;; Add a directive
+                (rata-agent-review--add-directive "f.txt" 1 nil "Check this edit")
+                (should (= 1 (length rata-agent-review--directives)))
+                ;; Send directives with stubbed agent-shell-insert
+                (cl-letf (((symbol-function 'agent-shell-insert)
+                           (lambda (&rest args)
+                             (setq inserted-text (plist-get args :text)))))
+                  (rata-agent-review-send)
+                  (should inserted-text)
+                  (should (string-search "Check this edit" inserted-text))
+                  (should-not rata-agent-review--directives)))
+            (when (buffer-live-p buf)
+              (kill-buffer buf))))))))
+
+(ert-deftest rata-test-agent-review-keys ()
+  "Keys for Agent Review: leader SPC a i r and *Agents* panel `r'."
+  (should (eq (rata-test--leader-lookup "SPC a i r") 'rata-agent-review))
+  (let ((buf (get-buffer-create "*rata-test-agents-review*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (rata-agent-center-mode)
+          (should (eq (key-binding (kbd "r")) 'rata-agent-review-from-panel)))
+      (kill-buffer buf))))
+
+(ert-deftest rata-test-agent-review-shackle-rule ()
+  "shackle must route *Agent Review:* to the same window and select it."
+  (let ((rule (seq-find (lambda (r)
+                          (and (stringp (car r))
+                               (string-match-p (car r) "*Agent Review: agent/feat*")))
+                        shackle-rules)))
+    (should rule)
+    (should (plist-get (cdr rule) :same))
+    (should (plist-get (cdr rule) :select))))
+
+(ert-deftest rata-test-agent-review-send-queued ()
+  "When the agent shell is busy, `rata-agent-review-send' delegates to prompt-queue."
+  (let ((shell (generate-new-buffer " *rata-test-review-shell*"))
+        queued)
+    (unwind-protect
+        (with-temp-buffer
+          (setq-local rata-agent-review--branch "agent/feat")
+          (setq-local rata-agent-review--base "main")
+          (setq-local rata-agent-review--worktree "/tmp/mock")
+          (setq-local rata-agent-review--shell-buffer shell)
+          (rata-agent-review--add-directive "foo.el" 12 nil "fix this")
+          (cl-letf (((symbol-function 'shell-maker-busy) (lambda () t))
+                    ((symbol-function 'agent-shell--prompt-queue-read)
+                     (lambda (&rest args) (plist-get args :initial)))
+                    ((symbol-function 'agent-shell-prompt-queue)
+                     (lambda (prompt) (push prompt queued))))
+            (rata-agent-review-send)
+            (should (= 1 (length queued)))
+            (should (string-search "fix this" (car queued)))
+            (should-not rata-agent-review--directives)))
+      (kill-buffer shell))))
+
+(ert-deftest rata-test-agent-review-comment-command ()
+  "Calling `rata-agent-review-comment' prompts and adds a directive."
+  (with-temp-buffer
+    (setq-local rata-agent-review--directives nil)
+    (setq-local rata-agent-review--next-id 1)
+    (cl-letf (((symbol-function 'read-string)
+               (let ((calls 0))
+                 (lambda (&rest _)
+                   (setq calls (1+ calls))
+                   (if (= calls 1) "lib/auth.el" "Review note"))))
+              ((symbol-function 'magit-refresh) #'ignore)
+              ((symbol-function 'rata-agent-review--context-at-point)
+               (lambda () (list :file nil :line nil :hunk nil))))
+      (rata-agent-review-comment)
+      (should (= 1 (length rata-agent-review--directives)))
+      (let ((d (car rata-agent-review--directives)))
+        (should (equal (plist-get d :file) "lib/auth.el"))
+        (should (equal (plist-get d :comment) "Review note"))))))
+
+(ert-deftest rata-test-agent-review-delete-directive-command ()
+  "Calling `rata-agent-review-delete-directive' removes the directive."
+  (with-temp-buffer
+    (setq-local rata-agent-review--directives nil)
+    (setq-local rata-agent-review--next-id 1)
+    (rata-agent-review--add-directive "a.el" 1 nil "first")
+    (cl-letf (((symbol-function 'magit-refresh) #'ignore))
+      (rata-agent-review-delete-directive 1)
+      (should-not rata-agent-review--directives))))
+
+(ert-deftest rata-test-agent-review-quit ()
+  "Pressing `q' quits review buffer and returns to origin buffer without deleting window."
+  (let* ((orig (get-buffer-create "*rata-test-review-orig*"))
+         (win (selected-window)))
+    (unwind-protect
+        (with-selected-window win
+          (switch-to-buffer orig)
+          (rata-test-agent-worktree--with-repo
+            (rata-test-agent-worktree--answering nil
+              (let* ((wt (rata-agent-worktree-create repo "agent/test-quit"))
+                     (buf (rata-agent-review-open wt orig)))
+                (unwind-protect
+                    (progn
+                      (switch-to-buffer buf)
+                      (should (eq (current-buffer) buf))
+                      (rata-agent-review-quit)
+                      (should (eq (window-buffer win) orig))
+                      (should (window-live-p win)))
+                  (when (buffer-live-p buf)
+                    (kill-buffer buf)))))))
+      (when (buffer-live-p orig)
+        (kill-buffer orig)))))
+
+;;; ============================================================
 ;;; Run all tests
 ;;; ============================================================
 
