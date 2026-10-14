@@ -396,19 +396,20 @@ With prefix PROMPT-FOR-FILE, pick a project file instead of this one."
     "aiao"  '(aidermacs-run            :which-key "run aider")
     ;; `aicl' is claude-loop's subtree, bound from init-claude-loop.el off this
     ;; same prefix -- do not add a plain `aicl' leaf here.
-    "aic"   '(:ignore t :which-key "agent shell")
-    "aics"  '(agent-shell                              :which-key "agent shell")
-    "aicc"  '(agent-shell-anthropic-start-claude-code   :which-key "claude code")
-    "aicp"  '(agent-shell-pi-start-agent                :which-key "pi")
+    "ais"   '(:ignore t :which-key "agent shell")
+    "aiss"  '(agent-shell                              :which-key "agent shell")
+    "aisa"  '(agent-shell-antigravity-start-agent       :which-key "antigravity")
+    "aisc"  '(agent-shell-anthropic-start-claude-code   :which-key "claude code")
+    "aisp"  '(agent-shell-pi-start-agent                :which-key "pi")
     ;; The `-to' variants need their own keys rather than a prefix argument:
     ;; `agent-shell-send-file' spends its "P" on prompting for a file, and
     ;; `agent-shell-send-region' never reads the prefix at all.
-    "aicf"  '(rata-agent-shell-send-file                :which-key "send current file")
-    "aicF"  '(agent-shell-send-file-to                  :which-key "send file -> pick shell")
-    "aicr"  '(agent-shell-send-region                   :which-key "send region")
-    "aicR"  '(agent-shell-send-region-to                :which-key "send region -> pick shell")
-    "aicd"  '(agent-shell-send-dwim                     :which-key "send dwim")
-    "aict"  '(agent-shell-toggle                        :which-key "toggle shell")
-    "aicb"  '(agent-shell-switch-buffer                 :which-key "switch shell")))
+    "aisf"  '(rata-agent-shell-send-file                :which-key "send current file")
+    "aisF"  '(agent-shell-send-file-to                  :which-key "send file -> pick shell")
+    "aisr"  '(agent-shell-send-region                   :which-key "send region")
+    "aisR"  '(agent-shell-send-region-to                :which-key "send region -> pick shell")
+    "aisd"  '(agent-shell-send-dwim                     :which-key "send dwim")
+    "aist"  '(agent-shell-toggle                        :which-key "toggle shell")
+    "aisb"  '(agent-shell-switch-buffer                 :which-key "switch shell")))
 
 (provide 'init-llm)
