@@ -296,6 +296,9 @@ spawn time, never at load."
 (declare-function rata-agent-permissions-test "init-agent-permissions")
 (declare-function rata-agent-permissions-toggle "init-agent-permissions")
 (declare-function rata-agent-permissions-status "init-agent-permissions")
+(declare-function rata-agent-antigravity-open-artifact "init-agent-artifacts")
+(declare-function rata-agent-antigravity-approve-plan "init-agent-artifacts")
+(declare-function rata-agent-antigravity-decline-plan "init-agent-artifacts")
 
 ;; Make the GUI Enter key fold agent-shell's `> ...' sections.
 ;;
@@ -356,7 +359,8 @@ spawn time, never at load."
     ("a" agent-shell-ui-toggle-all-fragments             "fold/unfold all sections")
     ("f" agent-shell-fork                                "fork session")
     ("u" agent-shell-show-usage                          "show usage")
-    ("o" agent-shell-other-buffer                        "shell <-> viewport"))
+    ("o" agent-shell-other-buffer                        "shell <-> viewport")
+    ("A" rata-agent-antigravity-open-artifact            "open artifact"))
   "Local-leader keys in `agent-shell-mode-map': (KEY COMMAND LABEL).")
 
 (with-eval-after-load 'agent-shell
@@ -406,6 +410,7 @@ With prefix PROMPT-FOR-FILE, pick a project file instead of this one."
     "ais"   '(:ignore t :which-key "agent shell")
     "aiss"  '(agent-shell                              :which-key "agent shell")
     "aisa"  '(agent-shell-antigravity-start-agent       :which-key "antigravity")
+    "aisA"  '(rata-agent-antigravity-open-artifact      :which-key "open artifact")
     "aisc"  '(agent-shell-anthropic-start-claude-code   :which-key "claude code")
     "aisp"  '(agent-shell-pi-start-agent                :which-key "pi")
     "aisx"  '(:ignore t                                 :which-key "permissions")

@@ -153,6 +153,7 @@ normally for a full backtrace.  Otherwise, catch and log them to
 (rata-load-module 'init-agent-worktree) ; one git worktree + layout per agent task
 (rata-load-module 'init-agent-prompts) ; prompt library inserted into agent shells
 (rata-load-module 'init-agent-review)  ; interactive diff & review hub for agent worktrees
+(rata-load-module 'init-agent-artifacts) ; Antigravity artifact opening and plan approval
 (rata-load-module 'init-org)
 (rata-load-module 'init-blog)      ; org-roam -> hugo blog export
 (rata-load-module 'init-dialogic)  ; dialogic formatting for blog posts
