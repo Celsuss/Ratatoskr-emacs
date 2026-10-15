@@ -347,17 +347,70 @@ The implementation is broken down into four test-driven sub-phases:
 ### Pillar II: AI-Powered Second Brain & PKM (`org-roam`)
 
 #### 5. Org-Roam MCP Server Bridge (`lisp/init-mcp.el` / `lisp/init-llm.el`)
-- **Tool**: `org-roam-mcp` (Python-based, executed on-demand via `uvx org-roam-mcp`).
-- **Why `uvx`**: Operates directly on the SQLite database `~/workspace/second-brain/org-roam/org-roam.db`
-  and Org files. Requires NO Emacs daemon, causes NO Elisp blocking, and provides fast
-  compiled SQLite queries.
-- **Tools exposed to Agent-Shell & Claude Code**:
-  - `search_nodes`: Semantic & title search of notes.
-  - `get_node_content`: Reads complete note content by ID or file path.
-  - `get_backlinks`: Retrieves forward and backward link graph.
-  - `create_note`: Appends captured notes into `inbox.org` or creates timestamped nodes.
-- **Safety Gate**: Configuration points explicitly to `rata-org-roam-dir` without hardcoding
-  absolute user paths in committed git files.
+
+- **Module Location**: `lisp/init-mcp.el`, loaded before `init-persp.el` and `init-agent-center.el` in `init.el`.
+- **Core Motivation**: Connects autonomous coding agents (`agent-shell`, Claude Code, Pi) directly to the operator's personal knowledge base (`~/workspace/second-brain/org-roam/`) via the Model Context Protocol (MCP).
+  1. Grants agents immediate access to project specifications, architectural decisions, past troubleshooting solutions, and meeting notes without manual copy-pasting.
+  2. Enables agents to capture fleeting notes, dev-logs, or ADRs directly back into `inbox.org` or atomic zettelkasten nodes.
+  3. Uses `uvx org-roam-mcp` to operate directly on the SQLite database and Org files: fast compiled queries, zero Emacs daemon requirement, zero blocking of the UI thread.
+  4. Ensures absolute safety: dynamically derives paths from `rata-org-roam-dir`, never hardcodes private paths into committed files, and isolates tests to temporary fixtures.
+
+##### 5.1 Architecture & ACP Transport Protocol
+- **ACP Stdio Transport**:
+  `agent-shell` speaks the Agent Client Protocol (ACP), which initializes MCP servers during `session/new`, `session/load`, and `session/fork` via `agent-shell-mcp-servers`.
+  Each stdio server definition is an alist conforming to ACP's `McpServer` schema:
+  ```elisp
+  ((name . "org-roam")
+   (command . "uvx")
+   (args . ("org-roam-mcp"))
+   (env . (((name . "ORG_ROAM_DIR") (value . "/path/to/roam/"))
+           ((name . "ORG_ROAM_DB_PATH") (value . "/path/to/roam/org-roam.db")))))
+  ```
+- **Claude Code CLI Configuration (`.mcp.json`)**:
+  Standalone Claude Code CLI sessions outside Emacs discover MCP servers through project-level `.mcp.json` or `~/.claude.json`. `init-mcp.el` provides a pure generator `rata-mcp-claude-code-config` and an interactive command `rata-mcp-write-project-mcp-json` to export this configuration on demand:
+  ```json
+  {
+    "mcpServers": {
+      "org-roam": {
+        "command": "uvx",
+        "args": ["org-roam-mcp"],
+        "env": {
+          "ORG_ROAM_DIR": "/path/to/roam/",
+          "ORG_ROAM_DB_PATH": "/path/to/roam/org-roam.db"
+        }
+      }
+    }
+  }
+  ```
+
+##### 5.2 Dynamic Environment Derivation & Configuration
+The module provides three customizable variables in the `rata` group:
+- `rata-mcp-org-roam-command`: List of strings representing the binary and args (default `'("uvx" "org-roam-mcp")`).
+- `rata-mcp-org-roam-enabled`: Boolean controlling whether the bridge is active (default `t`).
+- `rata-mcp-org-roam-db-path`: Optional custom database path; when `nil` (default), resolves automatically to `org-roam.db` inside `rata-org-roam-dir`.
+
+Pure helper `rata-mcp-org-roam-env (&optional roam-dir db-path)` derives the environment variable alist, resolving `file-truename` and `expand-file-name` dynamically so user paths are never hardcoded.
+
+##### 5.3 Executable Probing & Graceful Degradation
+External dependencies (`uvx` or `org-roam-mcp`) might not be installed on every machine or in test containers.
+- `rata-mcp-org-roam-available-p (&optional command)` probes for `(executable-find (car command))`.
+- If missing, `rata-mcp-org-roam-available-p` returns `nil` and logs a single non-intrusive warning via `display-warning` with category `'init-mcp`.
+- Crucially, missing binaries **never** raise errors, never halt Emacs initialization, and never prevent `agent-shell` from launching.
+
+##### 5.4 Lifecycle & Deferred Agent-Shell Registration
+To comply with architectural rule L-052 (never eagerly load `agent-shell` during Emacs startup):
+- `rata-mcp-register-agent-shell` registers the server spec into `agent-shell-mcp-servers` (with duplicate removal).
+- Registration is hooked inside `(with-eval-after-load 'agent-shell ...)` and runs only once `agent-shell` is actually invoked by the user.
+
+##### 5.5 Interactive Cockpit & Keybindings
+Under `SPC a m` (MCP):
+- `SPC a m s` (`rata-mcp-status`): Displays a dedicated status buffer inspecting binary availability, resolved paths, DB file existence, and `agent-shell-mcp-servers` state.
+- `SPC a m g` (`rata-mcp-write-project-mcp-json`): Writes/updates `.mcp.json` in the current project root for standalone Claude Code sessions.
+- `SPC a m t` (`rata-mcp-toggle-org-roam`): Toggles the `org-roam-mcp` bridge on or off dynamically.
+
+##### 5.6 Safety & Test Isolation
+- **Second-Brain Isolation**: Automated tests in `tests/run-tests.el` and batch test runs must **NEVER** read from or write to `~/workspace/second-brain/` or user credentials.
+- All unit tests bind `rata-org-roam-dir` to `temporary-file-directory` or throwaway directories.
 
 #### 6. Ambient Semantic Connections Sidebar (`lisp/init-roam-ai.el`)
 - **Buffer**: `*Roam Connections*` (right side-window, dedicated, 40 cols).
@@ -445,18 +498,69 @@ Phase 1: Second Brain MCP Bridge (org-roam-mcp + init-mcp.el)
 
 ## Phase 1: Second Brain MCP Bridge (`org-roam-mcp`)
 
-- **Scope**:
-  - Configure `init-mcp.el` and `init-llm.el` to register `org-roam-mcp` for `agent-shell`
-    and Claude Code sessions.
-  - Define `rata-mcp-org-roam-command` defaulting to `("uvx" "org-roam-mcp")`.
-  - Pass environment variables dynamically: `ORG_ROAM_DIR` and `ORG_ROAM_DB_PATH` derived
-    from `rata-org-roam-dir`.
-  - Ensure graceful degradation: if `uvx` or `org-roam-mcp` is absent, warn once and disable
-    the tool without interrupting agent-shell startup.
-- **Tests** (`tests/run-tests.el`):
-  - Pure function test verifying command generation and environment variable derivation.
-  - Mock test asserting tool definition registration for agent-shell.
-- **Verify**: `just are-verify relevant`.
+- **Scope & Objective**:
+  Implement `lisp/init-mcp.el` and hook it into `init-llm.el` and `agent-shell`, replacing the obsolete
+  `(use-package mcp)` stub with a dedicated Model Context Protocol bridge for the second brain (`org-roam-mcp`).
+  Exposes Org-roam note search, node content reading, backlinks graph traversal, and note capture to both
+  `agent-shell` (over ACP) and Claude Code CLI sessions (via `.mcp.json`).
+- **Sub-Phase Execution Sequence**:
+  - **Sub-Phase 1.1: Pure Data Model, Environment Derivation & Spec Construction**:
+    - Pre-requisite ERT tests:
+      - `rata-test-mcp-org-roam-env-derivation`: validates `rata-mcp-org-roam-env` with explicit directories,
+        asserting the returned structure is an ACP env alist `(((name . "ORG_ROAM_DIR") (value . "...")) ((name . "ORG_ROAM_DB_PATH") (value . "...")))`
+        with canonical expanded paths.
+      - `rata-test-mcp-org-roam-server-spec`: verifies `rata-mcp-org-roam-server-spec` constructs a compliant ACP
+        stdio server definition alist `((name . "org-roam") (command . "uvx") (args . ("org-roam-mcp")) (env . ...))`.
+      - `rata-test-mcp-claude-code-config`: verifies `rata-mcp-claude-code-config` formats an alist ready for
+        JSON serialization into `.mcp.json` / Claude Code configuration format.
+    - Implementation:
+      - Define customizable variables: `rata-mcp-org-roam-command` (default `'("uvx" "org-roam-mcp")`),
+        `rata-mcp-org-roam-enabled` (default `t`), and `rata-mcp-org-roam-db-path` (default `nil`, resolving to
+        `org-roam.db` inside `rata-org-roam-dir`).
+      - Implement pure helper `rata-mcp-org-roam-env (&optional dir db)`.
+      - Implement pure constructor `rata-mcp-org-roam-server-spec (&optional command dir db)`.
+      - Implement pure constructor `rata-mcp-claude-code-config (&optional command dir db)`.
+  - **Sub-Phase 1.2: Executable Probing, Graceful Degradation & Warnings**:
+    - Pre-requisite ERT tests:
+      - `rata-test-mcp-available-when-executable-present`: stubs `executable-find` to return a mock binary path,
+        asserting `rata-mcp-org-roam-available-p` returns non-nil.
+      - `rata-test-mcp-graceful-degradation-when-missing`: stubs `executable-find` to return `nil`, asserting
+        `rata-mcp-org-roam-available-p` returns `nil`, emits a warning via `display-warning` at most once, and
+        never signals an unhandled error.
+    - Implementation:
+      - Define `rata-mcp--warned-missing` variable for one-shot warning memoization.
+      - Implement `rata-mcp-org-roam-available-p (&optional command)` checking existence of `(car command)`.
+      - Emit `display-warning` with `'init-mcp` category when binary is unavailable, explaining that the
+        org-roam MCP bridge will be disabled.
+  - **Sub-Phase 1.3: Agent-Shell Registration & Deferred ACP Session Hookup**:
+    - Pre-requisite ERT tests:
+      - `rata-test-mcp-register-agent-shell-success`: asserts `rata-mcp-register-agent-shell` adds the server spec
+        to `agent-shell-mcp-servers` without duplicating existing `"org-roam"` entries.
+      - `rata-test-mcp-register-agent-shell-disabled`: asserts when `rata-mcp-org-roam-enabled` is nil or binary
+        is missing, registration skips adding to `agent-shell-mcp-servers`.
+      - `rata-test-mcp-agent-shell-deferred-load`: asserts loading `init-mcp.el` does NOT eagerly require or load
+        `agent-shell` at startup (satisfies rule L-052).
+    - Implementation:
+      - Implement `rata-mcp-register-agent-shell` to safely mutate `agent-shell-mcp-servers`.
+      - Hook into `agent-shell` lifecycle using `with-eval-after-load 'agent-shell`.
+      - Ensure dynamic lambdas/fallbacks allow session creation before or after package load without desync.
+  - **Sub-Phase 1.4: Claude Code CLI Export, Status Dashboard, Keybindings & Module Activation**:
+    - Pre-requisite ERT tests:
+      - `rata-test-mcp-write-project-mcp-json`: tests generating `.mcp.json` in a temporary directory, verifying
+        written JSON contains the correct `mcpServers.org-roam` structure and environment variables.
+      - `rata-test-mcp-status-command`: verifies `rata-mcp-status` executes and produces an informational buffer
+        without signaling.
+      - `rata-test-mcp-module-loaded-in-init`: asserts `(featurep 'init-mcp)` is true when `init.el` finishes.
+    - Implementation:
+      - Implement interactive command `rata-mcp-write-project-mcp-json (&optional dir)` to write/update `.mcp.json`
+        in current project.
+      - Implement interactive command `rata-mcp-status` reporting binary status, paths, DB file existence, and
+        server registration.
+      - Implement interactive command `rata-mcp-toggle-org-roam` to dynamically toggle the bridge.
+      - Define keybindings under `SPC a m` (`s` status, `g` generate project config, `t` toggle) in `lisp/init-mcp.el`.
+      - Uncomment `(rata-load-module 'init-mcp)` in `init.el`.
+      - Document module in `AGENTS.md`.
+- **Verify**: `just are-verify relevant` (or `just test`).
 
 ---
 
