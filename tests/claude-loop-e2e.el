@@ -655,7 +655,9 @@ if [ $n -le 1 ]; then echo 'FAILED: test_thing'; exit 1; fi; echo 'all good'"
             :attempt (lambda (_code) rata-e2e--fake-record)
             :live-p #'ignore
             :stop #'ignore
-            :kill #'ignore))
+            :kill #'ignore
+            :teardown (lambda (status) (push (list :teardown status)
+                                             rata-e2e--fake-calls))))
 
 (setq rata-claude-loop-max-attempts 2
       rata-e2e--fake-calls nil
@@ -675,9 +677,11 @@ if [ $n -le 1 ]; then echo 'FAILED: test_thing'; exit 1; fi; echo 'all good'"
                      "- [X] one\n- [X] two\n")
     (rata-e2e--check "backend: the run kept the backend it started with"
                      (rata-claude-loop--get :backend) 'fake)
-    (rata-e2e--check "backend: start, retry, start"
+    (rata-e2e--check "backend: start, retry, start, then teardown once"
                      (mapcar #'car (reverse rata-e2e--fake-calls))
-                     '(:start :retry :start))
+                     '(:start :retry :start :teardown))
+    (rata-e2e--check "backend: teardown is told the run finished"
+                     (car rata-e2e--fake-calls) '(:teardown finished))
     (rata-e2e--check "backend: the denied Bash in a record became the retry reason"
                      (and (string-match-p "Bash"
                                           (nth 1 (cadr (reverse rata-e2e--fake-calls))))

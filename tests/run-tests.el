@@ -230,9 +230,9 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC J j" . jira-issues)
     ("SPC a i o" . rata-agent-center-toggle)
     ("SPC a i n" . rata-agent-center-next-attention)
-    ("SPC a i c w" . rata-agent-worktree-new)
-    ("SPC a i c W" . rata-agent-worktree-finish)
-    ("SPC a i c P" . rata-agent-prompt)
+    ("SPC a i s w" . rata-agent-worktree-new)
+    ("SPC a i s W" . rata-agent-worktree-finish)
+    ("SPC a i s P" . rata-agent-prompt)
     ("SPC J l" . rata-jira-org-link-heading)
     ("SPC o b d d" . rata-dialogic-insert-block)
     ("SPC o b e" . org-hugo-export-wim-to-md)
@@ -826,6 +826,120 @@ CLI result event does."
   (let ((cli (cdr (assq 'cli rata-claude-loop--backends))))
     (dolist (op '(:check :start :retry :attempt :live-p :stop :kill))
       (should (functionp (plist-get cli op))))))
+
+(ert-deftest rata-test-claude-loop-acp-session-mode ()
+  "Only `--permission-mode MODE' has an ACP meaning; anything else is refused."
+  (should-not (rata-claude-loop-acp--session-mode nil))
+  (should (equal (rata-claude-loop-acp--session-mode
+                  '("--permission-mode" "acceptEdits"))
+                 "acceptEdits"))
+  (should-error (rata-claude-loop-acp--session-mode
+                 '("--permission-mode" "acceptEdits" "--verbose"))
+                :type 'user-error))
+
+(ert-deftest rata-test-claude-loop-acp-session-meta ()
+  "The loop's limits merge over agent-shell's meta without losing it."
+  (let ((base '((claudeCode . ((options . ((thinking . ((display . "summarized")))
+                                           (maxTurns . 99)))))
+                (other . 1)))
+        (rata-claude-loop-allowed-tools '("Bash(just:*)"))
+        (rata-claude-loop-max-turns 7)
+        (rata-claude-loop-task-budget-usd 1.5)
+        (rata-claude-loop-model nil)
+        (rata-claude-loop-fallback-model nil)
+        (rata-claude-loop-append-system-prompt "terse"))
+    (let* ((meta (rata-claude-loop-acp--session-meta base))
+           (options (map-nested-elt meta '(claudeCode options))))
+      ;; A vector, so it serialises as a JSON array.
+      (should (equal (alist-get 'allowedTools options) ["Bash(just:*)"]))
+      (should (equal (alist-get 'maxTurns options) 7))   ; ours wins
+      (should (= 1 (seq-count (lambda (e) (eq (car e) 'maxTurns)) options)))
+      (should (equal (alist-get 'maxBudgetUsd options) 1.5))
+      (should (equal (map-nested-elt options '(thinking display)) "summarized"))
+      (should (equal (map-nested-elt meta '(systemPrompt append)) "terse"))
+      (should (equal (alist-get 'other meta) 1))
+      (should-not (assq 'model options))))
+  ;; Unset limits add nothing at all.
+  (let ((rata-claude-loop-allowed-tools nil) (rata-claude-loop-max-turns nil)
+        (rata-claude-loop-task-budget-usd nil) (rata-claude-loop-model nil)
+        (rata-claude-loop-fallback-model nil)
+        (rata-claude-loop-append-system-prompt nil))
+    (should (equal (rata-claude-loop-acp--session-meta
+                    '((claudeCode . ((options . ((a . 1)))))))
+                   '((claudeCode . ((options . ((a . 1))))))))))
+
+(ert-deftest rata-test-claude-loop-acp-denials-speak-claude-tool-names ()
+  "An ACP tool call becomes a denial the core's lists and hints understand."
+  (let ((denial (rata-claude-loop-acp--denial
+                 '((:kind . "execute") (:title . "Print 6*7")
+                   (:raw-input . ((command . "python3 -c 'print(6*7)'")))))))
+    (should (equal (alist-get 'tool_name denial) "Bash"))
+    (should (member "Bash" rata-claude-loop-verification-denial-tools))
+    (should (equal (rata-claude-loop--denial-pattern denial) "Bash(python3:*)")))
+  (should (member (rata-claude-loop-acp--tool-name "edit" "Write x")
+                  rata-claude-loop-critical-denial-tools))
+  (should (equal (rata-claude-loop-acp--tool-name "think" "Pondering") "Pondering")))
+
+(ert-deftest rata-test-claude-loop-acp-only-ever-rejects-once ()
+  "The responder's choice is by kind, never position, and never an allow.
+`allow_always' is persisted by the adapter as a durable rule (spike Q1)."
+  (should (equal (rata-claude-loop-acp--pick-reject
+                  '(((:kind . "allow_once") (:option-id . "allow"))
+                    ((:kind . "allow_always") (:option-id . "always"))
+                    ((:kind . "reject_once") (:option-id . "reject"))))
+                 "reject"))
+  (should-not (rata-claude-loop-acp--pick-reject
+               '(((:kind . "allow_once") (:option-id . "allow"))
+                 ((:kind . "allow_always") (:option-id . "always"))))))
+
+(ert-deftest rata-test-claude-loop-acp-stop-reasons-classify-like-the-cli ()
+  "ACP stop reasons land on the CLI's failure kinds."
+  (cl-flet ((kind (stop) (car (rata-claude-loop--classify-attempt
+                               (rata-claude-loop-acp--stop-record stop)))))
+    (should-not (kind "end_turn"))
+    (should (eq (kind "max_turn_requests") 'max-turns))
+    (should (eq (kind "refusal") 'crash))
+    (should (eq (kind "cancelled") 'crash))
+    (should (eq (kind nil) 'crash))))
+
+(ert-deftest rata-test-claude-loop-acp-upstream-entry-points ()
+  "The agent-shell internals the backend calls still take what it passes.
+`agent-shell--start' is private; a renamed keyword would only fail at the
+first run, inside a timer.  A failure here means upstream moved."
+  (require 'agent-shell)
+  (require 'agent-shell-anthropic)
+  ;; A compiled `cl-defun' has the arglist (&rest rest); the keywords it
+  ;; accepts are only recorded in the docstring's usage line.
+  (let ((usage (downcase (car (help-split-fundoc
+                               (documentation 'agent-shell--start t)
+                               'agent-shell--start)))))
+    (dolist (key '("config" "no-focus" "new-session" "session-strategy"
+                   "session-id"))
+      (should (string-match-p (concat "[ (]" (regexp-quote key) "[ )]") usage))))
+  ;; `setf' of `map-elt' on an alist only replaces keys that already exist.
+  (let ((config (agent-shell-anthropic-make-claude-code-config)))
+    (dolist (key '(:session-meta :default-session-mode-id :default-model-id
+                   :buffer-name))
+      (should (assq key config))))
+  (dolist (function '(agent-shell-subscribe-to agent-shell-unsubscribe
+                      agent-shell-insert agent-shell-interrupt))
+    (should (fboundp function)))
+  (should (boundp 'agent-shell-permission-responder-function))
+  (should (boundp 'agent-shell-cwd-function))
+  (let ((backend (cdr (assq 'agent-shell rata-claude-loop--backends))))
+    (dolist (op '(:check :start :retry :attempt :live-p :stop :kill :teardown))
+      (should (functionp (plist-get backend op))))))
+
+(ert-deftest rata-test-claude-loop-acp-loads-without-agent-shell ()
+  "The backend module loads with agent-shell absent, and does not load it.
+agent-shell must only ever be required by the backend's :check (L-052)."
+  (let* ((emacs (expand-file-name invocation-name invocation-directory))
+         (lisp (expand-file-name "lisp" user-emacs-directory))
+         (status (call-process
+                  emacs nil nil nil "-Q" "--batch" "-L" lisp
+                  "--eval" "(require 'init-claude-loop-acp)"
+                  "--eval" "(kill-emacs (if (featurep 'agent-shell) 2 0))")))
+    (should (eq status 0))))
 
 (ert-deftest rata-test-claude-loop-denial-pattern ()
   "A denial suggests the narrowest --allowedTools pattern that would fit it."
@@ -4632,7 +4746,7 @@ Each binding is (VAR LAYOUT STATE SINCE); the buffers are killed after."
   (should (featurep 'init-agent-center))
   (should (memq #'rata-agent-center--on-mode-hook agent-shell-mode-hook)))
 
-;;; --- init-agent-center: activity line (A2, plans/ai-agent-powerhouse.md) ---
+;;; --- init-agent-center: activity line (A2, plans/ai-agent-roadmap.md) ---
 
 (ert-deftest rata-test-agent-center-tool-activity-strings ()
   "A tool call reads as `Label: detail', from its title, command and kind."
@@ -4945,7 +5059,7 @@ Each binding is (VAR LAYOUT STATE SINCE); the buffers are killed after."
         (should (equal (plist-get (rata-agent-center--entry buf) :state) 'needs-input))
         (should (equal (plist-get (rata-agent-center--entry buf) :activity) "Bash: rm -rf target"))))))
 
-;;; --- init-agent-worktree: one worktree per task (B6, plans/ai-agent-powerhouse.md) ---
+;;; --- init-agent-worktree: one worktree per task (B6, plans/ai-agent-roadmap.md) ---
 ;; Every git call runs against a throwaway repository under `temporary-file-directory'
 ;; with the user's git config shut out; nothing starts an agent.
 
@@ -5668,10 +5782,10 @@ is nil, and the diff silently widens to the project) fails here."
       (should (null responded-id)))))
 
 (ert-deftest rata-test-agent-permissions-leader-keys ()
-  "SPC a i s P shortcuts are bound to permission commands."
-  (should (eq (rata-test--leader-lookup "SPC a i s P t") 'rata-agent-permissions-test))
-  (should (eq (rata-test--leader-lookup "SPC a i s P T") 'rata-agent-permissions-toggle))
-  (should (eq (rata-test--leader-lookup "SPC a i s P s") 'rata-agent-permissions-status)))
+  "SPC a i s x shortcuts are bound to permission commands."
+  (should (eq (rata-test--leader-lookup "SPC a i s x t") 'rata-agent-permissions-test))
+  (should (eq (rata-test--leader-lookup "SPC a i s x T") 'rata-agent-permissions-toggle))
+  (should (eq (rata-test--leader-lookup "SPC a i s x s") 'rata-agent-permissions-status)))
 
 ;;; ============================================================
 ;;; Tests: Godot 4 & C++ GDExtension (init-gamedev.el)

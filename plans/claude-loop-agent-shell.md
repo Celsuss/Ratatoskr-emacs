@@ -293,6 +293,30 @@ kill, denied edit, denied Bash → unverified, retry in same session, cost delta
 budget, stale events after stop. Wire into `scripts/are-verify.sh` (`relevant`, since it
 needs packages) and add the path-map rows to `.are/knowledge/MODULES.md`.
 
+**Done 2026-10-01.** As built (deviations from the text above in bold):
+- `lisp/init-claude-loop-acp.el` registers `agent-shell` in `rata-claude-loop--backends`
+  with all seven operations **plus an optional `:teardown`** the core now calls from
+  `--halt` / `--finish`: a finished run closes its last shell, a halted one keeps it.
+  Shell lifetime is one task; a new task discards the previous shell. **Under `skip` a
+  failed task's shell is therefore discarded by the next task** — keeping failed shells
+  is Phase 3's `keep-shells`.
+- **The attempt record gained an optional `:detail`** so a backend without an exit code
+  can say what went wrong ("the agent shell went away…", the RPC error's message); the
+  CLI never sets it and its wording is unchanged.
+- Denials are recorded **before** the reject is sent, so even a responder bug that chose
+  an allow option would still fail the attempt — the e2e's wire check on the answer is
+  what catches the bug itself (mutation-checked).
+- **A dead shell on retry is reopened with `:session-id`** (agent-shell's resume path).
+  Not exercised by a test: the stub has no `session/load` / `session/resume`.
+- **`maxBudgetUsd` under ACP is per session = per task**, where the CLI's is per
+  attempt. Documented, untested live.
+- `tests/fake-claude-acp` (python3) + `tests/claude-loop-acp-e2e.el`, `just
+  test-claude-loop-acp`, wired into `are-verify relevant`. 10 scenario groups, 47 checks.
+  Batch Emacs runs agent-shell headless without trouble (probed first).
+- Found on the way: agent-shell reports the ACP agent's death as an `error` event
+  ("Agent process ended before completing request"), so an exiting agent fails the
+  attempt immediately rather than waiting for the timeout.
+
 ### Phase 3 — `ask` policy + operator takeover
 Timeout pause while a permission dialog is open; keep-shells policy; "open shell" button
 and `rata-claude-loop-open-session` opening the live shell instead of `claude --resume`.

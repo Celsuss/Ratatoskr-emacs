@@ -401,17 +401,17 @@ With prefix PROMPT-FOR-FILE, pick a project file instead of this one."
     "aia"   '(:ignore t :which-key "aider")
     "aiaa"  '(aidermacs-transient-menu :which-key "aider menu")
     "aiao"  '(aidermacs-run            :which-key "run aider")
-    ;; `aicl' is claude-loop's subtree, bound from init-claude-loop.el off this
-    ;; same prefix -- do not add a plain `aicl' leaf here.
+    ;; `aisl' is claude-loop's subtree, bound from init-claude-loop.el off this
+    ;; same prefix -- do not add a plain `aisl' leaf here.
     "ais"   '(:ignore t :which-key "agent shell")
     "aiss"  '(agent-shell                              :which-key "agent shell")
     "aisa"  '(agent-shell-antigravity-start-agent       :which-key "antigravity")
     "aisc"  '(agent-shell-anthropic-start-claude-code   :which-key "claude code")
     "aisp"  '(agent-shell-pi-start-agent                :which-key "pi")
-    "aisP"  '(:ignore t                                 :which-key "permissions")
-    "aisPt" '(rata-agent-permissions-test               :which-key "test rule (dry-run)")
-    "aisPT" '(rata-agent-permissions-toggle             :which-key "toggle permissions")
-    "aisPs" '(rata-agent-permissions-status             :which-key "permission status")
+    "aisx"  '(:ignore t                                 :which-key "permissions")
+    "aisxt" '(rata-agent-permissions-test               :which-key "test rule (dry-run)")
+    "aisxT" '(rata-agent-permissions-toggle             :which-key "toggle permissions")
+    "aisxs" '(rata-agent-permissions-status             :which-key "permission status")
     ;; The `-to' variants need their own keys rather than a prefix argument:
     ;; `agent-shell-send-file' spends its "P" on prompting for a file, and
     ;; `agent-shell-send-region' never reads the prefix at all.
