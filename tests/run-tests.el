@@ -242,9 +242,9 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC i o a" . rata-roam-alias-add-to-file)
     ;; agent-shell's context senders are not autoloaded upstream, so these
     ;; resolve only while their symbols stay in init-llm.el's :commands list.
-    ("SPC a i c f" . rata-agent-shell-send-file)
-    ("SPC a i c r" . agent-shell-send-region)
-    ("SPC a i c d" . agent-shell-send-dwim)
+    ("SPC a i s f" . rata-agent-shell-send-file)
+    ("SPC a i s r" . agent-shell-send-region)
+    ("SPC a i s d" . agent-shell-send-dwim)
     ;; init-mail.el binds its own wrappers, never mu4e symbols directly, so
     ;; these resolve on a host with no mu installed too (the wrapper then
     ;; explains what is missing instead of the key being dead).
@@ -5524,6 +5524,154 @@ is nil, and the diff silently widens to the project) fails here."
                     (kill-buffer buf)))))))
       (when (buffer-live-p orig)
         (kill-buffer orig)))))
+
+;;; ============================================================
+;;; Tests: Agent Shell Permissions (init-agent-permissions.el)
+;;; ============================================================
+
+(require 'init-agent-permissions nil t)
+
+(ert-deftest rata-test-agent-permissions-blacklist-precedence ()
+  "Blacklist rules strictly override whitelist rules."
+  (let* ((rata-agent-permissions-whitelist
+          '((:kind "execute" :command "rm" :reason "Whitelisted rm")))
+         (ctx '(:backend claude-code :kind "execute" :command "rm -rf /tmp/test" :title "rm -rf /tmp/test"))
+         (res (rata-agent-permissions--evaluate ctx)))
+    (should (eq (plist-get res :decision) 'deny))
+    (should (string-search "Destructive system command" (plist-get res :reason)))))
+
+(ert-deftest rata-test-agent-permissions-destructive-commands-denied ()
+  "Destructive shell commands evaluate to `deny' (zero process execution)."
+  (dolist (cmd '("rm -rf /"
+                 "rm -r foo"
+                 "sudo apt-get update"
+                 "su root"
+                 "mkfs.ext4 /dev/sda1"
+                 "dd if=/dev/zero of=/dev/sda"
+                 "chmod -R 777 ."
+                 "git push origin main --force"
+                 "git push -f"
+                 "git reset --hard HEAD~1"
+                 "git clean -fd"))
+    (let* ((ctx (list :backend 'claude-code :kind "execute" :command cmd :title cmd))
+           (res (rata-agent-permissions--evaluate ctx)))
+      (should (eq (plist-get res :decision) 'deny)))))
+
+(ert-deftest rata-test-agent-permissions-sensitive-paths-denied ()
+  "Access to sensitive files and credentials evaluates to `deny'."
+  (dolist (path '("/home/user/.authinfo"
+                  "/home/user/.authinfo.gpg"
+                  "/home/user/.ssh/id_rsa"
+                  "/home/user/.ssh/id_ed25519"
+                  "/home/user/.gnupg/pubring.kbx"
+                  "/repo/.env"
+                  "/repo/local.el"))
+    (let* ((ctx (list :backend 'pi :kind "read" :path path :title (format "Read %s" path)))
+           (res (rata-agent-permissions--evaluate ctx)))
+      (should (eq (plist-get res :decision) 'deny)))))
+
+(ert-deftest rata-test-agent-permissions-safe-commands-allowed ()
+  "Routine read-only inspection and test commands evaluate to `allow'."
+  (dolist (cmd '("git status"
+                 "git diff"
+                 "git log -n 5"
+                 "git show"
+                 "git branch"
+                 "just lint"
+                 "just test"
+                 "cargo test"
+                 "cargo check"
+                 "go test ./..."
+                 "ls -la"
+                 "cat README.md"
+                 "head -n 20 file.txt"
+                 "wc -l file.txt"
+                 "pwd"))
+    (let* ((ctx (list :backend 'claude-code :kind "execute" :command cmd :title cmd))
+           (res (rata-agent-permissions--evaluate ctx)))
+      (should (eq (plist-get res :decision) 'allow)))))
+
+(ert-deftest rata-test-agent-permissions-safe-project-read-allowed ()
+  "File reads and searches inside the project root evaluate to `allow'."
+  (let* ((ctx '(:backend gemini-cli :kind "read" :path "lisp/init-llm.el"
+                :project "/home/user/workspace/Ratatoskr-emacs"
+                :title "Read lisp/init-llm.el"))
+         (res (rata-agent-permissions--evaluate ctx)))
+    (should (eq (plist-get res :decision) 'allow))))
+
+(ert-deftest rata-test-agent-permissions-backend-isolation ()
+  "Rules scoped to one backend do not leak to other backends."
+  (let ((rata-agent-permissions-backend-rules
+         '((claude-code
+            (:blacklist (((:kind "execute" :command "^pytest" :reason "pytest blocked on claude"))))))))
+    ;; For claude-code, pytest is blacklisted
+    (let* ((ctx-claude '(:backend claude-code :kind "execute" :command "pytest" :title "pytest"))
+           (res-claude (rata-agent-permissions--evaluate ctx-claude)))
+      (should (eq (plist-get res-claude :decision) 'deny))
+      (should (equal (plist-get res-claude :reason) "pytest blocked on claude")))
+    ;; For pi, pytest is allowed via default whitelist
+    (let* ((ctx-pi '(:backend pi :kind "execute" :command "pytest" :title "pytest"))
+           (res-pi (rata-agent-permissions--evaluate ctx-pi)))
+      (should (eq (plist-get res-pi :decision) 'allow)))))
+
+(ert-deftest rata-test-agent-permissions-fallback-ask ()
+  "Unlisted tools fall back to `ask' (interactive dialog)."
+  (let* ((ctx '(:backend claude-code :kind "other" :title "unrecognized-tool" :command nil :path nil))
+         (res (rata-agent-permissions--evaluate ctx)))
+    (should (eq (plist-get res :decision) 'ask))))
+
+(ert-deftest rata-test-agent-permissions-responder-mock ()
+  "The responder sends allow_once for allowed tools and reject_once for denied tools."
+  (let ((responded-id nil)
+        (rata-agent-permissions-enabled t)
+        (options '(((:kind . "allow_once") (:option-id . "opt-allow") (:label . "Allow (y)"))
+                   ((:kind . "reject_once") (:option-id . "opt-reject") (:label . "Reject (n)")))))
+    ;; 1. Whitelisted command -> auto-allow
+    (let ((perm `((:tool-call . ((:kind . "execute")
+                                 (:command . "git status")
+                                 (:title . "git status")))
+                  (:options . ,options)
+                  (:respond . ,(lambda (opt-id) (setq responded-id opt-id))))))
+      (should (eq (rata-agent-permissions-responder perm) t))
+      (should (equal responded-id "opt-allow")))
+
+    ;; 2. Blacklisted command -> auto-deny
+    (setq responded-id nil)
+    (let ((perm `((:tool-call . ((:kind . "execute")
+                                 (:command . "rm -rf /tmp/danger")
+                                 (:title . "rm -rf /tmp/danger")))
+                  (:options . ,options)
+                  (:respond . ,(lambda (opt-id) (setq responded-id opt-id))))))
+      (should (eq (rata-agent-permissions-responder perm) t))
+      (should (equal responded-id "opt-reject")))
+
+    ;; 3. Unknown command -> fallback ask (returns nil, skips :respond)
+    (setq responded-id nil)
+    (let ((perm `((:tool-call . ((:kind . "unknown")
+                                 (:title . "unknown-tool")))
+                  (:options . ,options)
+                  (:respond . ,(lambda (opt-id) (setq responded-id opt-id))))))
+      (should (null (rata-agent-permissions-responder perm)))
+      (should (null responded-id)))))
+
+(ert-deftest rata-test-agent-permissions-disabled-toggle ()
+  "When disabled, responder immediately returns nil without evaluating rules."
+  (let ((responded-id nil)
+        (rata-agent-permissions-enabled nil)
+        (options '(((:kind . "allow_once") (:option-id . "opt-allow")))))
+    (let ((perm `((:tool-call . ((:kind . "execute")
+                                 (:command . "git status")
+                                 (:title . "git status")))
+                  (:options . ,options)
+                  (:respond . ,(lambda (opt-id) (setq responded-id opt-id))))))
+      (should (null (rata-agent-permissions-responder perm)))
+      (should (null responded-id)))))
+
+(ert-deftest rata-test-agent-permissions-leader-keys ()
+  "SPC a i s P shortcuts are bound to permission commands."
+  (should (eq (rata-test--leader-lookup "SPC a i s P t") 'rata-agent-permissions-test))
+  (should (eq (rata-test--leader-lookup "SPC a i s P T") 'rata-agent-permissions-toggle))
+  (should (eq (rata-test--leader-lookup "SPC a i s P s") 'rata-agent-permissions-status)))
 
 ;;; ============================================================
 ;;; Tests: Godot 4 & C++ GDExtension (init-gamedev.el)

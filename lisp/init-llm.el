@@ -287,10 +287,15 @@ spawn time, never at load."
 ;; Declared, never required: these modules load as source, so a
 ;; `eval-when-compile' require would run on every startup (FAIL-0012 / L-028).
 (eval-when-compile
-  (defvar agent-shell-ui-fragment-map))
+  (defvar agent-shell-ui-fragment-map)
+  (defvar agent-shell-permission-responder-function))
 
 (declare-function agent-shell-shell-buffer "agent-shell")
 (declare-function agent-shell-send-file "agent-shell")
+(declare-function rata-agent-permissions-responder "init-agent-permissions")
+(declare-function rata-agent-permissions-test "init-agent-permissions")
+(declare-function rata-agent-permissions-toggle "init-agent-permissions")
+(declare-function rata-agent-permissions-status "init-agent-permissions")
 
 ;; Make the GUI Enter key fold agent-shell's `> ...' sections.
 ;;
@@ -343,6 +348,7 @@ spawn time, never at load."
     ("m" agent-shell-set-session-model                   "set model")
     ("t" agent-shell-set-session-thought-level           "set thought level")
     ("p" agent-shell-jump-to-latest-permission-button-row "latest permission prompt")
+    ("P" rata-agent-permissions-status                   "permission rules status")
     ("q" agent-shell-quote-region                        "quote region into prompt")
     ("y" agent-shell-copy-last-output                    "copy last output")
     ("c" agent-shell-copy-source-block-at-point          "copy code block at point")
@@ -354,6 +360,7 @@ spawn time, never at load."
   "Local-leader keys in `agent-shell-mode-map': (KEY COMMAND LABEL).")
 
 (with-eval-after-load 'agent-shell
+  (setq agent-shell-permission-responder-function #'rata-agent-permissions-responder)
   (apply #'general-define-key
          :states '(normal visual)
          :keymaps 'agent-shell-mode-map
@@ -401,6 +408,10 @@ With prefix PROMPT-FOR-FILE, pick a project file instead of this one."
     "aisa"  '(agent-shell-antigravity-start-agent       :which-key "antigravity")
     "aisc"  '(agent-shell-anthropic-start-claude-code   :which-key "claude code")
     "aisp"  '(agent-shell-pi-start-agent                :which-key "pi")
+    "aisP"  '(:ignore t                                 :which-key "permissions")
+    "aisPt" '(rata-agent-permissions-test               :which-key "test rule (dry-run)")
+    "aisPT" '(rata-agent-permissions-toggle             :which-key "toggle permissions")
+    "aisPs" '(rata-agent-permissions-status             :which-key "permission status")
     ;; The `-to' variants need their own keys rather than a prefix argument:
     ;; `agent-shell-send-file' spends its "P" on prompting for a file, and
     ;; `agent-shell-send-region' never reads the prefix at all.

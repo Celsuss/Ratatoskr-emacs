@@ -147,6 +147,7 @@ normally for a full backtrace.  Otherwise, catch and log them to
 (rata-load-module 'init-jira)
 ;; (rata-load-module 'init-mcp)      ; experimental — uncomment when stable
 (rata-load-module 'init-persp)
+(rata-load-module 'init-agent-permissions) ; agent-shell permission whitelist/blacklist policies
 (rata-load-module 'init-agent-center) ; agent-shell overview across layouts
 (rata-load-module 'init-agent-worktree) ; one git worktree + layout per agent task
 (rata-load-module 'init-agent-prompts) ; prompt library inserted into agent shells
