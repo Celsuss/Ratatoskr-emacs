@@ -115,3 +115,25 @@
 ;; SConstruct (scons platform=linux compiledb=yes), CMakeLists.txt, or justfile:
 ;; (setq rata-godot-build-command "scons platform=linux dev_build=yes compiledb=yes -j8")
 
+;; --- Agent Shell Permissions (lisp/init-agent-permissions.el) ---
+;; Customize whitelist and blacklist rules or per-backend overrides.
+;;
+;; Default action when unlisted: 'ask (interactive prompt), 'deny, or 'allow
+;; (setq rata-agent-permissions-default-action 'ask)
+;;
+;; Extra machine-specific blacklist rules (evaluated first):
+;; (setq rata-agent-permissions-blacklist
+;;       '((:kind "execute" :command "terraform apply" :reason "Manual approval required for terraform apply")
+;;         (:path "secrets/.*" :reason "Local secrets directory")))
+;;
+;; Extra machine-specific whitelist rules:
+;; (setq rata-agent-permissions-whitelist
+;;       '((:kind "execute" :command "^make test" :reason "Local test suite runner")))
+;;
+;; Per-backend overrides:
+;; (setq rata-agent-permissions-backend-rules
+;;       '((claude-code
+;;          (:whitelist (((:kind "execute" :command "^make check")))))
+;;         (pi
+;;          (:blacklist (((:kind "execute" :command "^docker")))))))
+

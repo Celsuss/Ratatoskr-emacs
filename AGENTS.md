@@ -144,7 +144,7 @@ init-dev → init-lang → init-rust → init-go → init-python → init-cpp �
 init-cmake → init-terraform → init-just → init-docker → init-markdown →
 init-yaml → init-ansible → init-jupyter → init-helm → init-pkgbuild →
 init-casual → init-sql → init-k8s → init-gamedev → init-snippets →
-init-llm → init-claude-loop → init-khoj → init-irc → init-elfeed → init-elfeed-hn → init-mail → init-jira →
+init-llm → init-claude-loop → init-claude-loop-acp → init-khoj → init-irc → init-elfeed → init-elfeed-hn → init-mail → init-jira →
 init-persp → init-agent-center → init-agent-worktree → init-agent-prompts → init-agent-review → init-org → init-blog → init-dialogic →
 init-present → init-dashboard
 ```
@@ -251,6 +251,36 @@ init-present → init-dashboard
     retries being told to fix a break it inherited. The baseline's output is deliberately
     discarded rather than kept as retry feedback.
   - Tests: pure functions in `tests/run-tests.el`; the state machine in `tests/claude-loop-e2e.el` via `just test-claude-loop`, against a stub CLI with no API calls.
+- `init-claude-loop-acp.el` — the `agent-shell` backend for the claude-loop: set
+  `rata-claude-loop-backend` to `agent-shell` and each task runs in its own agent-shell
+  buffer ("Claude loop …") over ACP via `claude-agent-acp`, retries are further prompts
+  into the same live session, and the shell can be opened and read while it runs. It
+  implements the seven `rata-claude-loop--backends` operations plus `:teardown` (a
+  finished run closes its last shell; a halted one keeps it for reading) and owns nothing
+  else. Five things are load-bearing. **The responder only ever answers `reject_once`,**
+  chosen by kind: `allow_always` is persisted by the adapter as a durable Claude
+  settings rule, and the reject option's id is `"reject"`, not its kind. It answers only
+  for the loop's current shell while an attempt is in flight (agent-shell calls it with
+  the requesting shell current) and hands every other request to the responder that was
+  installed before, re-wrapping it at each attempt. **A denial is recorded in the
+  attempt record in the CLI's `permission_denials` shape,** with ACP kinds mapped to
+  Claude tool names (`execute` → `Bash`), because the turn itself still ends `end_turn`.
+  **Cost is a delta:** the adapter's `usage_update` reading is the session's running
+  total, and a retry reuses the session, so each attempt is charged what it added; a new
+  shell starts the mark at 0. **Limits travel in `_meta`:** `allowedTools`, `maxTurns`,
+  `maxBudgetUsd`, `model` in `claudeCode.options` (spread into the Agent SDK options),
+  the append in top-level `systemPrompt`; `rata-claude-loop-extra-args` must be exactly
+  `("--permission-mode" MODE)` and anything else is refused at `:check`. Under ACP
+  `maxBudgetUsd` applies to the whole session, i.e. per task, not per attempt. **It
+  calls the private `agent-shell--start`** (`:no-focus t :session-strategy 'new`), since
+  the public entry point focuses the buffer and offers a session picker;
+  `rata-test-claude-loop-acp-upstream-entry-points` pins the keywords from the docstring's
+  usage line (a compiled `cl-defun` reports `(&rest rest)`). agent-shell is only required
+  by `:check`, never at load (`rata-test-claude-loop-acp-loads-without-agent-shell`).
+  Tests: `just test-claude-loop-acp` (run by hand; not part of `just test`) drives the real
+  agent-shell and acp.el against `tests/fake-claude-acp`, a scripted python3 ACP agent
+  that logs every message it receives, so the suite asserts on the wire. Plan, spike and
+  open phases: `plans/claude-loop-agent-shell.md`.
 - `init-agent-center.el` — the `*Agents*` panel (`SPC a i o`): every live agent-shell
   session across all persp layouts, grouped by layout, with a state per shell —
   `needs-input` (permission question open), `error`, `done` (turn finished while you were
@@ -288,7 +318,7 @@ init-present → init-dashboard
   per chunk. Tests: `rata-test-agent-center-*` in
   `tests/run-tests.el`, all on synthetic event alists — nothing starts an agent.
 - `init-agent-worktree.el` — one git worktree per agent task (B6 in
-  `plans/ai-agent-powerhouse.md`). `SPC a i c w` / `C` in `*Agents*` cuts `agent/<slug>`
+  `plans/ai-agent-roadmap.md`). `SPC a i s w` / `C` in `*Agents*` cuts `agent/<slug>`
   from the branch checked out where you are, adds a worktree at
   `<main checkout>/.agent-shell/worktrees/<slug>`, switches to a persp layout named
   after the branch (so the panel files the shell there) and starts `agent-shell-new-shell`
@@ -309,7 +339,7 @@ init-present → init-dashboard
   registration. Tests: `rata-test-agent-worktree-*`, against throwaway repositories
   with `GIT_CONFIG_GLOBAL=/dev/null`; the shell start is stubbed.
 - `init-agent-prompts.el` — a prompt library for agent-shell (C12 in
-  `plans/ai-agent-powerhouse.md`). `SPC a i c P` picks a prompt from `prompts/*.md`
+  `plans/ai-agent-roadmap.md`). `SPC a i s P` picks a prompt from `prompts/*.md`
   (versioned) or `rata-agent-prompt-extra-directory` (per machine, set in `local.el`,
   wins on a name clash), fills `{{region}} {{file}} {{diff}} {{error}} {{project}}`
   from the buffer you came from, and **inserts without submitting** into the
@@ -323,8 +353,8 @@ init-present → init-dashboard
   `rata-test-agent-prompt-shipped-prompts-are-valid` fails on a shipped prompt that
   names an unknown placeholder or lacks its `<!-- description -->` line. Tests:
   `rata-test-agent-prompt-*`, with agent-shell stubbed; nothing starts an agent.
-- `init-agent-review.el` — an interactive multi-file diff and review hub for agent worktrees (Pillar I §1 in
-  `plans/ai-agent-powerhouse.md`). `SPC a i r` or `r` on a row in `*Agents*` opens a dedicated review cockpit
+- `init-agent-review.el` — an interactive multi-file diff and review hub for agent worktrees (review hub in
+  `plans/ai-agent-roadmap.md`). `SPC a i r` or `r` on a row in `*Agents*` opens a dedicated review cockpit
   `*Agent Review: <branch>*` for `base...HEAD`. Derives from `magit-diff-mode` to inherit Magit's diff
   navigation, syntax highlighting, hunk jumping, folding (`TAB`), and Ediff (`e` via `magit-ediff-dwim`),
   while prepending custom sections for worktree metadata and pending review directives. Staging directives

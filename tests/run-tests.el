@@ -230,9 +230,9 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC J j" . jira-issues)
     ("SPC a i o" . rata-agent-center-toggle)
     ("SPC a i n" . rata-agent-center-next-attention)
-    ("SPC a i c w" . rata-agent-worktree-new)
-    ("SPC a i c W" . rata-agent-worktree-finish)
-    ("SPC a i c P" . rata-agent-prompt)
+    ("SPC a i s w" . rata-agent-worktree-new)
+    ("SPC a i s W" . rata-agent-worktree-finish)
+    ("SPC a i s P" . rata-agent-prompt)
     ("SPC J l" . rata-jira-org-link-heading)
     ("SPC o b d d" . rata-dialogic-insert-block)
     ("SPC o b e" . org-hugo-export-wim-to-md)
@@ -242,9 +242,9 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC i o a" . rata-roam-alias-add-to-file)
     ;; agent-shell's context senders are not autoloaded upstream, so these
     ;; resolve only while their symbols stay in init-llm.el's :commands list.
-    ("SPC a i c f" . rata-agent-shell-send-file)
-    ("SPC a i c r" . agent-shell-send-region)
-    ("SPC a i c d" . agent-shell-send-dwim)
+    ("SPC a i s f" . rata-agent-shell-send-file)
+    ("SPC a i s r" . agent-shell-send-region)
+    ("SPC a i s d" . agent-shell-send-dwim)
     ;; init-mail.el binds its own wrappers, never mu4e symbols directly, so
     ;; these resolve on a host with no mu installed too (the wrapper then
     ;; explains what is missing instead of the key being dead).
@@ -826,6 +826,120 @@ CLI result event does."
   (let ((cli (cdr (assq 'cli rata-claude-loop--backends))))
     (dolist (op '(:check :start :retry :attempt :live-p :stop :kill))
       (should (functionp (plist-get cli op))))))
+
+(ert-deftest rata-test-claude-loop-acp-session-mode ()
+  "Only `--permission-mode MODE' has an ACP meaning; anything else is refused."
+  (should-not (rata-claude-loop-acp--session-mode nil))
+  (should (equal (rata-claude-loop-acp--session-mode
+                  '("--permission-mode" "acceptEdits"))
+                 "acceptEdits"))
+  (should-error (rata-claude-loop-acp--session-mode
+                 '("--permission-mode" "acceptEdits" "--verbose"))
+                :type 'user-error))
+
+(ert-deftest rata-test-claude-loop-acp-session-meta ()
+  "The loop's limits merge over agent-shell's meta without losing it."
+  (let ((base '((claudeCode . ((options . ((thinking . ((display . "summarized")))
+                                           (maxTurns . 99)))))
+                (other . 1)))
+        (rata-claude-loop-allowed-tools '("Bash(just:*)"))
+        (rata-claude-loop-max-turns 7)
+        (rata-claude-loop-task-budget-usd 1.5)
+        (rata-claude-loop-model nil)
+        (rata-claude-loop-fallback-model nil)
+        (rata-claude-loop-append-system-prompt "terse"))
+    (let* ((meta (rata-claude-loop-acp--session-meta base))
+           (options (map-nested-elt meta '(claudeCode options))))
+      ;; A vector, so it serialises as a JSON array.
+      (should (equal (alist-get 'allowedTools options) ["Bash(just:*)"]))
+      (should (equal (alist-get 'maxTurns options) 7))   ; ours wins
+      (should (= 1 (seq-count (lambda (e) (eq (car e) 'maxTurns)) options)))
+      (should (equal (alist-get 'maxBudgetUsd options) 1.5))
+      (should (equal (map-nested-elt options '(thinking display)) "summarized"))
+      (should (equal (map-nested-elt meta '(systemPrompt append)) "terse"))
+      (should (equal (alist-get 'other meta) 1))
+      (should-not (assq 'model options))))
+  ;; Unset limits add nothing at all.
+  (let ((rata-claude-loop-allowed-tools nil) (rata-claude-loop-max-turns nil)
+        (rata-claude-loop-task-budget-usd nil) (rata-claude-loop-model nil)
+        (rata-claude-loop-fallback-model nil)
+        (rata-claude-loop-append-system-prompt nil))
+    (should (equal (rata-claude-loop-acp--session-meta
+                    '((claudeCode . ((options . ((a . 1)))))))
+                   '((claudeCode . ((options . ((a . 1))))))))))
+
+(ert-deftest rata-test-claude-loop-acp-denials-speak-claude-tool-names ()
+  "An ACP tool call becomes a denial the core's lists and hints understand."
+  (let ((denial (rata-claude-loop-acp--denial
+                 '((:kind . "execute") (:title . "Print 6*7")
+                   (:raw-input . ((command . "python3 -c 'print(6*7)'")))))))
+    (should (equal (alist-get 'tool_name denial) "Bash"))
+    (should (member "Bash" rata-claude-loop-verification-denial-tools))
+    (should (equal (rata-claude-loop--denial-pattern denial) "Bash(python3:*)")))
+  (should (member (rata-claude-loop-acp--tool-name "edit" "Write x")
+                  rata-claude-loop-critical-denial-tools))
+  (should (equal (rata-claude-loop-acp--tool-name "think" "Pondering") "Pondering")))
+
+(ert-deftest rata-test-claude-loop-acp-only-ever-rejects-once ()
+  "The responder's choice is by kind, never position, and never an allow.
+`allow_always' is persisted by the adapter as a durable rule (spike Q1)."
+  (should (equal (rata-claude-loop-acp--pick-reject
+                  '(((:kind . "allow_once") (:option-id . "allow"))
+                    ((:kind . "allow_always") (:option-id . "always"))
+                    ((:kind . "reject_once") (:option-id . "reject"))))
+                 "reject"))
+  (should-not (rata-claude-loop-acp--pick-reject
+               '(((:kind . "allow_once") (:option-id . "allow"))
+                 ((:kind . "allow_always") (:option-id . "always"))))))
+
+(ert-deftest rata-test-claude-loop-acp-stop-reasons-classify-like-the-cli ()
+  "ACP stop reasons land on the CLI's failure kinds."
+  (cl-flet ((kind (stop) (car (rata-claude-loop--classify-attempt
+                               (rata-claude-loop-acp--stop-record stop)))))
+    (should-not (kind "end_turn"))
+    (should (eq (kind "max_turn_requests") 'max-turns))
+    (should (eq (kind "refusal") 'crash))
+    (should (eq (kind "cancelled") 'crash))
+    (should (eq (kind nil) 'crash))))
+
+(ert-deftest rata-test-claude-loop-acp-upstream-entry-points ()
+  "The agent-shell internals the backend calls still take what it passes.
+`agent-shell--start' is private; a renamed keyword would only fail at the
+first run, inside a timer.  A failure here means upstream moved."
+  (require 'agent-shell)
+  (require 'agent-shell-anthropic)
+  ;; A compiled `cl-defun' has the arglist (&rest rest); the keywords it
+  ;; accepts are only recorded in the docstring's usage line.
+  (let ((usage (downcase (car (help-split-fundoc
+                               (documentation 'agent-shell--start t)
+                               'agent-shell--start)))))
+    (dolist (key '("config" "no-focus" "new-session" "session-strategy"
+                   "session-id"))
+      (should (string-match-p (concat "[ (]" (regexp-quote key) "[ )]") usage))))
+  ;; `setf' of `map-elt' on an alist only replaces keys that already exist.
+  (let ((config (agent-shell-anthropic-make-claude-code-config)))
+    (dolist (key '(:session-meta :default-session-mode-id :default-model-id
+                   :buffer-name))
+      (should (assq key config))))
+  (dolist (function '(agent-shell-subscribe-to agent-shell-unsubscribe
+                      agent-shell-insert agent-shell-interrupt))
+    (should (fboundp function)))
+  (should (boundp 'agent-shell-permission-responder-function))
+  (should (boundp 'agent-shell-cwd-function))
+  (let ((backend (cdr (assq 'agent-shell rata-claude-loop--backends))))
+    (dolist (op '(:check :start :retry :attempt :live-p :stop :kill :teardown))
+      (should (functionp (plist-get backend op))))))
+
+(ert-deftest rata-test-claude-loop-acp-loads-without-agent-shell ()
+  "The backend module loads with agent-shell absent, and does not load it.
+agent-shell must only ever be required by the backend's :check (L-052)."
+  (let* ((emacs (expand-file-name invocation-name invocation-directory))
+         (lisp (expand-file-name "lisp" user-emacs-directory))
+         (status (call-process
+                  emacs nil nil nil "-Q" "--batch" "-L" lisp
+                  "--eval" "(require 'init-claude-loop-acp)"
+                  "--eval" "(kill-emacs (if (featurep 'agent-shell) 2 0))")))
+    (should (eq status 0))))
 
 (ert-deftest rata-test-claude-loop-denial-pattern ()
   "A denial suggests the narrowest --allowedTools pattern that would fit it."
@@ -4632,7 +4746,7 @@ Each binding is (VAR LAYOUT STATE SINCE); the buffers are killed after."
   (should (featurep 'init-agent-center))
   (should (memq #'rata-agent-center--on-mode-hook agent-shell-mode-hook)))
 
-;;; --- init-agent-center: activity line (A2, plans/ai-agent-powerhouse.md) ---
+;;; --- init-agent-center: activity line (A2, plans/ai-agent-roadmap.md) ---
 
 (ert-deftest rata-test-agent-center-tool-activity-strings ()
   "A tool call reads as `Label: detail', from its title, command and kind."
@@ -4945,7 +5059,7 @@ Each binding is (VAR LAYOUT STATE SINCE); the buffers are killed after."
         (should (equal (plist-get (rata-agent-center--entry buf) :state) 'needs-input))
         (should (equal (plist-get (rata-agent-center--entry buf) :activity) "Bash: rm -rf target"))))))
 
-;;; --- init-agent-worktree: one worktree per task (B6, plans/ai-agent-powerhouse.md) ---
+;;; --- init-agent-worktree: one worktree per task (B6, plans/ai-agent-roadmap.md) ---
 ;; Every git call runs against a throwaway repository under `temporary-file-directory'
 ;; with the user's git config shut out; nothing starts an agent.
 
@@ -5526,6 +5640,154 @@ is nil, and the diff silently widens to the project) fails here."
         (kill-buffer orig)))))
 
 ;;; ============================================================
+;;; Tests: Agent Shell Permissions (init-agent-permissions.el)
+;;; ============================================================
+
+(require 'init-agent-permissions nil t)
+
+(ert-deftest rata-test-agent-permissions-blacklist-precedence ()
+  "Blacklist rules strictly override whitelist rules."
+  (let* ((rata-agent-permissions-whitelist
+          '((:kind "execute" :command "rm" :reason "Whitelisted rm")))
+         (ctx '(:backend claude-code :kind "execute" :command "rm -rf /tmp/test" :title "rm -rf /tmp/test"))
+         (res (rata-agent-permissions--evaluate ctx)))
+    (should (eq (plist-get res :decision) 'deny))
+    (should (string-search "Destructive system command" (plist-get res :reason)))))
+
+(ert-deftest rata-test-agent-permissions-destructive-commands-denied ()
+  "Destructive shell commands evaluate to `deny' (zero process execution)."
+  (dolist (cmd '("rm -rf /"
+                 "rm -r foo"
+                 "sudo apt-get update"
+                 "su root"
+                 "mkfs.ext4 /dev/sda1"
+                 "dd if=/dev/zero of=/dev/sda"
+                 "chmod -R 777 ."
+                 "git push origin main --force"
+                 "git push -f"
+                 "git reset --hard HEAD~1"
+                 "git clean -fd"))
+    (let* ((ctx (list :backend 'claude-code :kind "execute" :command cmd :title cmd))
+           (res (rata-agent-permissions--evaluate ctx)))
+      (should (eq (plist-get res :decision) 'deny)))))
+
+(ert-deftest rata-test-agent-permissions-sensitive-paths-denied ()
+  "Access to sensitive files and credentials evaluates to `deny'."
+  (dolist (path '("/home/user/.authinfo"
+                  "/home/user/.authinfo.gpg"
+                  "/home/user/.ssh/id_rsa"
+                  "/home/user/.ssh/id_ed25519"
+                  "/home/user/.gnupg/pubring.kbx"
+                  "/repo/.env"
+                  "/repo/local.el"))
+    (let* ((ctx (list :backend 'pi :kind "read" :path path :title (format "Read %s" path)))
+           (res (rata-agent-permissions--evaluate ctx)))
+      (should (eq (plist-get res :decision) 'deny)))))
+
+(ert-deftest rata-test-agent-permissions-safe-commands-allowed ()
+  "Routine read-only inspection and test commands evaluate to `allow'."
+  (dolist (cmd '("git status"
+                 "git diff"
+                 "git log -n 5"
+                 "git show"
+                 "git branch"
+                 "just lint"
+                 "just test"
+                 "cargo test"
+                 "cargo check"
+                 "go test ./..."
+                 "ls -la"
+                 "cat README.md"
+                 "head -n 20 file.txt"
+                 "wc -l file.txt"
+                 "pwd"))
+    (let* ((ctx (list :backend 'claude-code :kind "execute" :command cmd :title cmd))
+           (res (rata-agent-permissions--evaluate ctx)))
+      (should (eq (plist-get res :decision) 'allow)))))
+
+(ert-deftest rata-test-agent-permissions-safe-project-read-allowed ()
+  "File reads and searches inside the project root evaluate to `allow'."
+  (let* ((ctx '(:backend gemini-cli :kind "read" :path "lisp/init-llm.el"
+                :project "/home/user/workspace/Ratatoskr-emacs"
+                :title "Read lisp/init-llm.el"))
+         (res (rata-agent-permissions--evaluate ctx)))
+    (should (eq (plist-get res :decision) 'allow))))
+
+(ert-deftest rata-test-agent-permissions-backend-isolation ()
+  "Rules scoped to one backend do not leak to other backends."
+  (let ((rata-agent-permissions-backend-rules
+         '((claude-code
+            (:blacklist (((:kind "execute" :command "^pytest" :reason "pytest blocked on claude"))))))))
+    ;; For claude-code, pytest is blacklisted
+    (let* ((ctx-claude '(:backend claude-code :kind "execute" :command "pytest" :title "pytest"))
+           (res-claude (rata-agent-permissions--evaluate ctx-claude)))
+      (should (eq (plist-get res-claude :decision) 'deny))
+      (should (equal (plist-get res-claude :reason) "pytest blocked on claude")))
+    ;; For pi, pytest is allowed via default whitelist
+    (let* ((ctx-pi '(:backend pi :kind "execute" :command "pytest" :title "pytest"))
+           (res-pi (rata-agent-permissions--evaluate ctx-pi)))
+      (should (eq (plist-get res-pi :decision) 'allow)))))
+
+(ert-deftest rata-test-agent-permissions-fallback-ask ()
+  "Unlisted tools fall back to `ask' (interactive dialog)."
+  (let* ((ctx '(:backend claude-code :kind "other" :title "unrecognized-tool" :command nil :path nil))
+         (res (rata-agent-permissions--evaluate ctx)))
+    (should (eq (plist-get res :decision) 'ask))))
+
+(ert-deftest rata-test-agent-permissions-responder-mock ()
+  "The responder sends allow_once for allowed tools and reject_once for denied tools."
+  (let ((responded-id nil)
+        (rata-agent-permissions-enabled t)
+        (options '(((:kind . "allow_once") (:option-id . "opt-allow") (:label . "Allow (y)"))
+                   ((:kind . "reject_once") (:option-id . "opt-reject") (:label . "Reject (n)")))))
+    ;; 1. Whitelisted command -> auto-allow
+    (let ((perm `((:tool-call . ((:kind . "execute")
+                                 (:command . "git status")
+                                 (:title . "git status")))
+                  (:options . ,options)
+                  (:respond . ,(lambda (opt-id) (setq responded-id opt-id))))))
+      (should (eq (rata-agent-permissions-responder perm) t))
+      (should (equal responded-id "opt-allow")))
+
+    ;; 2. Blacklisted command -> auto-deny
+    (setq responded-id nil)
+    (let ((perm `((:tool-call . ((:kind . "execute")
+                                 (:command . "rm -rf /tmp/danger")
+                                 (:title . "rm -rf /tmp/danger")))
+                  (:options . ,options)
+                  (:respond . ,(lambda (opt-id) (setq responded-id opt-id))))))
+      (should (eq (rata-agent-permissions-responder perm) t))
+      (should (equal responded-id "opt-reject")))
+
+    ;; 3. Unknown command -> fallback ask (returns nil, skips :respond)
+    (setq responded-id nil)
+    (let ((perm `((:tool-call . ((:kind . "unknown")
+                                 (:title . "unknown-tool")))
+                  (:options . ,options)
+                  (:respond . ,(lambda (opt-id) (setq responded-id opt-id))))))
+      (should (null (rata-agent-permissions-responder perm)))
+      (should (null responded-id)))))
+
+(ert-deftest rata-test-agent-permissions-disabled-toggle ()
+  "When disabled, responder immediately returns nil without evaluating rules."
+  (let ((responded-id nil)
+        (rata-agent-permissions-enabled nil)
+        (options '(((:kind . "allow_once") (:option-id . "opt-allow")))))
+    (let ((perm `((:tool-call . ((:kind . "execute")
+                                 (:command . "git status")
+                                 (:title . "git status")))
+                  (:options . ,options)
+                  (:respond . ,(lambda (opt-id) (setq responded-id opt-id))))))
+      (should (null (rata-agent-permissions-responder perm)))
+      (should (null responded-id)))))
+
+(ert-deftest rata-test-agent-permissions-leader-keys ()
+  "SPC a i s x shortcuts are bound to permission commands."
+  (should (eq (rata-test--leader-lookup "SPC a i s x t") 'rata-agent-permissions-test))
+  (should (eq (rata-test--leader-lookup "SPC a i s x T") 'rata-agent-permissions-toggle))
+  (should (eq (rata-test--leader-lookup "SPC a i s x s") 'rata-agent-permissions-status)))
+
+;;; ============================================================
 ;;; Tests: Godot 4 & C++ GDExtension (init-gamedev.el)
 ;;; ============================================================
 
@@ -5685,9 +5947,357 @@ is nil, and the diff silently widens to the project) fails here."
             ((symbol-function 'rata-cmake-build) (lambda () 'cmake-build)))
     (should (eq (rata-cpp-build) 'cmake-build))))
 
+(ert-deftest rata-test-agent-artifacts-session-scan-and-metadata ()
+  "Session scan finds .md files, parses .metadata.json, and ignores subdirectories."
+  (let* ((temp-brain (make-temp-file "rata-test-brain-" t))
+         (rata-agent-antigravity-brain-dir temp-brain)
+         (rata-agent-antigravity-brain-dirs (list temp-brain))
+         (session-id "12345678-1234-1234-1234-123456789abc")
+         (session-dir (expand-file-name session-id temp-brain))
+         (scratch-dir (expand-file-name "scratch" session-dir)))
+    (unwind-protect
+        (progn
+          (make-directory scratch-dir t)
+          (let ((plan-file (expand-file-name "test-plan.md" session-dir))
+                (meta-file (expand-file-name "test-plan.md.metadata.json" session-dir))
+                (notes-file (expand-file-name "notes.md" session-dir))
+                (scratch-file (expand-file-name "scratch.md" scratch-dir)))
+            (with-temp-file plan-file (insert "# Plan\nContent"))
+            (with-temp-file meta-file
+              (insert "{\"summary\":\"Test plan summary\",\"requestFeedback\":true,\"updatedAt\":\"2026-10-15T12:00:00Z\"}"))
+            (with-temp-file notes-file (insert "# Notes\nContent"))
+            (with-temp-file scratch-file (insert "# Scratch\nContent"))
+            (let ((artifacts (rata-agent-antigravity-session-artifacts session-id)))
+              (should (= (length artifacts) 2))
+              (let ((names (mapcar (lambda (a) (plist-get a :name)) artifacts)))
+                (should (member "test-plan.md" names))
+                (should (member "notes.md" names))
+                (should-not (member "scratch.md" names)))
+              (let ((plan (seq-find (lambda (a) (equal (plist-get a :name) "test-plan.md")) artifacts)))
+                (should (equal (plist-get plan :summary) "Test plan summary"))
+                (should (eq (plist-get plan :request-feedback) t))
+                (should (equal (plist-get plan :updated-at) "2026-10-15T12:00:00Z"))))))
+      (delete-directory temp-brain t))))
+
+(ert-deftest rata-test-agent-artifacts-session-plan ()
+  "Session plan retrieves the artifact with requestFeedback or plan in name."
+  (let* ((temp-brain (make-temp-file "rata-test-brain-" t))
+         (rata-agent-antigravity-brain-dir temp-brain)
+         (rata-agent-antigravity-brain-dirs (list temp-brain))
+         (session-id "12345678-1234-1234-1234-123456789abc")
+         (session-dir (expand-file-name session-id temp-brain)))
+    (unwind-protect
+        (progn
+          (make-directory session-dir t)
+          (let ((plan-file (expand-file-name "my-plan.md" session-dir))
+                (meta-file (expand-file-name "my-plan.md.metadata.json" session-dir))
+                (notes-file (expand-file-name "notes.md" session-dir)))
+            (with-temp-file plan-file (insert "# My Plan"))
+            (with-temp-file meta-file (insert "{\"summary\":\"My Plan\",\"requestFeedback\":true}"))
+            (with-temp-file notes-file (insert "# Notes"))
+            (let ((plan (rata-agent-antigravity-session-plan session-id)))
+              (should plan)
+              (should (equal (plist-get plan :name) "my-plan.md")))))
+      (delete-directory temp-brain t))))
+
+(ert-deftest rata-test-agent-artifacts-single-auto-open ()
+  "Single artifact is selected directly without prompting."
+  (let ((artifacts (list (list :file "/tmp/test.md" :name "test.md" :summary "Test"))))
+    (should (equal (rata-agent-antigravity-choose-artifact artifacts) "/tmp/test.md"))))
+
+(ert-deftest rata-test-agent-artifacts-query-filtering ()
+  "Query argument filters artifacts and picks exact match."
+  (let ((artifacts (list (list :file "/tmp/plan.md" :name "plan.md" :summary "Plan summary")
+                         (list :file "/tmp/walkthrough.md" :name "walkthrough.md" :summary "Walkthrough"))))
+    (should (equal (rata-agent-antigravity-choose-artifact artifacts "walkthrough")
+                    "/tmp/walkthrough.md"))
+    (should (equal (rata-agent-antigravity-choose-artifact artifacts "plan")
+                    "/tmp/plan.md"))))
+
+(ert-deftest rata-test-agent-artifacts-multiple-completing-read ()
+  "Multiple artifacts trigger completing-read."
+  (let ((artifacts (list (list :file "/tmp/plan.md" :name "plan.md" :summary "Plan summary")
+                         (list :file "/tmp/walkthrough.md" :name "walkthrough.md" :summary "Walkthrough"))))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) "walkthrough.md")))
+      (should (equal (rata-agent-antigravity-choose-artifact artifacts nil)
+                     "/tmp/walkthrough.md")))))
+
+(ert-deftest rata-test-agent-artifacts-approve-plan-submits ()
+  "Approving a plan sends `[Approved] <plan>' into the target shell."
+  (let ((inserted-text nil)
+        (inserted-submit nil)
+        (fake-shell (get-buffer-create "*rata-test-fake-ag-shell*"))
+        (fake-plan-file (make-temp-file "rata-test-plan-" nil ".md")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell--insert-to-shell-buffer)
+                   (lambda (&rest plist)
+                     (setq inserted-text (plist-get plist :text))
+                     (setq inserted-submit (plist-get plist :submit))))
+                  ((symbol-function 'pop-to-buffer) (lambda (b &rest _) b)))
+          (rata-agent-antigravity-approve-plan fake-plan-file fake-shell)
+          (should (equal inserted-text (format "[Approved] %s\n" (file-name-nondirectory fake-plan-file))))
+          (should (eq inserted-submit t)))
+      (kill-buffer fake-shell)
+      (delete-file fake-plan-file))))
+
+(ert-deftest rata-test-agent-artifacts-handle-artifact-interception ()
+  "Handling /artifact finishes output cleanly."
+  (let* ((temp-brain (make-temp-file "rata-test-brain-" t))
+         (rata-agent-antigravity-brain-dir temp-brain)
+         (rata-agent-antigravity-brain-dirs (list temp-brain))
+         (session-id "12345678-1234-1234-1234-123456789abc")
+         (session-dir (expand-file-name session-id temp-brain))
+         (fake-shell (get-buffer-create "*rata-test-fake-ag-shell2*"))
+         (output-written nil)
+         (finished-success nil))
+    (unwind-protect
+        (progn
+          (make-directory session-dir t)
+          (with-temp-file (expand-file-name "doc.md" session-dir) (insert "# Doc"))
+          (with-current-buffer fake-shell
+            (setq-local agent-shell--state (list (cons :session (list (cons :id session-id)))))
+            (cl-letf (((symbol-function 'shell-maker-write-output)
+                       (lambda (&rest plist) (setq output-written (plist-get plist :output))))
+                      ((symbol-function 'shell-maker-finish-output)
+                       (lambda (&rest plist) (setq finished-success (plist-get plist :success))))
+                      ((symbol-function 'pop-to-buffer) (lambda (b &rest _) b)))
+              (rata-agent-antigravity--handle-artifact-command "/artifact" fake-shell)
+              (should (equal output-written "Opened artifact: doc.md\n"))
+              (should (eq finished-success t)))))
+      (kill-buffer fake-shell)
+      (delete-directory temp-brain t))))
+
+(ert-deftest rata-test-agent-artifacts-approve-plan-busy-queues ()
+  "When target shell is busy, approving plan enqueues into prompt queue."
+  (let ((queued-prompt nil)
+        (fake-shell (get-buffer-create "*rata-test-fake-ag-shell-busy*"))
+        (fake-plan-file (make-temp-file "rata-test-plan-" nil ".md")))
+    (unwind-protect
+        (with-current-buffer fake-shell
+          (setq-local major-mode 'agent-shell-mode)
+          (cl-letf (((symbol-function 'shell-maker-busy) (lambda () t))
+                    ((symbol-function 'agent-shell--prompt-queue-enqueue)
+                     (lambda (&rest plist) (setq queued-prompt (plist-get plist :prompt))))
+                    ((symbol-function 'pop-to-buffer) (lambda (b &rest _) b)))
+            (rata-agent-antigravity-approve-plan fake-plan-file fake-shell)
+            (should (equal queued-prompt (format "[Approved] %s\n" (file-name-nondirectory fake-plan-file))))))
+      (kill-buffer fake-shell)
+      (delete-file fake-plan-file))))
+
+(ert-deftest rata-test-agent-artifacts-decline-plan ()
+  "Declining plan submits feedback or enqueues when busy."
+  (let ((inserted-text nil)
+        (queued-prompt nil)
+        (fake-shell (get-buffer-create "*rata-test-fake-ag-shell-dec*"))
+        (fake-plan-file (make-temp-file "rata-test-plan-" nil ".md")))
+    (unwind-protect
+        (with-current-buffer fake-shell
+          (setq-local major-mode 'agent-shell-mode)
+          ;; Not busy: immediate submit
+          (cl-letf (((symbol-function 'shell-maker-busy) (lambda () nil))
+                    ((symbol-function 'agent-shell--insert-to-shell-buffer)
+                     (lambda (&rest plist) (setq inserted-text (plist-get plist :text))))
+                    ((symbol-function 'pop-to-buffer) (lambda (b &rest _) b)))
+            (rata-agent-antigravity-decline-plan "Need tests" fake-plan-file fake-shell)
+            (should (equal inserted-text (format "[Declined] %s: Need tests\n"
+                                                 (file-name-nondirectory fake-plan-file))))
+            ;; Without reason: default feedback
+            (rata-agent-antigravity-decline-plan nil fake-plan-file fake-shell)
+            (should (equal inserted-text (format "[Declined] %s: Please revise the plan.\n"
+                                                 (file-name-nondirectory fake-plan-file)))))
+          ;; Busy: enqueues to prompt-queue
+          (cl-letf (((symbol-function 'shell-maker-busy) (lambda () t))
+                    ((symbol-function 'agent-shell--prompt-queue-enqueue)
+                     (lambda (&rest plist) (setq queued-prompt (plist-get plist :prompt))))
+                    ((symbol-function 'pop-to-buffer) (lambda (b &rest _) b)))
+            (rata-agent-antigravity-decline-plan "Revise scope" fake-plan-file fake-shell)
+            (should (equal queued-prompt (format "[Declined] %s: Revise scope\n"
+                                                 (file-name-nondirectory fake-plan-file))))))
+      (kill-buffer fake-shell)
+      (delete-file fake-plan-file))))
+
+(ert-deftest rata-test-agent-artifacts-handle-decline-command ()
+  "Handling /decline in shell submits declined payload."
+  (let* ((temp-brain (make-temp-file "rata-test-brain-" t))
+         (rata-agent-antigravity-brain-dir temp-brain)
+         (rata-agent-antigravity-brain-dirs (list temp-brain))
+         (session-id "12345678-1234-1234-1234-123456789abc")
+         (session-dir (expand-file-name session-id temp-brain))
+         (fake-shell (get-buffer-create "*rata-test-fake-ag-shell-cmd-dec*"))
+         (output-written nil)
+         (inserted-text nil))
+    (unwind-protect
+        (progn
+          (make-directory session-dir t)
+          (with-temp-file (expand-file-name "my-plan.md" session-dir) (insert "# Plan"))
+          (with-current-buffer fake-shell
+            (setq-local agent-shell--state (list (cons :session (list (cons :id session-id)))))
+            (cl-letf (((symbol-function 'shell-maker-write-output)
+                       (lambda (&rest plist) (setq output-written (plist-get plist :output))))
+                      ((symbol-function 'shell-maker-finish-output) #'ignore)
+                      ((symbol-function 'agent-shell--insert-to-shell-buffer)
+                       (lambda (&rest plist) (setq inserted-text (plist-get plist :text)))))
+              (rata-agent-antigravity--handle-decline-command "/decline Add support for postgres" fake-shell)
+              (should (equal output-written "Declining plan: my-plan.md\n"))
+              (should (equal inserted-text "[Declined] my-plan.md: Add support for postgres\n")))))
+      (kill-buffer fake-shell)
+      (delete-directory temp-brain t))))
+
+(ert-deftest rata-test-agent-artifacts-keybindings ()
+  "Verify artifact commands exist, are commandp, and bound in keys table."
+  (should (fboundp 'rata-agent-antigravity-open-artifact))
+  (should (commandp 'rata-agent-antigravity-open-artifact))
+  (should (fboundp 'rata-agent-antigravity-approve-plan))
+  (should (commandp 'rata-agent-antigravity-approve-plan))
+  (should (fboundp 'rata-agent-antigravity-decline-plan))
+  (should (commandp 'rata-agent-antigravity-decline-plan))
+  (should (assoc "A" rata-agent-shell-local-keys))
+  (should (eq (cadr (assoc "A" rata-agent-shell-local-keys))
+              'rata-agent-antigravity-open-artifact))
+  (should (eq (rata-test--leader-lookup "SPC a i s A") 'rata-agent-antigravity-open-artifact))
+  (with-temp-buffer
+    (rata-agent-antigravity-artifact-mode 1)
+    (should (eq (lookup-key rata-agent-antigravity-artifact-mode-map (kbd "C-c C-c"))
+                'rata-agent-antigravity-approve-plan))
+    (should (eq (lookup-key rata-agent-antigravity-artifact-mode-map (kbd "C-c C-k"))
+                'rata-agent-antigravity-decline-plan))))
+
+(ert-deftest rata-test-agent-artifacts-session-dir-multi-candidate ()
+  "Session dir resolves across candidate brain directories."
+  (let* ((temp-root (make-temp-file "rata-test-multi-" t))
+         (acp-brain (expand-file-name "antigravity-acp/brain" temp-root))
+         (cli-brain (expand-file-name "antigravity-cli/brain" temp-root))
+         (rata-agent-antigravity-brain-dir acp-brain)
+         (rata-agent-antigravity-brain-dirs (list acp-brain cli-brain))
+         (session-acp "11111111-1111-1111-1111-111111111111")
+         (session-cli "22222222-2222-2222-2222-222222222222")
+         (session-new "33333333-3333-3333-3333-333333333333"))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name session-acp acp-brain) t)
+          (make-directory (expand-file-name session-cli cli-brain) t)
+          (should (equal (rata-agent-antigravity-session-dir session-acp)
+                         (expand-file-name session-acp acp-brain)))
+          (should (equal (rata-agent-antigravity-session-dir session-cli)
+                         (expand-file-name session-cli cli-brain)))
+          (should (equal (rata-agent-antigravity-session-dir session-new)
+                         (expand-file-name session-new acp-brain))))
+      (delete-directory temp-root t))))
+
+(ert-deftest rata-test-agent-artifacts-session-meta ()
+  "Session meta injects systemPrompt under antigravity namespace."
+  (let* ((base '((other . ((foo . "bar")))))
+         (meta (rata-agent-antigravity-session-meta base))
+         (ag (alist-get 'antigravity meta))
+         (sp (alist-get 'systemPrompt ag))
+         (append-val (alist-get 'append sp)))
+    (should (equal (alist-get 'other meta) '((foo . "bar"))))
+    (should ag)
+    (should sp)
+    (should (stringp append-val))
+    (should (string-match-p "<artifacts>" append-val))))
+
+(ert-deftest rata-test-agent-artifacts-expand-plan-command ()
+  "Expanding /plan creates structured <PLAN> prompt with target file path."
+  (let* ((temp-brain (make-temp-file "rata-test-brain-" t))
+         (rata-agent-antigravity-brain-dir temp-brain)
+         (rata-agent-antigravity-brain-dirs (list temp-brain))
+         (session-id "12345678-1234-1234-1234-123456789abc")
+         (fake-shell (get-buffer-create "*rata-test-fake-plan-shell*")))
+    (unwind-protect
+        (with-current-buffer fake-shell
+          (setq-local agent-shell--state (list (cons :session (list (cons :id session-id)))))
+          (let ((expanded (rata-agent-antigravity-expand-plan-command
+                           "/plan Add new title face in agent overview"
+                           fake-shell)))
+            (should (string-match-p "<PLAN>" expanded))
+            (should (string-match-p "add-new-title-face-in-agent-overvie\\.md" expanded))
+            (should (string-match-p "requestFeedback" expanded))
+            (should (string-match-p ", A" expanded))
+            (should (string-match-p "<USER_REQUEST>\nAdd new title face in agent overview\n</USER_REQUEST>" expanded))
+            (should (file-directory-p (expand-file-name session-id temp-brain)))))
+      (kill-buffer fake-shell)
+      (delete-directory temp-brain t))))
+
+(ert-deftest rata-test-agent-artifacts-handle-plan-expansion ()
+  "Advice on agent-shell--handle expands /plan and calls orig-fun with new command."
+  (let* ((temp-brain (make-temp-file "rata-test-brain-" t))
+         (rata-agent-antigravity-brain-dir temp-brain)
+         (rata-agent-antigravity-brain-dirs (list temp-brain))
+         (fake-shell (get-buffer-create "*rata-test-fake-plan-shell2*"))
+         (session-id "12345678-1234-1234-1234-123456789abc")
+         (received-command nil))
+    (unwind-protect
+        (with-current-buffer fake-shell
+          (setq-local major-mode 'agent-shell-mode)
+          (setq-local agent-shell--state
+                      (list (cons :agent-config '((:identifier . antigravity)))
+                            (cons :session (list (cons :id session-id)))))
+          (rata-agent-artifacts--advice-handle
+           (lambda (&rest args) (setq received-command (plist-get args :command)))
+           :command "/plan Test planning expansion"
+           :shell-buffer fake-shell)
+          (should (stringp received-command))
+          (should (string-match-p "<PLAN>" received-command))
+          (should (string-match-p "test-planning-expansion\\.md" received-command)))
+      (kill-buffer fake-shell)
+      (delete-directory temp-brain t))))
+
+(ert-deftest rata-test-agent-artifacts-window-placement-sole-shell ()
+  "When agent-shell is sole regular window, opening artifact splits right."
+  (let* ((temp-file (make-temp-file "rata-test-art-" nil ".md"))
+         (fake-shell (get-buffer-create "*rata-test-sole-shell*"))
+         (side-buf (get-buffer-create "*Agents*")))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (set-window-buffer (selected-window) fake-shell)
+          (display-buffer-in-side-window side-buf '((side . right) (dedicated . t)))
+          (let ((opened-buf (rata-agent-antigravity-open-artifact-file temp-file fake-shell)))
+            (let ((shell-win (get-buffer-window fake-shell))
+                  (art-win (get-buffer-window opened-buf)))
+              (should shell-win)
+              (should art-win)
+              (should-not (eq shell-win art-win))
+              (should (eq (selected-window) art-win))
+              (should (> (nth 0 (window-edges art-win))
+                         (nth 0 (window-edges shell-win)))))))
+      (kill-buffer fake-shell)
+      (kill-buffer side-buf)
+      (delete-file temp-file))))
+
+(ert-deftest rata-test-agent-artifacts-window-placement-with-other-window ()
+  "When another regular window is open, opening artifact reuses it without splitting."
+  (let* ((temp-file (make-temp-file "rata-test-art2-" nil ".md"))
+         (fake-shell (get-buffer-create "*rata-test-right-shell*"))
+         (code-buf (get-buffer-create "*rata-test-left-code*"))
+         (side-buf (get-buffer-create "*Agents*")))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (let* ((left-win (selected-window))
+                 (right-win (split-window left-win nil 'right)))
+            (set-window-buffer left-win code-buf)
+            (set-window-buffer right-win fake-shell)
+            (select-window right-win)
+            (display-buffer-in-side-window side-buf '((side . right) (dedicated . t)))
+            (let ((opened-buf (rata-agent-antigravity-open-artifact-file temp-file fake-shell)))
+              (should (eq (get-buffer-window opened-buf) left-win))
+              (should (eq (get-buffer-window fake-shell) right-win))
+              (should (eq (selected-window) left-win))
+              (let ((real-wins (seq-filter #'rata-agent-antigravity--real-window-p
+                                           (window-list nil 'nomini))))
+                (should (= (length real-wins) 2))))))
+      (kill-buffer fake-shell)
+      (kill-buffer code-buf)
+      (kill-buffer side-buf)
+      (delete-file temp-file))))
+
 ;;; ============================================================
 ;;; Run all tests
 ;;; ============================================================
 
 (ert-run-tests-batch-and-exit)
+
 

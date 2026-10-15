@@ -29,5 +29,11 @@ test-work-agenda:
 test-claude-loop:
     RATA_ROOT={{init_dir}} {{emacs_bin}} -Q --batch -l tests/claude-loop-e2e.el
 
+# The claude-loop agent-shell (ACP) backend, end to end against a scripted stub
+# ACP agent (tests/fake-claude-acp, python3).  Loads agent-shell, acp and
+# shell-maker from elpaca/builds, so it is run by hand, not part of `test'.
+test-claude-loop-acp:
+    RATA_ROOT={{init_dir}} {{emacs_bin}} -Q --batch -l tests/claude-loop-acp-e2e.el
+
 # Run all tests (lint + compile + startup + ERT)
 test: lint compile batch test-ert test-work-agenda

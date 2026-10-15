@@ -283,6 +283,9 @@ re-check `init-llm.el`, `init-khoj.el`, `init-claude-loop.el` before binding.
 
 ## Later (not planned in detail)
 
+The follow-ups chosen on 2026-10-05 (A2, B6, B8, B9, C10–C12) are planned in
+`plans/ai-agent-roadmap.md`.
+
 - Include claude-loop runs as rows (it already has its own state machine; read it,
   don't duplicate it).
 

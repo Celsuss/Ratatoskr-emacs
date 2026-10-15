@@ -8,7 +8,7 @@ and verified incrementally.
 > [!NOTE]
 > All AI agent-specific workflows (Agent Review Mode, Second Brain MCP Bridge,
 > Spec-Driven Agent Spawning, Proactive Error Feedback, .ratarules, and Dev-Log Auto-Capture)
-> are consolidated in [`plans/ai-agent-powerhouse.md`](ai-agent-powerhouse.md).
+> are consolidated in [`plans/ai-agent-roadmap.md`](ai-agent-roadmap.md).
 > This plan focuses exclusively on Core Emacs Architecture, Completion, Build Tooling,
 > Git Conflict Ergonomics, and Org-roam PKM Reading Experience.
 

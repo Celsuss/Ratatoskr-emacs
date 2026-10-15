@@ -139,6 +139,7 @@ normally for a full backtrace.  Otherwise, catch and log them to
 (rata-load-module 'init-snippets)
 (rata-load-module 'init-llm)
 (rata-load-module 'init-claude-loop)
+(rata-load-module 'init-claude-loop-acp)
 (rata-load-module 'init-khoj)
 (rata-load-module 'init-irc)
 (rata-load-module 'init-elfeed)
@@ -147,10 +148,12 @@ normally for a full backtrace.  Otherwise, catch and log them to
 (rata-load-module 'init-jira)
 ;; (rata-load-module 'init-mcp)      ; experimental — uncomment when stable
 (rata-load-module 'init-persp)
+(rata-load-module 'init-agent-permissions) ; agent-shell permission whitelist/blacklist policies
 (rata-load-module 'init-agent-center) ; agent-shell overview across layouts
 (rata-load-module 'init-agent-worktree) ; one git worktree + layout per agent task
 (rata-load-module 'init-agent-prompts) ; prompt library inserted into agent shells
 (rata-load-module 'init-agent-review)  ; interactive diff & review hub for agent worktrees
+(rata-load-module 'init-agent-artifacts) ; Antigravity artifact opening and plan approval
 (rata-load-module 'init-org)
 (rata-load-module 'init-blog)      ; org-roam -> hugo blog export
 (rata-load-module 'init-dialogic)  ; dialogic formatting for blog posts

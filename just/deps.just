@@ -84,7 +84,7 @@ _deps-acp:
         installer=(npm install -g)
     else
         echo "SKIP: neither bun nor npm on PATH, so these are not installed: ${wanted[*]}"
-        echo "      They are what 'SPC a i c c' and 'SPC a i c p' launch. Install bun or node, then:"
+        echo "      They are what 'SPC a i s c' and 'SPC a i s p' launch. Install bun or node, then:"
         echo "        bun install -g ${wanted[*]}"
         exit 0
     fi
@@ -146,8 +146,8 @@ check-deps:
         "dvisvgm|org LaTeX math preview (SVG backend)"
         "cmake|vterm and jinx native modules"
         "claude|init-claude-loop.el"
-        "claude-agent-acp|agent-shell, SPC a i c c"
-        "pi-acp|agent-shell, SPC a i c p"
+        "claude-agent-acp|agent-shell, SPC a i s c"
+        "pi-acp|agent-shell, SPC a i s p"
         "mu|init-mail.el (mu4e indexer; the mu4e elisp ships beside it)"
         "mbsync|init-mail.el fetch (isync >= 1.5)"
         "clangd|init-cpp.el C++ LSP (code intelligence)"
