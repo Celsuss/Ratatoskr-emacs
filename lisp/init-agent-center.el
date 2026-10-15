@@ -25,6 +25,7 @@
 (declare-function agent-shell-unsubscribe "agent-shell")
 (declare-function agent-shell-interrupt "agent-shell")
 (declare-function agent-shell-new-shell "agent-shell")
+(declare-function agent-shell--send-permission-response "agent-shell")
 (declare-function get-current-persp "persp-mode")
 (declare-function safe-persp-name "persp-mode")
 (declare-function persp--buffer-in-persps "persp-mode")
@@ -217,6 +218,31 @@ A failing function is skipped: a label is not worth losing the row."
        (rata-agent-center--shell-p buffer)
        (ignore-errors (agent-shell-status :shell-buffer buffer))))
 
+(defun rata-agent-center--pending-permission (shell)
+  "Return pending permission alist for SHELL, or nil.
+Returns an alist with keys:
+  :tool-call-id  - String ID of the tool call
+  :request-id    - Request ID from the ACP client
+  :tool-call     - The tool call alist
+  :actions       - List of action alists
+  :client        - ACP client instance
+  :state         - The shell's buffer-local `agent-shell--state'"
+  (when (and (buffer-live-p shell)
+             (boundp 'agent-shell--state))
+    (when-let* ((state (buffer-local-value 'agent-shell--state shell))
+                (tool-calls (map-elt state :tool-calls))
+                (pending-pair (seq-find (lambda (pair)
+                                          (map-elt (cdr pair) :permission-request-id))
+                                        tool-calls)))
+      (let* ((tool-call-id (car pending-pair))
+             (tool-call (cdr pending-pair)))
+        (list (cons :tool-call-id tool-call-id)
+              (cons :request-id (map-elt tool-call :permission-request-id))
+              (cons :tool-call tool-call)
+              (cons :actions (map-elt tool-call :permission-actions))
+              (cons :client (map-elt state :client))
+              (cons :state state))))))
+
 ;;; ------------------------------------------------------------
 ;;; Activity: what a shell is doing right now (pure)
 ;;; ------------------------------------------------------------
@@ -262,7 +288,7 @@ A new prompt clears it.  Every other event leaves it alone."
   (let ((data (map-elt event :data)))
     (pcase (map-elt event :event)
       ('input-submitted '(:activity nil :activity-source nil :activity-tool nil))
-      ('tool-call-update
+      ((or 'tool-call-update 'permission-request)
        (let* ((call (map-elt data :tool-call))
               (id (map-elt data :tool-call-id))
               (finished (member (map-elt call :status) '("completed" "failed")))
@@ -387,6 +413,10 @@ mode hook after an adoption, cannot subscribe twice."
        :state (if (eq how 'current)
                   'starting
                 (rata-agent-center--reconcile 'ready status nil)))
+      (when-let* ((pending (rata-agent-center--pending-permission buffer))
+                  (text (rata-agent-center--tool-activity (map-elt pending :tool-call))))
+        (rata-agent-center--put buffer :activity text :activity-source 'tool
+                                :activity-tool (map-elt pending :tool-call-id)))
       (rata-agent-center--put buffer :token (rata-agent-center--subscribe buffer))
       (rata-agent-center--schedule-render))))
 
@@ -954,6 +984,81 @@ shell's window and showing the shell in the window you are in."
                                default-directory)))
       (call-interactively #'agent-shell-new-shell))))
 
+(defun rata-agent-center--resolve-permission-action (actions choice)
+  "Find the action in ACTIONS matching CHOICE (`allow', `always', or `deny')."
+  (pcase choice
+    ('allow
+     (or (seq-find (lambda (a) (equal (map-elt a :kind) "allow_once")) actions)
+         (seq-find (lambda (a) (member (map-elt a :char) '("y" ?y))) actions)))
+    ('always
+     (or (seq-find (lambda (a) (equal (map-elt a :kind) "allow_always")) actions)
+         (seq-find (lambda (a) (member (map-elt a :char) '("!" ?!))) actions)))
+    ('deny
+     (or (seq-find (lambda (a) (equal (map-elt a :kind) "reject_once")) actions)
+         (seq-find (lambda (a) (member (map-elt a :char) '("n" ?n))) actions)))))
+
+(defun rata-agent-center--respond-permission (shell choice)
+  "Respond to the pending permission in SHELL with CHOICE.
+CHOICE is `allow', `always', or `deny'."
+  (unless (buffer-live-p shell)
+    (user-error "No live agent shell"))
+  (let* ((pending (or (rata-agent-center--pending-permission shell)
+                      (user-error "Agent '%s' has no pending permission request"
+                                  (or (plist-get (rata-agent-center--entry shell) :title)
+                                      (buffer-name shell)))))
+         (actions (map-elt pending :actions))
+         (tool-call-id (map-elt pending :tool-call-id))
+         (tool-call (map-elt pending :tool-call))
+         (request-id (map-elt pending :request-id))
+         (client (map-elt pending :client))
+         (state (map-elt pending :state))
+         (action (rata-agent-center--resolve-permission-action actions choice))
+         (tool-desc (or (rata-agent-center--tool-activity tool-call)
+                        (map-elt tool-call :title)
+                        tool-call-id))
+         (shell-name (or (plist-get (rata-agent-center--entry shell) :title)
+                         (buffer-name shell))))
+    (when (and (eq choice 'always) (not action))
+      (user-error "Agent '%s' does not offer 'Always Allow' for %s" shell-name tool-desc))
+    (unless (or action (eq choice 'deny))
+      (user-error "Cannot resolve '%s' option for %s" choice tool-desc))
+    (let ((option-id (and action (map-elt action :option-id)))
+          (cancelled (and (eq choice 'deny) (not action)))
+          (msg (pcase choice
+                 ('allow (format "Allowed: %s" tool-desc))
+                 ('always (format "Always allowed: %s" tool-desc))
+                 ('deny (format "Denied: %s" tool-desc)))))
+      (with-current-buffer shell
+        (if (fboundp 'agent-shell--send-permission-response)
+            (agent-shell--send-permission-response
+             :client client
+             :request-id request-id
+             :option-id option-id
+             :cancelled cancelled
+             :state state
+             :tool-call-id tool-call-id
+             :message-text msg)
+          (error "agent-shell--send-permission-response is not available"))
+        (when (eq choice 'deny)
+          (when (fboundp 'agent-shell-interrupt)
+            (agent-shell-interrupt t))))
+      (message "%s in %s" msg shell-name))))
+
+(defun rata-agent-center-allow ()
+  "Allow the pending permission request for this line's agent."
+  (interactive)
+  (rata-agent-center--respond-permission (rata-agent-center--row-shell) 'allow))
+
+(defun rata-agent-center-allow-always ()
+  "Always allow the pending permission request for this line's agent."
+  (interactive)
+  (rata-agent-center--respond-permission (rata-agent-center--row-shell) 'always))
+
+(defun rata-agent-center-deny ()
+  "Deny the pending permission request for this line's agent and interrupt it."
+  (interactive)
+  (rata-agent-center--respond-permission (rata-agent-center--row-shell) 'deny))
+
 ;; `rata-agent-center-mode' derives from `tabulated-list-mode', whose keys evil's
 ;; normal state shadows, so they go through `evil-define-key*' -- the function;
 ;; the `evil-define-key' macro would compile to a broken call here.
@@ -968,7 +1073,10 @@ shell's window and showing the shell in the window you are in."
     (kbd "TAB") #'rata-agent-center-toggle-group
     (kbd "za")  #'rata-agent-center-toggle-group
     (kbd "c")   #'rata-agent-center-new-shell
-    (kbd "K")   #'rata-agent-center-interrupt))
+    (kbd "K")   #'rata-agent-center-interrupt
+    (kbd "a")   #'rata-agent-center-allow
+    (kbd "A")   #'rata-agent-center-allow-always
+    (kbd "d")   #'rata-agent-center-deny))
 
 (with-eval-after-load 'general
   (rata-leader

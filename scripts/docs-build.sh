@@ -30,7 +30,6 @@ Features	features
 Dependencies	dependencies
 Getting Started	getting-started
 Commands	commands
-Reliability (ARE)	are
 Architecture	architecture
 Keybindings	keybindings
 Agents panel	agents

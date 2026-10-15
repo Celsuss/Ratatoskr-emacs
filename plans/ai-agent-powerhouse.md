@@ -248,20 +248,20 @@ package choice as a decision (D-0xx).
 
 ## C11 — Bind the unused context senders
 
-**Goal.** Put agent-shell's existing but unbound commands under `SPC a i c`.
+**Goal.** Put agent-shell's existing but unbound commands under `SPC a i s`.
 
 | Command | Proposed key | Note |
 |---|---|---|
-| `agent-shell-send-screenshot` | `SPC a i c S` | saves to `.agent-shell/screenshots/` — gitignore check |
-| `agent-shell-send-clipboard-image` | `SPC a i c i` | |
-| flycheck error at point | `SPC a i c e` | `agent-shell-context-sources` already includes `error`; check whether `send-dwim` covers it before writing a wrapper |
-| `agent-shell-prompt-compose` | ~~`SPC a i c p`~~ taken by pi; pick another | compose buffer for long prompts |
-| `agent-shell-set-session-model` | `SPC a i c m` | |
-| `agent-shell-set-session-mode` | `SPC a i c M` | |
-| `agent-shell-fork` | `SPC a i c k` | fork the conversation into a new shell |
+| `agent-shell-send-screenshot` | `SPC a i s S` | saves to `.agent-shell/screenshots/` — gitignore check |
+| `agent-shell-send-clipboard-image` | `SPC a i s i` | |
+| flycheck error at point | `SPC a i s e` | `agent-shell-context-sources` already includes `error`; check whether `send-dwim` covers it before writing a wrapper |
+| `agent-shell-prompt-compose` | ~~`SPC a i s p`~~ taken by pi; pick another | compose buffer for long prompts |
+| `agent-shell-set-session-model` | `SPC a i s m` | |
+| `agent-shell-set-session-mode` | `SPC a i s M` | |
+| `agent-shell-fork` | `SPC a i s k` | fork the conversation into a new shell |
 | `agent-shell-resume-session` | (B9 covers it) | |
 
-Keys are suggestions; check `SPC a i c` for collisions first. Every command goes into
+Keys are suggestions; check `SPC a i s` for collisions first. Every command goes into
 `:commands` in `use-package agent-shell` (none are autoloaded upstream), and a curated
 few go into `rata-test-keybindings-live-after-init`.
 

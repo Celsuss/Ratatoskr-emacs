@@ -224,35 +224,9 @@ target is still =just <name>= with no module prefix.
 | =just install-deps=     | Install system dependencies (detects the OS) |
 | =just check-deps=       | Report which dependency binaries are present |
 | =just install-hooks=    | Install git pre-commit hook (one-time)       |
-| =just are=              | Show the ARE entry point and commands        |
 | =just docs-build=       | Build the documentation site (mdBook + pandoc) |
 | =just docs-serve=       | Build and serve the site on localhost:3000   |
 | =just docs-clean=       | Delete the generated site                    |
-| =just are-context=      | Generate task context from git + the ARE map |
-| =just are-verify LEVEL= | Risk-based verification: fast/relevant/full  |
-| =just are-audit=        | Repo-wide reliability audit                  |
-
-** Reliability (ARE)
-
-This config carries an [[file:.are/INDEX.md][Autonomous Reliability Engineering]] layer: a small knowledge base,
-a failure log, risk rules, and three bash scripts that compose the =just= targets above
-into risk-based verification levels. It adds no dependency and duplicates nothing —
-=AGENTS.md= still owns conventions, the =justfile= still owns commands, and =tests/=
-still owns the truth.
-
-Start at =.are/INDEX.md=. Before changing a module, run =just are-context "what you are
-doing"=; it prints the risk tier and the exact knowledge worth reading. Verification
-levels, and what each one does *not* prove, are in =.are/knowledge/TESTING_STRATEGY.md=.
-
-#+begin_src sh
-  just are-verify fast       # ~4s   — lint + claude-loop e2e + audit, no packages needed
-  just are-verify relevant   # ~2min — adds byte-compile + the ERT suite
-  just are-verify full       # ~3min — adds batch startup; what the pre-commit hook runs
-#+end_src
-
-Note: the pre-commit hook is not active until you run =just install-hooks=. GitHub Actions
-also runs the verification levels on pull requests and pushes to =master=
-(=.github/workflows/ci.yml=). See =.are/memory/FAILURE_INDEX.md=.
 
 ** Architecture
 
@@ -359,13 +333,13 @@ click it to open the panel.
 
 *** One worktree per task
 
-=SPC a i c w= (=C= in the panel) asks for a task, turns it into a branch
+=SPC a i s w= (=C= in the panel) asks for a task, turns it into a branch
 (=agent/<slug>=, editable), and creates a git worktree for it at
 =<repo>/.agent-shell/worktrees/<slug>=, branched from the branch you are on. The
 agent starts there in a new layout named after the branch, so parallel agents never
 share a checkout. The panel shows such a group as =repo ⎇ agent/<slug>=.
 
-=SPC a i c W= (=X= in the panel) finishes one: it refuses while the worktree has
+=SPC a i s W= (=X= in the panel) finishes one: it refuses while the worktree has
 uncommitted or untracked files, an unsaved buffer, or a branch not yet merged into
 the branch it came from. Otherwise it asks once, kills the worktree's shells and
 buffers, closes its layout, copies agent-shell's transcripts into the main
@@ -374,12 +348,12 @@ the branch is a second question (=git branch -d=).
 
 | Key           | Action                                   |
 |---------------+------------------------------------------|
-| =SPC a i c w= | New agent in its own worktree and layout |
-| =SPC a i c W= | Finish an agent worktree                 |
+| =SPC a i s w= | New agent in its own worktree and layout |
+| =SPC a i s W= | Finish an agent worktree                 |
 
 *** Prompt library
 
-=SPC a i c P= picks a saved prompt (=prompts/*.md= in this repository, plus
+=SPC a i s P= picks a saved prompt (=prompts/*.md= in this repository, plus
 =rata-agent-prompt-extra-directory= per machine, which wins on a name clash),
 fills its placeholders from the buffer you are in, and *inserts* it into the
 project's agent shell without sending it, so you can edit it first. =C-u= picks
@@ -400,7 +374,7 @@ rata-agent-prompt-new= and =rata-agent-prompt-edit= create and open them.
 
 | Key            | Action                                   |
 |----------------+------------------------------------------|
-| =SPC a i c P=  | Insert a library prompt into the shell   |
+| =SPC a i s P=  | Insert a library prompt into the shell   |
 
 ** Claude Code Task Loop
 
@@ -414,7 +388,7 @@ Write the tasks in any =.md= or =.org= file:
 - [ ] Update the API documentation
 #+end_src
 
-Open that file and hit =SPC a i c l l=. Each task is handed to its own
+Open that file and hit =SPC a i s l l=. Each task is handed to its own
 =claude -p= process, so every task starts from a *clean context* — no
 =/clear= needed, and nothing leaks between tasks. Org =TODO= headings work
 too and are moved to =DONE=.
@@ -424,7 +398,7 @@ directory above it holding a =.git= (or another marker in
 =rata-claude-loop-root-markers=). If there is no repository, it runs in the
 task file's own directory. A marker sitting in =$HOME= is deliberately
 ignored, so a dotfiles repo or a stray =~/package.json= cannot turn your
-entire home directory into the working directory. =C-u C-u SPC a i c l l=
+entire home directory into the working directory. =C-u C-u SPC a i s l l=
 prompts for the directory if you need to override it.
 
 Progress is rendered into =*claude-loop*=; the child runs with
@@ -469,7 +443,7 @@ knows what it did and what broke, rather than starting from a clean context.
 timeout and a self-reported =blocked= are excluded on purpose: the first
 leaves unknown partial state, the second is a considered judgement.
 
-If the retry does not help, =SPC a i c l o= opens a vterm running =claude
+If the retry does not help, =SPC a i s l o= opens a vterm running =claude
 --resume= on that same session, so you can take over by hand from exactly
 where it got stuck.
 
@@ -477,17 +451,17 @@ where it got stuck.
 
 | Key           | Action                     |
 |---------------+----------------------------|
-| =SPC a i c l l= | Start the loop             |
-| =C-u SPC a i c l l= | Start, prompting for the task file |
-| =C-u C-u SPC a i c l l= | ...and for the working directory |
-| =SPC a i c l r= | Run only the task at point |
-| =SPC a i c l s= | Stop (SIGINT, then SIGKILL after a grace period) |
-| =SPC a i c l n= | Skip current task (=[-]=)    |
-| =SPC a i c l c= | Resume after a halt        |
-| =SPC a i c l t= | Retry the current task by resuming its session |
-| =SPC a i c l o= | Take over the session in a vterm |
-| =SPC a i c l b= | Show the output buffer     |
-| =SPC a i c l ?= | Status                     |
+| =SPC a i s l l= | Start the loop             |
+| =C-u SPC a i s l l= | Start, prompting for the task file |
+| =C-u C-u SPC a i s l l= | ...and for the working directory |
+| =SPC a i s l r= | Run only the task at point |
+| =SPC a i s l s= | Stop (SIGINT, then SIGKILL after a grace period) |
+| =SPC a i s l n= | Skip current task (=[-]=)    |
+| =SPC a i s l c= | Resume after a halt        |
+| =SPC a i s l t= | Retry the current task by resuming its session |
+| =SPC a i s l o= | Take over the session in a vterm |
+| =SPC a i s l b= | Show the output buffer     |
+| =SPC a i s l ?= | Status                     |
 
 In the =*claude-loop*= buffer itself: =q= quits, =gr= reports status, =gt=
 retries, =go= takes over, =C-c C-k= stops.

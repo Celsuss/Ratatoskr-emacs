@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: signal
+# key: sig
+# --
+signal ${1:signal_name}(${2:args})

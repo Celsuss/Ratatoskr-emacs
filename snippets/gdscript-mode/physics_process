@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: _physics_process
+# key: physics
+# --
+func _physics_process(delta: float) -> void:
+    $0

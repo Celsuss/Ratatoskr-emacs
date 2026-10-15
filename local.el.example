@@ -12,8 +12,7 @@
 ;; THIS FILE IS THE CHECKLIST.  It is committed precisely so that a new machine
 ;; does not have to remember what to recreate.  When you add a value that must
 ;; stay off the public remote, add a commented line for it here in the same
-;; commit — `just are-audit' fails if a variable named below still carries a real
-;; value in the tracked sources, and if a name below does not exist at all.
+;; commit so that templates and source definitions stay in sync.
 ;;
 ;; What belongs here: instance hostnames, corporate identity, anything specific
 ;; to one machine.  What does NOT: passwords and tokens (those live in
@@ -105,3 +104,14 @@
 ;; `rata-' variable, not `khoj-server-url' itself: the module hands that one to
 ;; use-package :custom, which overwrites a plain setq when khoj loads (L-051).
 ;; (setq rata-khoj-server-url "http://khoj.homelab.local")
+
+;; --- Game Development / Godot 4 (lisp/init-gamedev.el) ---
+;; Path to the Godot binary.  Unset, it automatically discovers Godot on PATH,
+;; standard Steam installation directories, or Flatpak.  Set this if you use a
+;; custom Godot binary or source build:
+;; (setq rata-godot-executable "/path/to/godot")
+;;
+;; Optional custom build command for C++ GDExtension.  Unset, it detects
+;; SConstruct (scons platform=linux compiledb=yes), CMakeLists.txt, or justfile:
+;; (setq rata-godot-build-command "scons platform=linux dev_build=yes compiledb=yes -j8")
+

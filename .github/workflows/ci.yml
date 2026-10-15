@@ -37,5 +37,3 @@ jobs:
         run: just compile
       - name: claude-loop e2e (CRITICAL module, stub CLI)
         run: just test-claude-loop
-      - name: ARE audit (repo-wide invariants)
-        run: just are-audit

@@ -3,8 +3,8 @@
 
 ;; Several agents on one repository at once, each in its own git worktree and
 ;; its own persp layout, so they cannot overwrite each other's work (B6 in
-;; plans/ai-agent-powerhouse.md).  `SPC a i c w' / `C' in *Agents* starts one;
-;; `SPC a i c W' / `X' finishes it.
+;; plans/ai-agent-powerhouse.md).  `SPC a i s w' / `C' in *Agents* starts one;
+;; `SPC a i s W' / `X' finishes it.
 ;;
 ;; Upstream has `agent-shell-new-worktree-shell', but it takes no arguments:
 ;; a random name, a `read-directory-name' prompt, and a branch named after the
@@ -324,8 +324,8 @@ On `rata-agent-center-project-label-functions'."
 (with-eval-after-load 'general
   (rata-leader
     :states '(normal visual)
-    "aicw" '(rata-agent-worktree-new :which-key "agent in new worktree")
-    "aicW" '(rata-agent-worktree-finish :which-key "finish agent worktree")))
+    "aisw" '(rata-agent-worktree-new :which-key "agent in new worktree")
+    "aisW" '(rata-agent-worktree-finish :which-key "finish agent worktree")))
 
 (provide 'init-agent-worktree)
 ;;; init-agent-worktree.el ends here
