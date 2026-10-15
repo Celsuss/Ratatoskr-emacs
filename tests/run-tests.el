@@ -5268,19 +5268,23 @@ are kept in the main checkout; the branch goes only on a second yes."
       (should-not questions))))
 
 (ert-deftest rata-test-agent-worktree-panel-label ()
-  "A shell in an agent worktree is labelled `repo ⎇ branch' in the panel."
+  "A shell in any git checkout or worktree is labelled `repo ⎇ branch' in the panel."
   (rata-test-agent-worktree--with-repo
     (rata-test-agent-worktree--answering nil
-      (let ((wt (rata-agent-worktree-create repo "agent/fix-x")))
+      (let ((wt (rata-agent-worktree-create repo "agent/fix-x"))
+            (repo-name (file-name-nondirectory (directory-file-name repo))))
         (should (equal (rata-agent-worktree-project-label wt)
-                       (format "%s ⎇ agent/fix-x"
-                               (abbreviate-file-name (directory-file-name repo)))))
-        (should-not (rata-agent-worktree-project-label repo))
+                       (format "%s ⎇ agent/fix-x" repo-name)))
+        ;; Main checkout is now labelled with repo name and branch name too.
+        (should (equal (rata-agent-worktree-project-label repo)
+                       (format "%s ⎇ main" repo-name)))
+        ;; Non-git directory returns nil so heading falls back to project path.
+        (should-not (rata-agent-worktree-project-label temporary-file-directory))
         (should (memq #'rata-agent-worktree-project-label
                       rata-agent-center-project-label-functions))
         ;; The heading uses the label rather than the long worktree path.
         (should (string-match-p
-                 "agent/fix-x — .* ⎇ agent/fix-x"
+                 (format "agent/fix-x — %s ⎇ agent/fix-x" (regexp-quote repo-name))
                  (rata-agent-center--group-heading
                   "agent/fix-x"
                   (list (list :project (abbreviate-file-name (file-name-as-directory wt))

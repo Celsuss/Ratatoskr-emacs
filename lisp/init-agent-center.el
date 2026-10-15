@@ -190,8 +190,9 @@ holds it, else the current one."
   "Functions of a directory that may name its project for the panel.
 The first non-nil string is the shell's :project-label, shown in its
 group heading in place of the project root.  init-agent-worktree.el
-adds one, so a worktree reads `repo ⎇ branch' rather than a long path.
-Called once, when the shell is registered, never per render.")
+adds one, so any git checkout or worktree reads `repo ⎇ branch' rather
+than a long path.  Called once, when the shell is registered, never per
+render.")
 
 (defun rata-agent-center--project-label (dir)
   "DIR's label from `rata-agent-center-project-label-functions', or nil.

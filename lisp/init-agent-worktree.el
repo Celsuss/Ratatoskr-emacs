@@ -303,16 +303,16 @@ before deleting the branch."
 ;;; ------------------------------------------------------------
 
 (defun rata-agent-worktree-project-label (dir)
-  "`repo ⎇ branch' when DIR is in an agent worktree, else nil.
+  "`repo ⎇ branch' when DIR is in a git repository or worktree, else nil.
 On `rata-agent-center-project-label-functions'."
   (unless (file-remote-p dir)
     (when-let* ((list (rata-agent-worktree--list dir))
                 (main-root (car (car list)))
+                (name (file-name-nondirectory (directory-file-name main-root)))
+                (repo (if (string-empty-p name) main-root name))
                 (wt (rata-agent-worktree--at dir))
-                ((not (file-equal-p (car wt) main-root)))
-                (branch (cdr wt))
-                ((rata-agent-worktree--base main-root branch)))
-      (format "%s ⎇ %s" (abbreviate-file-name (directory-file-name main-root)) branch))))
+                (branch (or (cdr wt) "(detached)")))
+      (format "%s ⎇ %s" repo branch))))
 
 (add-hook 'rata-agent-center-project-label-functions #'rata-agent-worktree-project-label)
 
