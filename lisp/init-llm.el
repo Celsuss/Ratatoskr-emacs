@@ -389,6 +389,7 @@ With prefix PROMPT-FOR-FILE, pick a project file instead of this one."
 
 (declare-function rata-vterm-run "init-dev" (program &optional name args new-session))
 (declare-function rata-vterm-open "init-dev" (&optional name))
+(declare-function rata-agent-center-register-vterm "init-agent-center" (buffer agent &optional title))
 
 (defcustom rata-vterm-claude-program "claude"
   "Program to launch Claude Code in vterm."
@@ -405,13 +406,19 @@ With prefix PROMPT-FOR-FILE, pick a project file instead of this one."
   "Start or switch to a Claude Code vterm session in the current window.
 With prefix arg NEW-SESSION, always create a fresh vterm session."
   (interactive "P")
-  (rata-vterm-run rata-vterm-claude-program "*terminal: claude*" nil new-session))
+  (let ((buf (rata-vterm-run rata-vterm-claude-program "*terminal: claude*" nil new-session)))
+    (when (fboundp 'rata-agent-center-register-vterm)
+      (rata-agent-center-register-vterm buf "Claude" (buffer-name buf)))
+    buf))
 
 (defun rata-vterm-antigravity (&optional new-session)
   "Start or switch to an Antigravity vterm session in the current window.
 With prefix arg NEW-SESSION, always create a fresh vterm session."
   (interactive "P")
-  (rata-vterm-run rata-vterm-antigravity-program "*terminal: antigravity*" nil new-session))
+  (let ((buf (rata-vterm-run rata-vterm-antigravity-program "*terminal: antigravity*" nil new-session)))
+    (when (fboundp 'rata-agent-center-register-vterm)
+      (rata-agent-center-register-vterm buf "Antigravity" (buffer-name buf)))
+    buf))
 
 ;; All AI leader keys at top level so they are live from startup (FAIL-0009);
 ;; commands autoload from their packages via each :commands list.

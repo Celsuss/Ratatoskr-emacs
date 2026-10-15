@@ -6341,6 +6341,81 @@ is nil, and the diff silently widens to the project) fails here."
   (should-error (rata-vterm-run "non-existent-executable-12345")
                 :type 'user-error))
 
+(ert-deftest rata-test-agent-center-register-vterm ()
+  "Ensure vterm buffers can be registered in agent-center registry."
+  (rata-test-agent-center--with-registry
+    (let ((buf (generate-new-buffer "*terminal: claude*")))
+      (unwind-protect
+          (let ((entry (rata-agent-center-register-vterm buf "Claude" "*terminal: claude*")))
+            (should entry)
+            (should (eq (plist-get entry :backend) 'vterm))
+            (should (equal (plist-get entry :agent) "Claude"))
+            (should (equal (plist-get entry :title) "*terminal: claude*"))
+            (should (eq (plist-get entry :state) 'working))
+            (should (equal (buffer-local-value 'rata-agent-center-vterm-agent buf) "Claude"))
+            (should (eq (rata-agent-center--entry buf) entry)))
+        (kill-buffer buf)))))
+
+(ert-deftest rata-test-agent-center-reconcile-vterm ()
+  "Ensure vterm buffer tail scraping correctly updates state and activity."
+  (rata-test-agent-center--with-registry
+    (let ((buf (generate-new-buffer "*terminal: claude*")))
+      (unwind-protect
+          (progn
+            (rata-agent-center-register-vterm buf "Claude")
+            (let ((entry (rata-agent-center--entry buf)))
+              ;; 1. Permission prompt -> needs-input
+              (with-current-buffer buf
+                (erase-buffer)
+                (insert "Running command...\nAllow Bash(just test)? [y/N] "))
+              (cl-letf (((symbol-function 'get-buffer-process)
+                         (lambda (_) 'fake-proc))
+                        ((symbol-function 'process-live-p) (lambda (_) t))
+                        ((symbol-function 'rata-agent-center--visible-p) (lambda (_) nil)))
+                (should (eq (rata-agent-center--reconcile-vterm buf entry) 'needs-input))
+                (should (eq (plist-get (rata-agent-center--entry buf) :state) 'needs-input))
+                (should (string-match-p "Allow" (plist-get (rata-agent-center--entry buf) :activity)))
+
+                ;; 2. Turn completed (idle prompt ❯) -> done
+                (with-current-buffer buf
+                  (erase-buffer)
+                  (insert "Task complete!\n❯ "))
+                (rata-agent-center--put buf :state 'working)
+                (should (eq (rata-agent-center--reconcile-vterm buf (rata-agent-center--entry buf)) 'done))
+                (should (eq (plist-get (rata-agent-center--entry buf) :state) 'done))
+
+                ;; 3. Visible -> ready
+                (cl-letf (((symbol-function 'rata-agent-center--visible-p) (lambda (_) t)))
+                  (should (eq (rata-agent-center--reconcile-vterm buf (rata-agent-center--entry buf)) 'ready))
+                  (should (eq (plist-get (rata-agent-center--entry buf) :state) 'ready))))))
+        (kill-buffer buf)))))
+
+(ert-deftest rata-test-agent-center-vterm-respond-permission-error ()
+  "Ensure responding to permissions on a vterm row directs user to the terminal."
+  (rata-test-agent-center--with-registry
+    (let ((buf (generate-new-buffer "*terminal: claude*")))
+      (unwind-protect
+          (progn
+            (rata-agent-center-register-vterm buf "Claude")
+            (should-error (rata-agent-center--respond-permission buf 'allow)
+                          :type 'user-error))
+        (kill-buffer buf)))))
+
+(ert-deftest rata-test-agent-center-vterm-adopt ()
+  "Ensure rata-agent-center--adopt discovers open vterm agent buffers."
+  (rata-test-agent-center--with-registry
+    (let ((buf (generate-new-buffer "*terminal: claude*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (setq-local rata-agent-center-vterm-agent "Claude"))
+            (rata-agent-center--adopt)
+            (let ((entry (rata-agent-center--entry buf)))
+              (should entry)
+              (should (eq (plist-get entry :backend) 'vterm))
+              (should (equal (plist-get entry :agent) "Claude"))))
+        (kill-buffer buf)))))
+
 ;;; ============================================================
 ;;; Run all tests
 ;;; ============================================================

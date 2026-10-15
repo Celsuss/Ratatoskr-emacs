@@ -35,12 +35,14 @@
 (declare-function evil-define-key* "evil-core")
 (declare-function rata-leader "init-evil")
 (declare-function project-root "project")
+(declare-function vterm-send-C-c "vterm" ())
 (eval-when-compile
   (defvar persp-before-deactivate-functions)
   (defvar persp-activated-functions)
   (defvar persp-filter-save-buffers-functions)
   (defvar agent-shell--state)
-  (defvar agent-shell-mode-hook))
+  (defvar agent-shell-mode-hook)
+  (defvar vterm-exit-functions))
 
 (defgroup rata-agent-center nil
   "Overview of live agent-shell sessions across persp layouts."
@@ -133,15 +135,42 @@ does not."
     (puthash buffer entry rata-agent-center--registry)))
 
 (cl-defun rata-agent-center--add-entry
-    (buffer &key layout project project-label agent title (state 'starting) token)
+    (buffer &key layout project project-label agent title (state 'starting) token backend)
   "Create BUFFER's registry entry and return it.  Nothing is subscribed."
   (puthash buffer
            (list :buffer buffer :layout layout :project project
                  :project-label project-label :agent agent
                  :title title :state state :since (float-time)
                  :last-stop-reason nil :cost nil :error nil :token token
-                 :activity nil :activity-source nil :activity-tool nil)
+                 :activity nil :activity-source nil :activity-tool nil
+                 :backend (or backend 'agent-shell))
            rata-agent-center--registry))
+
+(defvar-local rata-agent-center-vterm-agent nil
+  "When non-nil, string naming the agent running in this vterm buffer.")
+
+(defun rata-agent-center-register-vterm (buffer agent &optional title)
+  "Register the vterm BUFFER running AGENT (e.g. \"Claude\", \"Antigravity\").
+TITLE is the session title, defaulting to BUFFER's name.
+Returns the newly created or existing entry plist."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq-local rata-agent-center-vterm-agent agent))
+    (or (rata-agent-center--entry buffer)
+        (let ((entry
+               (rata-agent-center--add-entry
+                buffer
+                :layout (rata-agent-center--layout-for buffer 'current)
+                :project (rata-agent-center--project
+                          (buffer-local-value 'default-directory buffer))
+                :project-label (rata-agent-center--project-label
+                                (buffer-local-value 'default-directory buffer))
+                :agent agent
+                :title (or title (buffer-name buffer))
+                :state 'working
+                :backend 'vterm)))
+          (rata-agent-center--schedule-render)
+          entry))))
 
 (defun rata-agent-center--sweep ()
   "Drop entries whose buffer is dead.
@@ -435,11 +464,23 @@ tests can stub it -- Emacs 31's `featurep' ignores a `let' of `features'."
   (featurep 'agent-shell))
 
 (defun rata-agent-center--adopt ()
-  "Register every shell that is already open."
+  "Register every shell and agent terminal that is already open."
   (when (and (rata-agent-center--agent-shell-loaded-p)
              (fboundp 'agent-shell-buffers))
     (dolist (buf (agent-shell-buffers))
-      (rata-agent-center--register buf 'adopted))))
+      (rata-agent-center--register buf 'adopted)))
+  (dolist (buf (buffer-list))
+    (when (buffer-live-p buf)
+      (let ((vagent (buffer-local-value 'rata-agent-center-vterm-agent buf))
+            (bname (buffer-name buf)))
+        (cond
+         (vagent
+          (unless (rata-agent-center--entry buf)
+            (rata-agent-center-register-vterm buf vagent)))
+         ((string-match-p "\\`\\*terminal: \\(claude\\|antigravity\\)" bname)
+          (let ((agent-label (if (string-match-p "claude" bname) "Claude" "Antigravity")))
+            (unless (rata-agent-center--entry buf)
+              (rata-agent-center-register-vterm buf agent-label)))))))))
 
 ;;; ============================================================
 ;;; The *Agents* buffer
@@ -585,14 +626,72 @@ heading only."
                         (mapcar (lambda (e) (rata-agent-center--row e now)) (cdr g))))))
             groups)))
 
+(defconst rata-agent-center--vterm-input-regexp
+  "\\(\\[[yY]/[nN]\\]\\|([yY]/[nN])\\|\\b[Aa]llow\\b\\|\\b[Aa]pprove\\b\\|\\b[Pp]roceed\\?\\|\\? +[Ss]elect\\)"
+  "Regexp matching terminal prompts that require user decision.")
+
+(defconst rata-agent-center--vterm-prompt-regexp
+  "\\`\\s-*\\(❯\\|>\\|\\?\\)\\s-*\\'"
+  "Regexp matching idle terminal prompt lines.")
+
+(defun rata-agent-center--reconcile-vterm (buf entry)
+  "Update ENTRY for vterm BUF by inspecting process and buffer tail."
+  (when (buffer-live-p buf)
+    (let* ((proc (get-buffer-process buf))
+           (proc-live (and proc (process-live-p proc)))
+           (visible-p (rata-agent-center--visible-p buf))
+           (cur-state (plist-get entry :state)))
+      (if (not proc-live)
+          ;; Process exited
+          (let* ((status (and proc (process-status proc)))
+                 (exit-code (and proc (process-exit-status proc)))
+                 (ok-p (and (eq status 'exit) (eq exit-code 0))))
+            (if ok-p
+                (progn
+                  (rata-agent-center--put buf :state (if visible-p 'ready 'done)
+                                          :last-stop-reason "finished")
+                  (if visible-p 'ready 'done))
+              (let ((err-msg (format "exited %s" (or exit-code status "unknown"))))
+                (rata-agent-center--put buf :state 'error :error err-msg)
+                'error)))
+        ;; Process is live
+        (let* ((text (with-current-buffer buf
+                       (let ((max-p (point-max)))
+                         (buffer-substring-no-properties (max (point-min) (- max-p 1500)) max-p))))
+               (lines (split-string (replace-regexp-in-string "\r" "" text) "\n" t "[ \t]+"))
+               (last-line (or (car (last lines)) ""))
+               (new-state cur-state))
+          (cond
+           ;; 1. Asking for permission / confirmation
+           ((string-match-p rata-agent-center--vterm-input-regexp last-line)
+            (setq new-state 'needs-input))
+           ;; 2. Currently visible
+           (visible-p
+            (setq new-state 'ready))
+           ;; 3. Idle prompt while in background (turn finished)
+           ((string-match-p rata-agent-center--vterm-prompt-regexp last-line)
+            (setq new-state (if (eq cur-state 'working) 'done cur-state)))
+           ;; 4. Otherwise working
+           (t
+            (setq new-state (if (memq cur-state '(ready done starting)) 'working cur-state))))
+          (unless (eq new-state cur-state)
+            (rata-agent-center--put buf :state new-state))
+          (when (and (not (string-empty-p last-line))
+                     (not (eq new-state 'ready)))
+            (rata-agent-center--put buf :activity (truncate-string-to-width last-line rata-agent-center--activity-max nil nil "…")
+                                    :activity-source 'tool))
+          new-state)))))
+
 (defun rata-agent-center--reconcile-all ()
-  "Correct every entry's state against `agent-shell-status'."
+  "Correct every entry's state against its backend."
   (maphash (lambda (buf entry)
-             (let ((state (rata-agent-center--reconcile
-                           (plist-get entry :state) (rata-agent-center--status buf)
-                           (rata-agent-center--visible-p buf))))
-               (unless (eq state (plist-get entry :state))
-                 (rata-agent-center--put buf :state state))))
+             (if (eq (plist-get entry :backend) 'vterm)
+                 (rata-agent-center--reconcile-vterm buf entry)
+               (let ((state (rata-agent-center--reconcile
+                             (plist-get entry :state) (rata-agent-center--status buf)
+                             (rata-agent-center--visible-p buf))))
+                 (unless (eq state (plist-get entry :state))
+                   (rata-agent-center--put buf :state state)))))
            rata-agent-center--registry))
 
 (defun rata-agent-center--fill ()
@@ -632,7 +731,7 @@ its one-line-per-entry incremental update."
 (define-derived-mode rata-agent-center-mode tabulated-list-mode "Agents"
   "Every live agent-shell session, grouped by persp layout."
   (setq tabulated-list-format
-        `[("State" 7 nil) ("Agent" 6 nil) ("Title" ,rata-agent-center--title-width nil) ("Age" 4 nil) ("Last" 0 nil)]
+        `[("State" 7 nil) ("Agent" 11 nil) ("Title" ,rata-agent-center--title-width nil) ("Age" 4 nil) ("Last" 0 nil)]
         tabulated-list-padding 1
         tabulated-list-sort-key nil
         tabulated-list-printer #'rata-agent-center--print-entry)
@@ -955,6 +1054,20 @@ shell's window and showing the shell in the window you are in."
     (tabulated-list-print)
     (rata-agent-center--goto-heading (cdr found))))
 
+(defun rata-agent-center--on-vterm-exit (buffer event)
+  "Called when a vterm process in BUFFER exits with EVENT."
+  (when-let* ((entry (rata-agent-center--entry buffer)))
+    (when (eq (plist-get entry :backend) 'vterm)
+      (let* ((clean-event (string-trim (or event "")))
+             (ok-p (string-prefix-p "finished" clean-event)))
+        (if ok-p
+            (rata-agent-center--put buffer :state 'done :last-stop-reason "finished")
+          (rata-agent-center--put buffer :state 'error :error clean-event))
+        (rata-agent-center--schedule-render)))))
+
+(with-eval-after-load 'vterm
+  (add-hook 'vterm-exit-functions #'rata-agent-center--on-vterm-exit))
+
 (defun rata-agent-center-interrupt ()
   "Interrupt this line's shell, after asking."
   (interactive)
@@ -963,20 +1076,26 @@ shell's window and showing the shell in the window you are in."
     (when (y-or-n-p (format "Interrupt %s? " (or (plist-get entry :title)
                                                  (buffer-name shell))))
       (with-current-buffer shell
-        ;; FORCE: we have just asked; agent-shell would ask again.
-        (agent-shell-interrupt t)))))
+        (if (eq (plist-get entry :backend) 'vterm)
+            (if-let* ((proc (get-buffer-process shell)))
+                (interrupt-process proc)
+              (when (fboundp 'vterm-send-C-c)
+                (vterm-send-C-c)))
+          (when (fboundp 'agent-shell-interrupt)
+            ;; FORCE: we have just asked; agent-shell would ask again.
+            (agent-shell-interrupt t)))))))
 
 (defun rata-agent-center-new-shell ()
   "Start a new agent-shell in this line's layout and project."
   (interactive)
   (let* ((on-heading (get-text-property (line-beginning-position)
                                         'rata-agent-center-heading))
-         (entry (unless on-heading (rata-agent-center--entry (tabulated-list-get-id))))
-         (layout (cdr (rata-agent-center--line-layout)))
-         (project (if on-heading
-                      (get-text-property (line-beginning-position)
-                                         'rata-agent-center-project)
-                    (plist-get entry :project))))
+          (entry (unless on-heading (rata-agent-center--entry (tabulated-list-get-id))))
+          (layout (cdr (rata-agent-center--line-layout)))
+          (project (if on-heading
+                       (get-text-property (line-beginning-position)
+                                          'rata-agent-center-project)
+                     (plist-get entry :project))))
     (rata-agent-center--switch-layout layout)
     ;; Never open the shell in the dedicated panel window.
     (select-window (rata-agent-center--main-window))
@@ -1003,6 +1122,8 @@ shell's window and showing the shell in the window you are in."
 CHOICE is `allow', `always', or `deny'."
   (unless (buffer-live-p shell)
     (user-error "No live agent shell"))
+  (when (eq (plist-get (rata-agent-center--entry shell) :backend) 'vterm)
+    (user-error "Terminal agents handle prompts directly inside the terminal. Press RET to visit"))
   (let* ((pending (or (rata-agent-center--pending-permission shell)
                       (user-error "Agent '%s' has no pending permission request"
                                   (or (plist-get (rata-agent-center--entry shell) :title)
