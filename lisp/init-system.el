@@ -120,7 +120,7 @@
           "\\*pytest.*\\*"
           "\\*restclient.*\\*"
           "\\*ejc-sql-output\\*"
-          vterm-mode))
+          "^\\*vterm\\*$"))
   (popper-mode 1)
   (global-set-key (kbd "M-`") #'popper-toggle)
   (global-set-key (kbd "C-M-`") #'popper-cycle)

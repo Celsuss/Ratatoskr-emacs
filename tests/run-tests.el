@@ -6299,6 +6299,49 @@ is nil, and the diff silently widens to the project) fails here."
       (delete-file temp-file))))
 
 ;;; ============================================================
+;;; Multi-vterm and toggle isolation tests
+;;; ============================================================
+
+(ert-deftest rata-test-vterm-toggle-isolation ()
+  "Ensure dedicated toggle vterm isolation predicate behaves correctly."
+  (should (fboundp 'rata-vterm-toggle-buffer-p))
+  (should (equal vterm-toggle-scope 'dedicated))
+  (should (member 'rata-vterm-toggle-buffer-p vterm-toggle-togglable-buffer-functions))
+  (let ((vterm-buf (get-buffer-create "*vterm*"))
+        (term-buf (get-buffer-create "*terminal*"))
+        (claude-buf (get-buffer-create "*terminal: claude*"))
+        (agy-buf (get-buffer-create "*terminal: antigravity*"))
+        (other-buf (get-buffer-create "*scratch-test*")))
+    (unwind-protect
+        (progn
+          (should (rata-vterm-toggle-buffer-p vterm-buf))
+          (should-not (rata-vterm-toggle-buffer-p term-buf))
+          (should-not (rata-vterm-toggle-buffer-p claude-buf))
+          (should-not (rata-vterm-toggle-buffer-p agy-buf))
+          (should-not (rata-vterm-toggle-buffer-p other-buf)))
+      (kill-buffer vterm-buf)
+      (kill-buffer term-buf)
+      (kill-buffer claude-buf)
+      (kill-buffer agy-buf)
+      (kill-buffer other-buf))))
+
+(ert-deftest rata-test-vterm-keybindings ()
+  "Ensure leader keys for vterm spawning resolve to valid commands."
+  (should (commandp (rata-test--leader-lookup "SPC t o")))
+  (should (eq (rata-test--leader-lookup "SPC t o") 'rata-vterm-open))
+  (should (commandp (rata-test--leader-lookup "SPC a i t t")))
+  (should (eq (rata-test--leader-lookup "SPC a i t t") 'rata-vterm-open))
+  (should (commandp (rata-test--leader-lookup "SPC a i t c")))
+  (should (eq (rata-test--leader-lookup "SPC a i t c") 'rata-vterm-claude))
+  (should (commandp (rata-test--leader-lookup "SPC a i t a")))
+  (should (eq (rata-test--leader-lookup "SPC a i t a") 'rata-vterm-antigravity)))
+
+(ert-deftest rata-test-vterm-run-missing-executable ()
+  "Ensure rata-vterm-run signals user-error when executable is not found."
+  (should-error (rata-vterm-run "non-existent-executable-12345")
+                :type 'user-error))
+
+;;; ============================================================
 ;;; Run all tests
 ;;; ============================================================
 
