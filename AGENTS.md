@@ -318,7 +318,7 @@ init-present → init-dashboard
   per chunk. Tests: `rata-test-agent-center-*` in
   `tests/run-tests.el`, all on synthetic event alists — nothing starts an agent.
 - `init-agent-worktree.el` — one git worktree per agent task (B6 in
-  `plans/ai-agent-powerhouse.md`). `SPC a i s w` / `C` in `*Agents*` cuts `agent/<slug>`
+  `plans/ai-agent-roadmap.md`). `SPC a i s w` / `C` in `*Agents*` cuts `agent/<slug>`
   from the branch checked out where you are, adds a worktree at
   `<main checkout>/.agent-shell/worktrees/<slug>`, switches to a persp layout named
   after the branch (so the panel files the shell there) and starts `agent-shell-new-shell`
@@ -339,7 +339,7 @@ init-present → init-dashboard
   registration. Tests: `rata-test-agent-worktree-*`, against throwaway repositories
   with `GIT_CONFIG_GLOBAL=/dev/null`; the shell start is stubbed.
 - `init-agent-prompts.el` — a prompt library for agent-shell (C12 in
-  `plans/ai-agent-powerhouse.md`). `SPC a i s P` picks a prompt from `prompts/*.md`
+  `plans/ai-agent-roadmap.md`). `SPC a i s P` picks a prompt from `prompts/*.md`
   (versioned) or `rata-agent-prompt-extra-directory` (per machine, set in `local.el`,
   wins on a name clash), fills `{{region}} {{file}} {{diff}} {{error}} {{project}}`
   from the buffer you came from, and **inserts without submitting** into the
@@ -353,8 +353,8 @@ init-present → init-dashboard
   `rata-test-agent-prompt-shipped-prompts-are-valid` fails on a shipped prompt that
   names an unknown placeholder or lacks its `<!-- description -->` line. Tests:
   `rata-test-agent-prompt-*`, with agent-shell stubbed; nothing starts an agent.
-- `init-agent-review.el` — an interactive multi-file diff and review hub for agent worktrees (Pillar I §1 in
-  `plans/ai-agent-pillars.md`). `SPC a i r` or `r` on a row in `*Agents*` opens a dedicated review cockpit
+- `init-agent-review.el` — an interactive multi-file diff and review hub for agent worktrees (review hub in
+  `plans/ai-agent-roadmap.md`). `SPC a i r` or `r` on a row in `*Agents*` opens a dedicated review cockpit
   `*Agent Review: <branch>*` for `base...HEAD`. Derives from `magit-diff-mode` to inherit Magit's diff
   navigation, syntax highlighting, hunk jumping, folding (`TAB`), and Ediff (`e` via `magit-ediff-dwim`),
   while prepending custom sections for worktree metadata and pending review directives. Staging directives

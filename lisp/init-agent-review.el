@@ -2,7 +2,7 @@
 ;;; init-agent-review.el --- Interactive diff & review hub for agent worktrees
 
 ;; Multi-file diff review and directive staging cockpit for agent worktrees
-;; (Pillar I §1 in plans/ai-agent-pillars.md).
+;; (review hub in plans/ai-agent-roadmap.md).
 ;;
 ;; Derives from `magit-diff-mode' to inherit full Magit diff navigation,
 ;; hunk syntax highlighting, folding (TAB), and side-by-side comparison (e via

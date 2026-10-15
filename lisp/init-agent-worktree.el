@@ -3,7 +3,7 @@
 
 ;; Several agents on one repository at once, each in its own git worktree and
 ;; its own persp layout, so they cannot overwrite each other's work (B6 in
-;; plans/ai-agent-powerhouse.md).  `SPC a i s w' / `C' in *Agents* starts one;
+;; plans/ai-agent-roadmap.md).  `SPC a i s w' / `C' in *Agents* starts one;
 ;; `SPC a i s W' / `X' finishes it.
 ;;
 ;; Upstream has `agent-shell-new-worktree-shell', but it takes no arguments:

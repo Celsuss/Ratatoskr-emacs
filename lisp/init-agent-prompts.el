@@ -1,7 +1,7 @@
 ;;; -*- lexical-binding: t; -*-
 ;;; init-agent-prompts.el --- Reusable prompts for agent-shell
 
-;; A prompt library (C12 in plans/ai-agent-powerhouse.md).  `SPC a i s P'
+;; A prompt library (C12 in plans/ai-agent-roadmap.md).  `SPC a i s P'
 ;; picks a prompt, fills its placeholders from the buffer you are in, and
 ;; inserts the result into that project's agent shell -- inserts, never
 ;; submits, so it can be read and edited before anything is spent.

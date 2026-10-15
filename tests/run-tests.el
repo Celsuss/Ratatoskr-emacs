@@ -4746,7 +4746,7 @@ Each binding is (VAR LAYOUT STATE SINCE); the buffers are killed after."
   (should (featurep 'init-agent-center))
   (should (memq #'rata-agent-center--on-mode-hook agent-shell-mode-hook)))
 
-;;; --- init-agent-center: activity line (A2, plans/ai-agent-powerhouse.md) ---
+;;; --- init-agent-center: activity line (A2, plans/ai-agent-roadmap.md) ---
 
 (ert-deftest rata-test-agent-center-tool-activity-strings ()
   "A tool call reads as `Label: detail', from its title, command and kind."
@@ -5059,7 +5059,7 @@ Each binding is (VAR LAYOUT STATE SINCE); the buffers are killed after."
         (should (equal (plist-get (rata-agent-center--entry buf) :state) 'needs-input))
         (should (equal (plist-get (rata-agent-center--entry buf) :activity) "Bash: rm -rf target"))))))
 
-;;; --- init-agent-worktree: one worktree per task (B6, plans/ai-agent-powerhouse.md) ---
+;;; --- init-agent-worktree: one worktree per task (B6, plans/ai-agent-roadmap.md) ---
 ;; Every git call runs against a throwaway repository under `temporary-file-directory'
 ;; with the user's git config shut out; nothing starts an agent.
 
