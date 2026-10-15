@@ -177,8 +177,13 @@ FRAME, WIDTH, HEIGHT, START-X and START-Y are ORIG's arguments."
 
 ;; --- Vterm ---
   (defvar vterm-toggle--vterm-dedicated-buffer)
+  (defvar vterm-mode-map)
 (declare-function vterm-mode "vterm")
 (declare-function vterm-send-string "vterm" (string &optional paste-p))
+(declare-function vterm--self-insert "vterm" ())
+(declare-function vterm-send-escape "vterm" ())
+(declare-function evil-normal-state "evil-core" ())
+(declare-function evil-define-key* "evil-core" (state keymaps &rest bindings))
 
 (defvar rata-vterm-toggle-buffer-name "*vterm*"
   "Name of the dedicated vterm-toggle buffer.")
@@ -189,9 +194,42 @@ FRAME, WIDTH, HEIGHT, START-X and START-Y are ORIG's arguments."
        (or (eq buffer (bound-and-true-p vterm-toggle--vterm-dedicated-buffer))
            (string= (buffer-name buffer) rata-vterm-toggle-buffer-name))))
 
+(defun rata-vterm--setup-evil-keys ()
+  "Configure Evil keybindings for `vterm-mode'.
+In insert state, forward all CTRL keys (C-a..C-z, C-c, C-x, C-g, etc.) directly
+to the terminal process so agents and CLI tools receive interrupts, mode changes,
+and readline inputs without Emacs interception.
+`<escape>' returns to Evil normal state, restoring Emacs keybindings.
+`C-<escape>' sends literal ESC to the terminal (e.g. to close artifact views)."
+  (when (boundp 'vterm-mode-map)
+    (dolist (char (number-sequence ?a ?z))
+      (evil-define-key* 'insert vterm-mode-map
+        (kbd (format "C-%c" char)) #'vterm--self-insert))
+    (evil-define-key* 'insert vterm-mode-map
+      (kbd "C-SPC")      #'vterm--self-insert
+      (kbd "C-@")        #'vterm--self-insert
+      (kbd "C-\\")       #'vterm--self-insert
+      (kbd "C-]")        #'vterm--self-insert
+      (kbd "C-_")        #'vterm--self-insert
+      (kbd "C-<escape>") #'vterm-send-escape
+      (kbd "<escape>")   #'evil-normal-state
+      (kbd "ESC")        #'evil-normal-state)))
+
 (use-package vterm
   :commands (vterm vterm-mode vterm-send-string)
-  :defer t)
+  :defer t
+  :config
+  (with-eval-after-load 'evil
+    (rata-vterm--setup-evil-keys)
+    (with-eval-after-load 'evil-collection-vterm
+      (rata-vterm--setup-evil-keys))))
+
+(with-eval-after-load 'vterm
+  (with-eval-after-load 'evil
+    (rata-vterm--setup-evil-keys)
+    (with-eval-after-load 'evil-collection-vterm
+      (rata-vterm--setup-evil-keys)))
+  (add-hook 'vterm-mode-hook #'rata-vterm--setup-evil-keys))
 
 ;; --- Vterm-toggle ---
 (use-package vterm-toggle

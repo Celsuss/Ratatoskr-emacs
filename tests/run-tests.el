@@ -6341,6 +6341,59 @@ is nil, and the diff silently widens to the project) fails here."
   (should-error (rata-vterm-run "non-existent-executable-12345")
                 :type 'user-error))
 
+(ert-deftest rata-test-vterm-evil-keys-in-insert-state ()
+  "Ensure all CTRL keys are forwarded to vterm in insert state,
+C-<escape> sends ESC to the terminal, and <escape> enters normal mode."
+  (skip-unless (require 'vterm nil t))
+  (let ((buf (generate-new-buffer "*test-vterm-keys*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (vterm-mode)
+          (evil-insert-state)
+          (rata-vterm--setup-evil-keys)
+          ;; Check all letters C-a..C-z
+          (dolist (char (number-sequence ?a ?z))
+            (should (eq (key-binding (kbd (format "C-%c" char))) #'vterm--self-insert)))
+          ;; Check critical control characters
+          (should (eq (key-binding (kbd "C-c")) #'vterm--self-insert))
+          (should (eq (key-binding (kbd "C-x")) #'vterm--self-insert))
+          (should (eq (key-binding (kbd "C-g")) #'vterm--self-insert))
+          (should (eq (key-binding (kbd "C-h")) #'vterm--self-insert))
+          (should (eq (key-binding (kbd "C-u")) #'vterm--self-insert))
+          (should (eq (key-binding (kbd "C-o")) #'vterm--self-insert))
+          (should (eq (key-binding (kbd "C-SPC")) #'vterm--self-insert))
+          ;; Check terminal ESC chord (C-<escape>)
+          (should (eq (key-binding (kbd "C-<escape>")) #'vterm-send-escape))
+          ;; Check that <escape> enters normal state
+          (should (eq (key-binding (kbd "<escape>")) #'evil-normal-state)))
+      (when-let* ((proc (get-buffer-process buf)))
+        (set-process-query-on-exit-flag proc nil)
+        (delete-process proc))
+      (let ((kill-buffer-query-functions nil))
+        (kill-buffer buf)))))
+
+(ert-deftest rata-test-vterm-evil-keys-in-normal-state ()
+  "Ensure returning to normal state restores Emacs leader and navigation keys."
+  (skip-unless (require 'vterm nil t))
+  (let ((buf (generate-new-buffer "*test-vterm-normal*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (vterm-mode)
+          (rata-vterm--setup-evil-keys)
+          (evil-normal-state)
+          ;; Leader key is active
+          (should (key-binding (kbd "SPC")))
+          ;; Window navigation
+          (should (eq (key-binding (kbd "C-w")) 'evil-window-map))
+          ;; i and a enter insert mode
+          (should (eq (key-binding (kbd "i")) 'evil-collection-vterm-insert))
+          (should (eq (key-binding (kbd "a")) 'evil-collection-vterm-append)))
+      (when-let* ((proc (get-buffer-process buf)))
+        (set-process-query-on-exit-flag proc nil)
+        (delete-process proc))
+      (let ((kill-buffer-query-functions nil))
+        (kill-buffer buf)))))
+
 (ert-deftest rata-test-agent-center-register-vterm ()
   "Ensure vterm buffers can be registered in agent-center registry."
   (rata-test-agent-center--with-registry
