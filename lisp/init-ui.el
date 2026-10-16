@@ -66,7 +66,7 @@
   :defer t
   :config
   (setq golden-ratio-exclude-buffer-regexp
-        '("\\*magit" "\\*Org Agenda\\*" "\\*vterm\\*")))
+        '("\\*magit" "\\*Org Agenda\\*" "\\*vterm" "\\*terminal")))
 
 (with-eval-after-load 'init-evil
   (rata-leader

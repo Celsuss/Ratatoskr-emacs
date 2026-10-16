@@ -5268,19 +5268,23 @@ are kept in the main checkout; the branch goes only on a second yes."
       (should-not questions))))
 
 (ert-deftest rata-test-agent-worktree-panel-label ()
-  "A shell in an agent worktree is labelled `repo ⎇ branch' in the panel."
+  "A shell in any git checkout or worktree is labelled `repo ⎇ branch' in the panel."
   (rata-test-agent-worktree--with-repo
     (rata-test-agent-worktree--answering nil
-      (let ((wt (rata-agent-worktree-create repo "agent/fix-x")))
+      (let ((wt (rata-agent-worktree-create repo "agent/fix-x"))
+            (repo-name (file-name-nondirectory (directory-file-name repo))))
         (should (equal (rata-agent-worktree-project-label wt)
-                       (format "%s ⎇ agent/fix-x"
-                               (abbreviate-file-name (directory-file-name repo)))))
-        (should-not (rata-agent-worktree-project-label repo))
+                       (format "%s ⎇ agent/fix-x" repo-name)))
+        ;; Main checkout is now labelled with repo name and branch name too.
+        (should (equal (rata-agent-worktree-project-label repo)
+                       (format "%s ⎇ main" repo-name)))
+        ;; Non-git directory returns nil so heading falls back to project path.
+        (should-not (rata-agent-worktree-project-label temporary-file-directory))
         (should (memq #'rata-agent-worktree-project-label
                       rata-agent-center-project-label-functions))
         ;; The heading uses the label rather than the long worktree path.
         (should (string-match-p
-                 "agent/fix-x — .* ⎇ agent/fix-x"
+                 (format "agent/fix-x — %s ⎇ agent/fix-x" (regexp-quote repo-name))
                  (rata-agent-center--group-heading
                   "agent/fix-x"
                   (list (list :project (abbreviate-file-name (file-name-as-directory wt))
@@ -6293,6 +6297,177 @@ is nil, and the diff silently widens to the project) fails here."
       (kill-buffer code-buf)
       (kill-buffer side-buf)
       (delete-file temp-file))))
+
+;;; ============================================================
+;;; Multi-vterm and toggle isolation tests
+;;; ============================================================
+
+(ert-deftest rata-test-vterm-toggle-isolation ()
+  "Ensure dedicated toggle vterm isolation predicate behaves correctly."
+  (should (fboundp 'rata-vterm-toggle-buffer-p))
+  (should (equal vterm-toggle-scope 'dedicated))
+  (should (member 'rata-vterm-toggle-buffer-p vterm-toggle-togglable-buffer-functions))
+  (let ((vterm-buf (get-buffer-create "*vterm*"))
+        (term-buf (get-buffer-create "*terminal*"))
+        (claude-buf (get-buffer-create "*terminal: claude*"))
+        (agy-buf (get-buffer-create "*terminal: antigravity*"))
+        (other-buf (get-buffer-create "*scratch-test*")))
+    (unwind-protect
+        (progn
+          (should (rata-vterm-toggle-buffer-p vterm-buf))
+          (should-not (rata-vterm-toggle-buffer-p term-buf))
+          (should-not (rata-vterm-toggle-buffer-p claude-buf))
+          (should-not (rata-vterm-toggle-buffer-p agy-buf))
+          (should-not (rata-vterm-toggle-buffer-p other-buf)))
+      (kill-buffer vterm-buf)
+      (kill-buffer term-buf)
+      (kill-buffer claude-buf)
+      (kill-buffer agy-buf)
+      (kill-buffer other-buf))))
+
+(ert-deftest rata-test-vterm-keybindings ()
+  "Ensure leader keys for vterm spawning resolve to valid commands."
+  (should (commandp (rata-test--leader-lookup "SPC t o")))
+  (should (eq (rata-test--leader-lookup "SPC t o") 'rata-vterm-open))
+  (should (commandp (rata-test--leader-lookup "SPC a i t t")))
+  (should (eq (rata-test--leader-lookup "SPC a i t t") 'rata-vterm-open))
+  (should (commandp (rata-test--leader-lookup "SPC a i t c")))
+  (should (eq (rata-test--leader-lookup "SPC a i t c") 'rata-vterm-claude))
+  (should (commandp (rata-test--leader-lookup "SPC a i t a")))
+  (should (eq (rata-test--leader-lookup "SPC a i t a") 'rata-vterm-antigravity)))
+
+(ert-deftest rata-test-vterm-run-missing-executable ()
+  "Ensure rata-vterm-run signals user-error when executable is not found."
+  (should-error (rata-vterm-run "non-existent-executable-12345")
+                :type 'user-error))
+
+(ert-deftest rata-test-vterm-evil-keys-in-insert-state ()
+  "Ensure all CTRL keys are forwarded to vterm in insert state,
+C-<escape> sends ESC to the terminal, and <escape> enters normal mode."
+  (skip-unless (require 'vterm nil t))
+  (let ((buf (generate-new-buffer "*test-vterm-keys*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (vterm-mode)
+          (evil-insert-state)
+          (rata-vterm--setup-evil-keys)
+          ;; Check all letters C-a..C-z
+          (dolist (char (number-sequence ?a ?z))
+            (should (eq (key-binding (kbd (format "C-%c" char))) #'vterm--self-insert)))
+          ;; Check critical control characters
+          (should (eq (key-binding (kbd "C-c")) #'vterm--self-insert))
+          (should (eq (key-binding (kbd "C-x")) #'vterm--self-insert))
+          (should (eq (key-binding (kbd "C-g")) #'vterm--self-insert))
+          (should (eq (key-binding (kbd "C-h")) #'vterm--self-insert))
+          (should (eq (key-binding (kbd "C-u")) #'vterm--self-insert))
+          (should (eq (key-binding (kbd "C-o")) #'vterm--self-insert))
+          (should (eq (key-binding (kbd "C-SPC")) #'vterm--self-insert))
+          ;; Check terminal ESC chord (C-<escape>)
+          (should (eq (key-binding (kbd "C-<escape>")) #'vterm-send-escape))
+          ;; Check that <escape> enters normal state
+          (should (eq (key-binding (kbd "<escape>")) #'evil-normal-state)))
+      (when-let* ((proc (get-buffer-process buf)))
+        (set-process-query-on-exit-flag proc nil)
+        (delete-process proc))
+      (let ((kill-buffer-query-functions nil))
+        (kill-buffer buf)))))
+
+(ert-deftest rata-test-vterm-evil-keys-in-normal-state ()
+  "Ensure returning to normal state restores Emacs leader and navigation keys."
+  (skip-unless (require 'vterm nil t))
+  (let ((buf (generate-new-buffer "*test-vterm-normal*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (vterm-mode)
+          (rata-vterm--setup-evil-keys)
+          (evil-normal-state)
+          ;; Leader key is active
+          (should (key-binding (kbd "SPC")))
+          ;; Window navigation
+          (should (eq (key-binding (kbd "C-w")) 'evil-window-map))
+          ;; i and a enter insert mode
+          (should (eq (key-binding (kbd "i")) 'evil-collection-vterm-insert))
+          (should (eq (key-binding (kbd "a")) 'evil-collection-vterm-append)))
+      (when-let* ((proc (get-buffer-process buf)))
+        (set-process-query-on-exit-flag proc nil)
+        (delete-process proc))
+      (let ((kill-buffer-query-functions nil))
+        (kill-buffer buf)))))
+
+(ert-deftest rata-test-agent-center-register-vterm ()
+  "Ensure vterm buffers can be registered in agent-center registry."
+  (rata-test-agent-center--with-registry
+    (let ((buf (generate-new-buffer "*terminal: claude*")))
+      (unwind-protect
+          (let ((entry (rata-agent-center-register-vterm buf "Claude" "*terminal: claude*")))
+            (should entry)
+            (should (eq (plist-get entry :backend) 'vterm))
+            (should (equal (plist-get entry :agent) "Claude"))
+            (should (equal (plist-get entry :title) "*terminal: claude*"))
+            (should (eq (plist-get entry :state) 'working))
+            (should (equal (buffer-local-value 'rata-agent-center-vterm-agent buf) "Claude"))
+            (should (eq (rata-agent-center--entry buf) entry)))
+        (kill-buffer buf)))))
+
+(ert-deftest rata-test-agent-center-reconcile-vterm ()
+  "Ensure vterm buffer tail scraping correctly updates state and activity."
+  (rata-test-agent-center--with-registry
+    (let ((buf (generate-new-buffer "*terminal: claude*")))
+      (unwind-protect
+          (progn
+            (rata-agent-center-register-vterm buf "Claude")
+            (let ((entry (rata-agent-center--entry buf)))
+              ;; 1. Permission prompt -> needs-input
+              (with-current-buffer buf
+                (erase-buffer)
+                (insert "Running command...\nAllow Bash(just test)? [y/N] "))
+              (cl-letf (((symbol-function 'get-buffer-process)
+                         (lambda (_) 'fake-proc))
+                        ((symbol-function 'process-live-p) (lambda (_) t))
+                        ((symbol-function 'rata-agent-center--visible-p) (lambda (_) nil)))
+                (should (eq (rata-agent-center--reconcile-vterm buf entry) 'needs-input))
+                (should (eq (plist-get (rata-agent-center--entry buf) :state) 'needs-input))
+                (should (string-match-p "Allow" (plist-get (rata-agent-center--entry buf) :activity)))
+
+                ;; 2. Turn completed (idle prompt ❯) -> done
+                (with-current-buffer buf
+                  (erase-buffer)
+                  (insert "Task complete!\n❯ "))
+                (rata-agent-center--put buf :state 'working)
+                (should (eq (rata-agent-center--reconcile-vterm buf (rata-agent-center--entry buf)) 'done))
+                (should (eq (plist-get (rata-agent-center--entry buf) :state) 'done))
+
+                ;; 3. Visible -> ready
+                (cl-letf (((symbol-function 'rata-agent-center--visible-p) (lambda (_) t)))
+                  (should (eq (rata-agent-center--reconcile-vterm buf (rata-agent-center--entry buf)) 'ready))
+                  (should (eq (plist-get (rata-agent-center--entry buf) :state) 'ready))))))
+        (kill-buffer buf)))))
+
+(ert-deftest rata-test-agent-center-vterm-respond-permission-error ()
+  "Ensure responding to permissions on a vterm row directs user to the terminal."
+  (rata-test-agent-center--with-registry
+    (let ((buf (generate-new-buffer "*terminal: claude*")))
+      (unwind-protect
+          (progn
+            (rata-agent-center-register-vterm buf "Claude")
+            (should-error (rata-agent-center--respond-permission buf 'allow)
+                          :type 'user-error))
+        (kill-buffer buf)))))
+
+(ert-deftest rata-test-agent-center-vterm-adopt ()
+  "Ensure rata-agent-center--adopt discovers open vterm agent buffers."
+  (rata-test-agent-center--with-registry
+    (let ((buf (generate-new-buffer "*terminal: claude*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (setq-local rata-agent-center-vterm-agent "Claude"))
+            (rata-agent-center--adopt)
+            (let ((entry (rata-agent-center--entry buf)))
+              (should entry)
+              (should (eq (plist-get entry :backend) 'vterm))
+              (should (equal (plist-get entry :agent) "Claude"))))
+        (kill-buffer buf)))))
 
 ;;; ============================================================
 ;;; Run all tests

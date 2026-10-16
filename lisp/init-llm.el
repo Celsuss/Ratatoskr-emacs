@@ -387,6 +387,39 @@ With prefix PROMPT-FOR-FILE, pick a project file instead of this one."
     (agent-shell))
   (agent-shell-send-file prompt-for-file))
 
+(declare-function rata-vterm-run "init-dev" (program &optional name args new-session))
+(declare-function rata-vterm-open "init-dev" (&optional name))
+(declare-function rata-agent-center-register-vterm "init-agent-center" (buffer agent &optional title))
+
+(defcustom rata-vterm-claude-program "claude"
+  "Program to launch Claude Code in vterm."
+  :type 'string
+  :group 'rata)
+
+(defcustom rata-vterm-antigravity-program
+  (if (executable-find "antigravity") "antigravity" "agy")
+  "Program to launch Antigravity in vterm."
+  :type 'string
+  :group 'rata)
+
+(defun rata-vterm-claude (&optional new-session)
+  "Start or switch to a Claude Code vterm session in the current window.
+With prefix arg NEW-SESSION, always create a fresh vterm session."
+  (interactive "P")
+  (let ((buf (rata-vterm-run rata-vterm-claude-program "*terminal: claude*" nil new-session)))
+    (when (fboundp 'rata-agent-center-register-vterm)
+      (rata-agent-center-register-vterm buf "Claude" (buffer-name buf)))
+    buf))
+
+(defun rata-vterm-antigravity (&optional new-session)
+  "Start or switch to an Antigravity vterm session in the current window.
+With prefix arg NEW-SESSION, always create a fresh vterm session."
+  (interactive "P")
+  (let ((buf (rata-vterm-run rata-vterm-antigravity-program "*terminal: antigravity*" nil new-session)))
+    (when (fboundp 'rata-agent-center-register-vterm)
+      (rata-agent-center-register-vterm buf "Antigravity" (buffer-name buf)))
+    buf))
+
 ;; All AI leader keys at top level so they are live from startup (FAIL-0009);
 ;; commands autoload from their packages via each :commands list.
 (with-eval-after-load 'general
@@ -405,6 +438,10 @@ With prefix PROMPT-FOR-FILE, pick a project file instead of this one."
     "aia"   '(:ignore t :which-key "aider")
     "aiaa"  '(aidermacs-transient-menu :which-key "aider menu")
     "aiao"  '(aidermacs-run            :which-key "run aider")
+    "ait"   '(:ignore t                                 :which-key "terminal")
+    "aitt"  '(rata-vterm-open                           :which-key "terminal (open)")
+    "aita"  '(rata-vterm-antigravity                    :which-key "antigravity")
+    "aitc"  '(rata-vterm-claude                         :which-key "claude code")
     ;; `aisl' is claude-loop's subtree, bound from init-claude-loop.el off this
     ;; same prefix -- do not add a plain `aisl' leaf here.
     "ais"   '(:ignore t :which-key "agent shell")

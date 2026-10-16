@@ -176,14 +176,130 @@ FRAME, WIDTH, HEIGHT, START-X and START-Y are ORIG's arguments."
   :after magit)
 
 ;; --- Vterm ---
+  (defvar vterm-toggle--vterm-dedicated-buffer)
+  (defvar vterm-mode-map)
+(declare-function vterm-mode "vterm")
+(declare-function vterm-send-string "vterm" (string &optional paste-p))
+(declare-function vterm--self-insert "vterm" ())
+(declare-function vterm-send-escape "vterm" ())
+(declare-function evil-normal-state "evil-core" ())
+(declare-function evil-define-key* "evil-core" (state keymaps &rest bindings))
+
+(defvar rata-vterm-toggle-buffer-name "*vterm*"
+  "Name of the dedicated vterm-toggle buffer.")
+
+(defun rata-vterm-toggle-buffer-p (buffer)
+  "Return non-nil if BUFFER is the dedicated vterm-toggle buffer."
+  (and (buffer-live-p buffer)
+       (or (eq buffer (bound-and-true-p vterm-toggle--vterm-dedicated-buffer))
+           (string= (buffer-name buffer) rata-vterm-toggle-buffer-name))))
+
+(defun rata-vterm--setup-evil-keys ()
+  "Configure Evil keybindings for `vterm-mode'.
+In insert state, forward all CTRL keys (C-a..C-z, C-c, C-x, C-g, etc.) directly
+to the terminal process so agents and CLI tools receive interrupts, mode changes,
+and readline inputs without Emacs interception.
+`<escape>' returns to Evil normal state, restoring Emacs keybindings.
+`C-<escape>' sends literal ESC to the terminal (e.g. to close artifact views)."
+  (when (boundp 'vterm-mode-map)
+    (dolist (char (number-sequence ?a ?z))
+      (evil-define-key* 'insert vterm-mode-map
+        (kbd (format "C-%c" char)) #'vterm--self-insert))
+    (evil-define-key* 'insert vterm-mode-map
+      (kbd "C-SPC")      #'vterm--self-insert
+      (kbd "C-@")        #'vterm--self-insert
+      (kbd "C-\\")       #'vterm--self-insert
+      (kbd "C-]")        #'vterm--self-insert
+      (kbd "C-_")        #'vterm--self-insert
+      (kbd "C-<escape>") #'vterm-send-escape
+      (kbd "<escape>")   #'evil-normal-state
+      (kbd "ESC")        #'evil-normal-state)))
+
 (use-package vterm
-  :commands vterm
-  :defer t)
+  :commands (vterm vterm-mode vterm-send-string)
+  :defer t
+  :config
+  (with-eval-after-load 'evil
+    (rata-vterm--setup-evil-keys)
+    (with-eval-after-load 'evil-collection-vterm
+      (rata-vterm--setup-evil-keys))))
+
+(with-eval-after-load 'vterm
+  (with-eval-after-load 'evil
+    (rata-vterm--setup-evil-keys)
+    (with-eval-after-load 'evil-collection-vterm
+      (rata-vterm--setup-evil-keys)))
+  (add-hook 'vterm-mode-hook #'rata-vterm--setup-evil-keys))
 
 ;; --- Vterm-toggle ---
 (use-package vterm-toggle
   :after general
-  :commands (vterm-toggle vterm-toggle-cd))
+  :commands (vterm-toggle vterm-toggle-cd)
+  :init
+  (setq vterm-toggle-scope 'dedicated
+        vterm-toggle-togglable-buffer-functions '(rata-vterm-toggle-buffer-p)))
+
+(defun rata-vterm-open (&optional name)
+  "Spawn a new vterm terminal buffer in the current window.
+With prefix arg or string NAME, name the buffer accordingly.
+Otherwise generate a unique buffer name starting with `*terminal*'."
+  (interactive
+   (list (when current-prefix-arg
+           (read-string "Terminal name: "))))
+  (unless (require 'vterm nil t)
+    (user-error "Vterm package is not available"))
+  (let* ((dir default-directory)
+         (buf-name (if (and name (not (string-empty-p (string-trim name))))
+                       (if (string-prefix-p "*" name)
+                           name
+                         (format "*terminal: %s*" (string-trim name)))
+                     (generate-new-buffer-name "*terminal*")))
+         (buf (generate-new-buffer buf-name)))
+    (with-current-buffer buf
+      (setq default-directory dir))
+    (switch-to-buffer buf)
+    (with-current-buffer buf
+      (vterm-mode))
+    buf))
+
+(defun rata-vterm-run (program &optional name args new-session)
+  "Run PROGRAM in a vterm buffer in the current window.
+PROGRAM is the executable name or path.
+NAME is the desired buffer name (defaults to `*terminal: <program>*').
+ARGS is an optional list of string arguments passed to PROGRAM.
+If NEW-SESSION is nil and an active buffer exists with NAME, switch to it.
+Otherwise, create a new buffer and execute PROGRAM in it."
+  (unless (require 'vterm nil t)
+    (user-error "Vterm package is not available"))
+  (unless (executable-find program)
+    (user-error "Executable `%s' not found in exec-path" program))
+  (let* ((dir default-directory)
+         (base-name (or name (format "*terminal: %s*" (file-name-nondirectory program))))
+         (target-name (if (and new-session (get-buffer base-name))
+                          (generate-new-buffer-name base-name)
+                        base-name))
+         (existing (get-buffer target-name))
+         (proc (and existing (get-buffer-process existing))))
+    (if (and existing (process-live-p proc) (not new-session))
+        (progn
+          (switch-to-buffer existing)
+          existing)
+      (when (and existing (not (process-live-p proc)))
+        (kill-buffer existing))
+      (let ((buf (generate-new-buffer target-name))
+            (cmd (mapconcat #'shell-quote-argument (cons program args) " ")))
+        (with-current-buffer buf
+          (setq default-directory dir))
+        (switch-to-buffer buf)
+        (with-current-buffer buf
+          (vterm-mode)
+          (run-at-time 0.05 nil
+                       (lambda (b command)
+                         (when (buffer-live-p b)
+                           (with-current-buffer b
+                             (vterm-send-string (concat command "\n")))))
+                       buf cmd))
+        buf))))
 
 ;; Terminal leader keys at top level so they are live from startup (FAIL-0009).
 (with-eval-after-load 'general
@@ -191,7 +307,8 @@ FRAME, WIDTH, HEIGHT, START-X and START-Y are ORIG's arguments."
     :states '(normal visual)
     "t"   '(:ignore t :which-key "toggle")
     "tt"  '(vterm-toggle :which-key "terminal")
-    "tT"  '(vterm-toggle-cd :which-key "terminal (cd)")))
+    "tT"  '(vterm-toggle-cd :which-key "terminal (cd)")
+    "to"  '(rata-vterm-open :which-key "open terminal")))
 
 ;; --- Envrc (buffer-local direnv, replaces global direnv-mode) ---
 (use-package envrc
