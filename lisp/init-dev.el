@@ -154,7 +154,8 @@ FRAME, WIDTH, HEIGHT, START-X and START-Y are ORIG's arguments."
 ;; --- Magit ---
 (use-package magit
   :after general
-  :commands (magit-status magit-blame magit-log magit-find-file magit-diff-buffer-file))
+  :commands (magit-status magit-blame magit-log magit-find-file magit-diff-buffer-file
+             magit-worktree))
 
 ;; Git leader keys at top level so they are live from startup (FAIL-0009).
 (with-eval-after-load 'general
@@ -167,6 +168,7 @@ FRAME, WIDTH, HEIGHT, START-X and START-Y are ORIG's arguments."
     "gl"  '(magit-log :which-key "log")
     "gf"  '(magit-find-file :which-key "find file")
     "gd"  '(magit-diff-buffer-file :which-key "diff buffer")
+    "gw"  '(magit-worktree :which-key "worktrees")
     "gF"  '(forge-list-pullreqs :which-key "pull requests")
     "gI"  '(forge-list-issues :which-key "issues")))
 
