@@ -324,6 +324,15 @@ Otherwise, create a new buffer and execute PROGRAM in it."
   :commands (projectile-mode projectile-project-root
              projectile-run-project-tests projectile-kill-buffers
              projectile-replace projectile-replace-regexp)
+  :custom
+  ;; A repository under the temp directory is scratch (test fixtures, a quick
+  ;; clone), never something to switch back to, so it is not recorded as a
+  ;; known project.  Truename, because projectile matches the root's truename
+  ;; and the temp directory can be a symlink (macOS's /var/folders).
+  (projectile-ignored-project-patterns
+   (list (concat "\\`" (regexp-quote
+                        (file-name-as-directory
+                         (file-truename temporary-file-directory))))))
   :config
   (projectile-mode +1))
 
