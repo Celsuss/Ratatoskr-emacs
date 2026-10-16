@@ -154,7 +154,8 @@ FRAME, WIDTH, HEIGHT, START-X and START-Y are ORIG's arguments."
 ;; --- Magit ---
 (use-package magit
   :after general
-  :commands (magit-status magit-blame magit-log magit-find-file magit-diff-buffer-file))
+  :commands (magit-status magit-blame magit-log magit-find-file magit-diff-buffer-file
+             magit-worktree))
 
 ;; Git leader keys at top level so they are live from startup (FAIL-0009).
 (with-eval-after-load 'general
@@ -167,6 +168,7 @@ FRAME, WIDTH, HEIGHT, START-X and START-Y are ORIG's arguments."
     "gl"  '(magit-log :which-key "log")
     "gf"  '(magit-find-file :which-key "find file")
     "gd"  '(magit-diff-buffer-file :which-key "diff buffer")
+    "gw"  '(magit-worktree :which-key "worktrees")
     "gF"  '(forge-list-pullreqs :which-key "pull requests")
     "gI"  '(forge-list-issues :which-key "issues")))
 
@@ -322,6 +324,15 @@ Otherwise, create a new buffer and execute PROGRAM in it."
   :commands (projectile-mode projectile-project-root
              projectile-run-project-tests projectile-kill-buffers
              projectile-replace projectile-replace-regexp)
+  :custom
+  ;; A repository under the temp directory is scratch (test fixtures, a quick
+  ;; clone), never something to switch back to, so it is not recorded as a
+  ;; known project.  Truename, because projectile matches the root's truename
+  ;; and the temp directory can be a symlink (macOS's /var/folders).
+  (projectile-ignored-project-patterns
+   (list (concat "\\`" (regexp-quote
+                        (file-name-as-directory
+                         (file-truename temporary-file-directory))))))
   :config
   (projectile-mode +1))
 

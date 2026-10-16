@@ -28,6 +28,27 @@
 (load (expand-file-name "init.el" user-emacs-directory) nil t)
 (message "=== Ratatoskr ERT: config loaded, running tests ===")
 
+;; The suite runs against the operator's own `var/', so projectile's state files
+;; are the real ones: a test that visits a file in a throwaway repository (the
+;; agent-worktree tests do) has projectile's find-file hook record that
+;; repository as a known project, and `SPC p p' then offers every
+;; `/tmp/rata-wt-*' a test run ever made.  Both files are pointed at a scratch
+;; directory, and the copies already read from disk are dropped, so nothing the
+;; suite visits reaches the real list.
+(defvar rata-test--projectile-dir (make-temp-file "rata-test-projectile-" t)
+  "Scratch directory holding projectile's state files for this test run.")
+(add-hook 'kill-emacs-hook
+          (lambda () (delete-directory rata-test--projectile-dir t)))
+(with-eval-after-load 'projectile
+  (setq projectile-known-projects-file
+        (expand-file-name "known-projects.eld" rata-test--projectile-dir)
+        projectile-frecency-file
+        (expand-file-name "frecency.eld" rata-test--projectile-dir)
+        projectile-known-projects nil
+        projectile-known-projects-on-file nil
+        projectile--frecency-table nil
+        projectile--frecency-dirty nil))
+
 ;; Nothing in tests/ may reach a network service (AGENTS.md), and nothing may read
 ;; `~/.authinfo.gpg' (SAFETY_RULES): the first thing a real jira.el request does is
 ;; ask auth-source for the token, which decrypts that file -- a GPG passphrase
@@ -5099,6 +5120,25 @@ Each binding is (VAR LAYOUT STATE SINCE); the buffers are killed after."
                  "/src/repo/.agent-shell/worktrees/fix-x"))
   (should (equal (rata-agent-worktree--path "/src/repo" "other/name")
                  "/src/repo/.agent-shell/worktrees/other-name")))
+
+(ert-deftest rata-test-projectile-state-isolated-from-var ()
+  "The suite never writes projectile's known projects or frecency into `var/'.
+Before the harness redirected them, every run added its `/tmp/rata-wt-*'
+fixtures to the list `SPC p p' offers."
+  (require 'projectile)
+  (let ((var-dir (file-truename (expand-file-name "var/" user-emacs-directory))))
+    (dolist (file (list projectile-known-projects-file projectile-frecency-file))
+      (should-not (string-prefix-p var-dir (file-truename file))))))
+
+(ert-deftest rata-test-projectile-ignores-temp-projects ()
+  "A repository under the temp directory is not recorded as a known project."
+  (require 'projectile)
+  (let ((tmp (file-name-as-directory (make-temp-file "rata-wt-" t))))
+    (unwind-protect
+        (progn
+          (should (projectile-ignored-project-p tmp))
+          (should-not (projectile-ignored-project-p user-emacs-directory)))
+      (delete-directory tmp t))))
 
 (defmacro rata-test-agent-worktree--with-repo (&rest body)
   "Run BODY in a fresh git repository with one commit on `main'.
