@@ -1,6 +1,6 @@
 * Elfeed                                                             :elfeed:
 
-** Software Development                                             :dev:blog:
+** Software Development                                         :dev:personal:
 *** [[https://log.schemescape.com/feed.xml][Schemescape]] :schemescape:lisp:systems:slow:
 *** [[https://ntietz.com/atom.xml][Ntietz]] :ntietz:rust:career:
 *** [[https://xeiaso.net/blog.rss][Xe Iaso]] :xe_iaso:golang:nix:devops:
@@ -23,87 +23,87 @@
 *** [[https://blog.orhun.dev/rss.xml][Orhun]] :orhun:rust:tooling:
 
 ** Machine Learning                                                       :ml:
-*** [[https://jalammar.github.io/feed.xml][Jay Alammar]] :jayalammar:blog:llm:deep:slow:
-*** [[https://lilianweng.github.io/index.xml][Lil'Log]] :lillog:blog:research:deep:slow:
-*** [[https://huyenchip.com/feed.xml][Huyen Chip]] :huyen_chip:blog:mlops:llm:deep:
-*** [[https://sebastianraschka.com/rss_feed.xml][Sebastian Raschka]] :sebastianraschka:blog:llm:research:deep:
-*** [[https://magazine.sebastianraschka.com/feed][Ahead of AI]] :aheadofai:blog:llm:research:weekly:
-*** [[https://www.interconnects.ai/feed][Interconnects]] :interconnects:blog:llm:research:policy:
-*** [[https://importai.substack.com/feed][Import AI]] :importai:blog:research:policy:weekly:aggregator:
-*** [[https://eugeneyan.com/rss/][Eugene Yan]] :eugeneyan:blog:mlops:recsys:
+*** [[https://jalammar.github.io/feed.xml][Jay Alammar]] :jayalammar:personal:llm:deep:slow:
+*** [[https://lilianweng.github.io/index.xml][Lil'Log]] :lillog:personal:research:deep:slow:
+*** [[https://huyenchip.com/feed.xml][Huyen Chip]] :huyen_chip:personal:mlops:llm:deep:
+*** [[https://sebastianraschka.com/rss_feed.xml][Sebastian Raschka]] :sebastianraschka:personal:llm:research:deep:
+*** [[https://magazine.sebastianraschka.com/feed][Ahead of AI]] :aheadofai:personal:newsletter:llm:research:weekly:
+*** [[https://www.interconnects.ai/feed][Interconnects]] :interconnects:personal:newsletter:llm:research:policy:
+*** [[https://importai.substack.com/feed][Import AI]] :importai:personal:newsletter:research:policy:weekly:aggregator:
+*** [[https://eugeneyan.com/rss/][Eugene Yan]] :eugeneyan:personal:mlops:recsys:
 *** [[https://www.answer.ai/index.xml][Answer.AI]] :answerai:llm:research:corp:
-*** [[https://huggingface.co/blog/feed.xml][Hugging Face]] :huggingface:llm:corp:
+*** [[https://huggingface.co/blog/feed.xml][Hugging Face]] :huggingface:llm:corp:vendor:
 *** [[https://research.google/blog/rss/][Google Research]] :google_research:research:corp:
-*** [[https://bair.berkeley.edu/blog/feed.xml][BAIR Berkeley]] :bair:research:papers:deep:
-*** [[https://openai.com/news/rss.xml][OpenAI News]] :openai:llm:corp:release:
+*** [[https://bair.berkeley.edu/blog/feed.xml][BAIR Berkeley]] :bair:academic:research:papers:deep:
+*** [[https://openai.com/news/rss.xml][OpenAI News]] :openai:llm:corp:vendor:release:
 
 ** Data & MLOps                                                   :data:mlops:
-*** [[https://airflow.apache.org/blog/index.xml][Apache Airflow]] :airflow:orchestration:release:
-*** [[https://www.dataengineeringweekly.com/feed][Data Engineering Weekly]] :dataengweekly:aggregator:weekly:
-*** [[https://duckdb.org/feed.xml][DuckDB]] :duckdb:databases:release:
-*** [[https://netflixtechblog.com/feed][Netflix Tech Blog]] :netflix:corp:blog:systems:
-*** [[https://medium.com/feed/airbnb-engineering][Airbnb Engineering]] :airbnb:corp:blog:systems:
-*** [[https://www.databricks.com/blog/feed][Databricks]] :databricks:corp:blog:vendor:
-*** [[https://www.uber.com/blog/rss/][Uber Engineering]] :uber:corp:blog:systems:
+*** [[https://airflow.apache.org/blog/index.xml][Apache Airflow]] :airflow:project:orchestration:release:
+*** [[https://www.dataengineeringweekly.com/feed][Data Engineering Weekly]] :dataengweekly:personal:newsletter:aggregator:weekly:
+*** [[https://duckdb.org/feed.xml][DuckDB]] :duckdb:project:databases:release:
+*** [[https://netflixtechblog.com/feed][Netflix Tech Blog]] :netflix:corp:eng:systems:
+*** [[https://medium.com/feed/airbnb-engineering][Airbnb Engineering]] :airbnb:corp:eng:systems:
+*** [[https://www.databricks.com/blog/feed][Databricks]] :databricks:corp:vendor:
+*** [[https://www.uber.com/blog/rss/][Uber Engineering]] :uber:corp:eng:systems:
 
 ** Emacs                                                          :emacs:foss:
-*** [[https://planet.emacslife.com/atom.xml][Planet Emacslife]] :emacslife:aggregator:blog:firehose:
-*** [[https://systemcrafters.net/rss/news.xml][System Crafters]] :systemcrafters:blog:
-*** [[https://www.masteringemacs.org/feed][Mastering Emacs]] :masteringemacs:blog:deep:slow:
-*** [[https://protesilaos.com/master.xml][Protesilaos]] :prot:blog:release:
+*** [[https://planet.emacslife.com/atom.xml][Planet Emacslife]] :emacslife:aggregator:firehose:
+*** [[https://systemcrafters.net/rss/news.xml][System Crafters]] :systemcrafters:personal:
+*** [[https://www.masteringemacs.org/feed][Mastering Emacs]] :masteringemacs:personal:deep:slow:
+*** [[https://protesilaos.com/master.xml][Protesilaos]] :prot:personal:release:
 *** [[https://lobste.rs/t/emacs.rss][Lobsters Emacs]] :lobsters_emacs:aggregator:
 
 ** Linux                                                          :linux:foss:
-*** [[https://itsfoss.com/rss/][It's Foss]] :itsfoss:distro:firehose:
-*** [[https://archlinux.org/feeds/news/][Arch Linux]] :arch:distro:release:
-*** [[https://archlinux.org/feeds/planet/][Arch Linux Planet]] :arch:blog:aggregator:distro:
-*** [[https://lwn.net/headlines/newrss][LWN]] :lwn:kernel:systems:deep:
-*** [[https://www.phoronix.com/rss.php][Phoronix]] :phoronix:kernel:hardware:firehose:
-*** [[https://9to5linux.com/feed/atom][9to5Linux]] :9to5linux:distro:firehose:
-*** [[https://fedoramagazine.org/feed/][Fedora Magazine]] :fedora:distro:blog:
+*** [[https://itsfoss.com/rss/][It's Foss]] :itsfoss:outlet:distro:firehose:
+*** [[https://archlinux.org/feeds/news/][Arch Linux]] :arch:project:distro:release:
+*** [[https://archlinux.org/feeds/planet/][Arch Linux Planet]] :arch:project:aggregator:distro:
+*** [[https://lwn.net/headlines/newrss][LWN]] :lwn:outlet:kernel:systems:deep:
+*** [[https://www.phoronix.com/rss.php][Phoronix]] :phoronix:outlet:kernel:hardware:firehose:
+*** [[https://9to5linux.com/feed/atom][9to5Linux]] :9to5linux:outlet:distro:firehose:
+*** [[https://fedoramagazine.org/feed/][Fedora Magazine]] :fedora:project:distro:
 
 ** Homelab                                                      :homelab:foss:
-*** [[https://noted.lol/rss][Noted Homelab]] :noted:selfhost:blog:
-*** [[https://selfh.st/rss/][selfh.st]] :selfhst:selfhost:aggregator:weekly:
-*** [[https://tailscale.com/blog/index.xml][Tailscale]] :tailscale:networking:corp:blog:
-*** [[https://www.jeffgeerling.com/blog.xml][Jeff Geerling]] :geerling:hardware:k8s:blog:
-*** [[https://technotim.live/feed.xml][Techno Tim]] :technotim:hardware:k8s:selfhost:
-*** [[https://www.servethehome.com/feed/][ServeTheHome]] :servethehome:hardware:firehose:
+*** [[https://noted.lol/rss][Noted Homelab]] :noted:personal:selfhost:
+*** [[https://selfh.st/rss/][selfh.st]] :selfhst:personal:newsletter:selfhost:aggregator:weekly:
+*** [[https://tailscale.com/blog/index.xml][Tailscale]] :tailscale:corp:vendor:networking:
+*** [[https://www.jeffgeerling.com/blog.xml][Jeff Geerling]] :geerling:personal:hardware:k8s:
+*** [[https://technotim.live/feed.xml][Techno Tim]] :technotim:personal:hardware:k8s:selfhost:
+*** [[https://www.servethehome.com/feed/][ServeTheHome]] :servethehome:outlet:hardware:firehose:
 
 ** News                                                                 :news:
-*** [[https://feber.se/rss/][Feber]] :feber:firehose:
-*** [[https://www.sweclockers.com/feeds/nyheter][SweClockers]] :sweclockers:hardware:firehose:
+*** [[https://feber.se/rss/][Feber]] :feber:outlet:sv:firehose:
+*** [[https://www.sweclockers.com/feeds/nyheter][SweClockers]] :sweclockers:outlet:sv:hardware:firehose:
 *** [[https://news.ycombinator.com/rss][Hacker News]] :hn:aggregator:firehose:
 *** [[https://hnrss.org/best][Hacker News Best]] :hn_best:aggregator:daily:
 *** [[https://hnrss.org/frontpage?points=250][Hacker News 250+ Points]] :hn_250:aggregator:daily:
 *** [[https://lobste.rs/rss][lobster]] :lobsters:aggregator:firehose:
-*** [[https://hackaday.com/blog/feed/][Hackaday]] :hackaday:hardware:firehose:
-*** [[https://www.theregister.com/headlines.atom][The Register]] :theregister:firehose:
-*** [[https://feeds.arstechnica.com/arstechnica/index][Ars Technica]] :arstechnica:firehose:
-*** [[https://www.svt.se/nyheter/rss.xml][SVT Nyheter]] :svt:firehose:
-*** [[https://api.sr.se/api/rss/program/83][Sveriges Radio Ekot]] :ekot:firehose:
-*** [[https://computersweden.idg.se/feed][Computer Sweden]] :computersweden:daily:
+*** [[https://hackaday.com/blog/feed/][Hackaday]] :hackaday:outlet:hardware:firehose:
+*** [[https://www.theregister.com/headlines.atom][The Register]] :theregister:outlet:firehose:
+*** [[https://feeds.arstechnica.com/arstechnica/index][Ars Technica]] :arstechnica:outlet:firehose:
+*** [[https://www.svt.se/nyheter/rss.xml][SVT Nyheter]] :svt:outlet:sv:firehose:
+*** [[https://api.sr.se/api/rss/program/83][Sveriges Radio Ekot]] :ekot:outlet:sv:firehose:
+*** [[https://computersweden.idg.se/feed][Computer Sweden]] :computersweden:outlet:sv:daily:
 
 ** Security                                                         :security:
-*** [[https://krebsonsecurity.com/feed/][Krebs on Security]] :krebs:blog:
-*** [[https://www.schneier.com/feed/atom/][Schneier on Security]] :schneier:blog:policy:
-*** [[https://googleprojectzero.blogspot.com/feeds/posts/default][Google Project Zero]] :projectzero:research:corp:deep:slow:
+*** [[https://krebsonsecurity.com/feed/][Krebs on Security]] :krebs:personal:
+*** [[https://www.schneier.com/feed/atom/][Schneier on Security]] :schneier:personal:policy:
+*** [[https://googleprojectzero.blogspot.com/feeds/posts/default][Google Project Zero]] :projectzero:corp:eng:research:deep:slow:
 
 ** Games                                                               :games:
-*** [[https://www.fz.se/feeds/nyheter][FZ]] :fz:firehose:
-*** [[https://www.polygon.com/rss/index.xml][Polygon]] :polygon:firehose:
-*** [[https://www.rockpapershotgun.com/feed][Rock Paper Shotgun]] :rps:firehose:
-*** [[https://www.pcgamer.com/rss/][PC Gamer]] :pcgamer:firehose:
+*** [[https://www.fz.se/feeds/nyheter][FZ]] :fz:outlet:sv:firehose:
+*** [[https://www.polygon.com/rss/index.xml][Polygon]] :polygon:outlet:firehose:
+*** [[https://www.rockpapershotgun.com/feed][Rock Paper Shotgun]] :rps:outlet:firehose:
+*** [[https://www.pcgamer.com/rss/][PC Gamer]] :pcgamer:outlet:firehose:
 
 ** Tech radar                                                     :tech_radar:
-*** DZone                                                 :dzone:aggregator:
+*** DZone                                            :dzone:outlet:aggregator:
 **** [[https://feeds.dzone.com/ai-ml][DZone ai-ml]] :dzone_aiml:ml:llm:
 **** [[https://feeds.dzone.com/deployment][DZone development]] :dzone_deploy:devops:
 **** [[https://feeds.dzone.com/cloud-architecture][DZone cloud architecture]] :dzone_cloud:cloud:architecture:
 **** [[https://feeds.dzone.com/devops-and-cicd][DZone devops and cicd]] :dzone_devops:devops:cicd:
 **** [[https://feeds.dzone.com/open-source][DZone open source]] :dzone_oss:foss:
 **** [[https://feeds.dzone.com/tools][DZone tools]] :dzone_tools:tooling:
-*** InfoQ                                                 :infoq:aggregator:
+*** InfoQ                                            :infoq:outlet:aggregator:
 **** [[https://feed.infoq.com/development][InfoQ development]] :infoq_dev:architecture:
 **** [[https://feed.infoq.com/architecture-design][InfoQ architecture design]] :infoq_arch:architecture:
 **** [[https://feed.infoq.com/architecture/articles/][InfoQ architecture articles]] :infoq_arch_articles:architecture:deep:
@@ -116,5 +116,5 @@
 *** [[https://www.smbc-comics.com/comic/rss][SMBC]] :smbc:comic:
 *** [[https://www.monkeyuser.com/index.xml][Monkeyuser]] :monkeyuser:comic:
 *** [[https://turnoff.us/feed.xml][turnoff.us]] :turnoff:comic:
-*** [[http://syndication.thedailywtf.com/TheDailyWtf][The Daily WTF]] :dailywtf:opinion:
+*** [[http://syndication.thedailywtf.com/TheDailyWtf][The Daily WTF]] :dailywtf:outlet:opinion:
 *** [[https://www.commitstrip.com/en/feed/][CommitStrip]] :commitstrip:comic:

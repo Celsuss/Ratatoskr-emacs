@@ -21,7 +21,7 @@
   ;; `rata-test-elfeed-view-tags-exist-in-feeds-org' checks the contract.
   '(;; Domain — these tags are the section headings of feeds.org.
     ("a" "all"        "All Unread"        "@6-months-ago +unread")
-    ("b" "blogs"      "Blogs"             "@6-months-ago +unread +blog")
+    ("b" "personal"   "Personal Blogs"    "@6-months-ago +unread +personal")
     ("d" "dev"        "Dev"               "@6-months-ago +unread +dev")
     ("m" "ml"         "Machine Learning"  "@6-months-ago +unread +ml")
     ("D" "data"       "Data & MLOps"      "@6-months-ago +unread +data")
@@ -39,13 +39,27 @@
     ("F" "firehose"   "Firehose"          "@3-days-ago +unread +firehose")
     ("S" "slow"       "Slow Burners"      "@1-year-ago +unread +slow")
     ("L" "deep"       "Long-form"         "@1-year-ago +unread +deep")
-    ;; Content type.  `corp' is "written by a company, not a person": Netflix,
-    ;; Airbnb, Uber, Databricks, Tailscale, Hugging Face, Google Research,
-    ;; OpenAI, Answer.AI, Project Zero.
+    ;; Source — who writes it.  feeds.org gives a feed at most one of these,
+    ;; so they partition rather than overlap: `personal' one named human's own
+    ;; site, `corp' a company, `project' an OSS project or distro, `outlet' a
+    ;; publication with staff writers, `academic' a university lab.  An
+    ;; aggregator has none of them, and neither does a comic — `+personal' is
+    ;; for reading people, and XKCD next to Dan Luu is not that.  The old
+    ;; `blog' tag meant "is a blog", which is nearly everything, so +blog
+    ;; listed Tailscale next to Julia Evans; `personal' is the half that was
+    ;; wanted and `corp' its opposite.
     ("c" "corp"       "Company Blogs"     "@6-months-ago +unread +corp")
+    (nil "corp_eng"   "Company Eng Blogs" "@6-months-ago +unread +corp +eng")
+    (nil "project"    "Project Blogs"     "@6-months-ago +unread +project")
+    (nil "outlet"     "Publications"      "@2-weeks-ago +unread +outlet")
+    (nil "academic"   "Academic"          "@1-year-ago +unread +academic")
+    ;; Format and language.
     ("r" "release"    "Releases"          "@3-months-ago +unread +release")
     ("A" "aggregator" "Aggregators"       "@2-weeks-ago +unread +aggregator")
+    (nil "newsletter" "Newsletters"       "@1-month-ago +unread +newsletter")
     (nil "comic"      "Comics"            "@1-month-ago +unread +comic")
+    ;; Swedish-language feeds, so `-sv' can drop them in one term.
+    (nil "swedish"    "Swedish"           "@1-week-ago +unread +sv")
     ;; Topic — cuts across sections, which is the whole point.
     ("i" "llm"        "AI & LLM"          "@6-months-ago +unread +llm")
     ;; Arch gets a year: both archlinux.org feeds together are low volume
