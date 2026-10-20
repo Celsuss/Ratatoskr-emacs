@@ -1,5 +1,5 @@
 #!/bin/sh
-# Stands in for curl in rata-test-hn-curl-retrieve-plumbing: no network.
+# Stands in for curl in rata-test-net-curl-retrieve-plumbing: no network.
 # Prints the file $RATA_FAKE_CURL_BODY, then the --write-out status line
 # ($RATA_FAKE_CURL_STATUS), then exits with $RATA_FAKE_CURL_EXIT.  The
 # arguments it was given go to $RATA_FAKE_CURL_ARGS, one per line.

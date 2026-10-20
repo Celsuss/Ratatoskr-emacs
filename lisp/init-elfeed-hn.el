@@ -12,8 +12,10 @@
 ;; Three rules hold the async part together, the same ones the claude-loop
 ;; follows at a larger size:
 ;;
-;; - `rata-elfeed-hn--retrieve' is the only function that touches the network,
-;;   so the tests replace exactly one function.
+;; - `rata-net-retrieve' (init-net.el) is the only function that touches the
+;;   network, so the tests replace exactly one function.  It fetches with curl,
+;;   and that is not a detail: url.el cannot reach a host that publishes an
+;;   AAAA record from a network with no IPv6 route (FAIL-0024).
 ;; - Every reply is delivered from a zero-delay timer, never from inside
 ;;   url.el's process callback, and an error in it becomes a result, not a
 ;;   signal: a signal there is demoted to a *Messages* line nobody reads.
@@ -24,6 +26,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'init-net)
 
 (declare-function elfeed-deref "elfeed-db" (ref))
 (declare-function elfeed-entry-content "elfeed-db" (entry))
@@ -47,9 +50,12 @@
 One request returns the story and its whole comment tree, however big."
   :type 'string)
 
-(defcustom rata-elfeed-hn-timeout 20
-  "Seconds before a request is abandoned and reported as timed out."
-  :type 'number)
+;; Fetching moved to init-net.el when plain elfeed entries turned out to need
+;; the same curl path (FAIL-0027); the old names still work from custom.el.
+(define-obsolete-variable-alias 'rata-elfeed-hn-timeout 'rata-net-timeout "2026-10-20")
+(define-obsolete-variable-alias 'rata-elfeed-hn-curl-program 'rata-net-curl-program "2026-10-20")
+(define-obsolete-variable-alias 'rata-elfeed-hn-max-images 'rata-net-max-images "2026-10-20")
+(define-obsolete-variable-alias 'rata-elfeed-hn-image-max-bytes 'rata-net-image-max-bytes "2026-10-20")
 
 (defconst rata-elfeed-hn--item-url-regexp
   "\\`https?://\\(?:www\\.\\)?news\\.ycombinator\\.com/item\\?id=\\([0-9]+\\)\\'"
@@ -86,188 +92,12 @@ otherwise CONTENT is searched for the shape an HN feed writes."
   (defvar shr-width)
   (defvar shr-max-width)
   (defvar shr-base)
-  (defvar browse-url-handlers)
-  (defvar url-http-response-status)
-  (defvar url-http-content-type)
-  (defvar url-http-end-of-headers))
-
-(defun rata-elfeed-hn--read-response (status max-bytes)
-  "Turn the current url.el response buffer into a result plist.
-STATUS is url.el's status list.  Returns (:ok t :type TYPE :body STRING)
-or (:error REASON).  A body over MAX-BYTES is an error, not a truncation;
-MAX-BYTES nil means no cap."
-  (condition-case err
-      (cond
-       ((plist-get status :error)
-        (list :error (rata-elfeed-hn--error-reason (plist-get status :error))))
-       (t
-        (let ((code (bound-and-true-p url-http-response-status))
-              (ctype (or (bound-and-true-p url-http-content-type) "")))
-          (cond
-           ((and code (not (<= 200 code 299))) (list :error (format "HTTP %s" code)))
-           ((not (bound-and-true-p url-http-end-of-headers))
-            (list :error "no response"))
-           ((and max-bytes (> (- (point-max) url-http-end-of-headers) max-bytes))
-            (list :error (format "over %d KB" (/ max-bytes 1024))))
-           (t
-            (rata-elfeed-hn--ok-result
-             ctype (buffer-substring-no-properties
-                    (1+ url-http-end-of-headers) (point-max))))))))
-    (error (list :error (error-message-string err)))))
-
-(defun rata-elfeed-hn--text-type-p (type)
-  "Non-nil when the MIME TYPE is text to decode, not bytes to keep."
-  (string-match-p "\\`text/\\|json\\|xml\\|javascript" type))
-
-(defun rata-elfeed-hn--ok-result (ctype bytes)
-  "Return the success plist for raw BYTES of Content-Type CTYPE.
-Text is decoded with the charset CTYPE names, UTF-8 when it names none
-Emacs knows.  Anything else -- an image -- is kept as the bytes it is,
-except an SVG, which is XML but must reach `create-image' undecoded."
-  (let* ((type (downcase (string-trim (car (split-string ctype ";")))))
-         (charset (and (string-match "charset=\\([^; ]+\\)" ctype)
-                       (intern-soft (downcase (match-string 1 ctype)))))
-         (coding (if (and charset (coding-system-p charset)) charset 'utf-8)))
-    (list :ok t
-          :type type
-          :body (if (and (rata-elfeed-hn--text-type-p type)
-                         (not (string-prefix-p "image/" type)))
-                    (decode-coding-string bytes coding)
-                  bytes))))
-
-(defun rata-elfeed-hn--error-reason (err)
-  "Return a short reason string for url.el error ERR."
-  (pcase err
-    (`(error http ,code) (format "HTTP %s" code))
-    (`(,_ . ,data) (format "%s" (if (consp data) (car (last data)) data)))
-    (_ (format "%s" err))))
-
-(defcustom rata-elfeed-hn-curl-program "curl"
-  "The curl executable, or nil to fetch with Emacs's own url.el.
-curl is the default because it races IPv6 against IPv4 (happy eyeballs)
-and url.el does not: on a network that hands out an IPv6 address but
-does not route it, url.el waits out a connect timeout on every site that
-publishes an AAAA record -- most of Cloudflare -- and the article reads
-\"timed out\".  url.el is used when curl is not on PATH."
-  :type '(choice (string :tag "Program") (const :tag "url.el" nil)))
-
-(defconst rata-elfeed-hn--curl-status-format "\n%{http_code} %{content_type}"
-  "curl --write-out format: a last line with the status and content type.")
-
-(defun rata-elfeed-hn--curl-args (url max-bytes timeout)
-  "Return curl's arguments for fetching URL.  Pure.
-MAX-BYTES (nil: no cap) stops a download the server declares too big;
-TIMEOUT is in seconds."
-  `("--silent" "--show-error" "--location" "--compressed"
-    "--max-time" ,(number-to-string timeout)
-    ,@(when max-bytes (list "--max-filesize" (number-to-string max-bytes)))
-    "--write-out" ,rata-elfeed-hn--curl-status-format
-    "--" ,url))
-
-(defun rata-elfeed-hn--curl-result (output exit stderr max-bytes)
-  "Turn a finished curl run into a result plist.  Pure.
-OUTPUT is its raw stdout -- the body, then the status line that
-`rata-elfeed-hn--curl-status-format' appends; EXIT its exit code; STDERR
-its error text.  A body over MAX-BYTES (nil: no cap) is an error."
-  (let* ((cut (string-match "\n\\([0-9]+\\) \\([^\n]*\\)\\'" output))
-         (code (and cut (string-to-number (match-string 1 output))))
-         (ctype (and cut (match-string 2 output)))
-         (body (and cut (substring output 0 cut))))
-    (cond
-     ((eql exit 28) (list :error "timed out"))
-     ((eql exit 63) (list :error (format "over %d KB" (/ (or max-bytes 0) 1024))))
-     ((not (eql exit 0))
-      (list :error (let ((msg (string-trim (or stderr ""))))
-                     (if (string-empty-p msg)
-                         (format "curl exited %s" exit)
-                       (replace-regexp-in-string "\\`curl: ([0-9]+) " "" msg)))))
-     ((not cut) (list :error "no response"))
-     ((not (<= 200 code 299)) (list :error (format "HTTP %d" code)))
-     ((and max-bytes (> (string-bytes body) max-bytes))
-      (list :error (format "over %d KB" (/ max-bytes 1024))))
-     (t (rata-elfeed-hn--ok-result ctype body)))))
-
-(defun rata-elfeed-hn--curl-retrieve (program url max-bytes finish)
-  "Fetch URL with curl PROGRAM; call FINISH with the result plist.
-Return the process."
-  (let* ((out (generate-new-buffer " *rata-elfeed-hn-curl*"))
-         (err (generate-new-buffer " *rata-elfeed-hn-curl-err*"))
-         ;; An explicit pipe, so its own "Process ... finished" line is not
-         ;; written into the error text.
-         (err-pipe (make-pipe-process :name "rata-elfeed-hn-curl-err" :buffer err
-                                      :noquery t :sentinel #'ignore)))
-    (with-current-buffer out (set-buffer-multibyte nil))
-    (make-process
-     :name "rata-elfeed-hn-curl"
-     :buffer out
-     :stderr err-pipe
-     :coding 'binary
-     :connection-type 'pipe
-     :noquery t
-     :command (cons program (rata-elfeed-hn--curl-args url max-bytes rata-elfeed-hn-timeout))
-     :sentinel
-     (lambda (proc _event)
-       (unless (process-live-p proc)
-         (unwind-protect
-             (funcall finish
-                      (condition-case e
-                          (rata-elfeed-hn--curl-result
-                           (with-current-buffer out (buffer-string))
-                           (process-exit-status proc)
-                           (with-current-buffer err (buffer-string))
-                           max-bytes)
-                        (error (list :error (error-message-string e)))))
-           (kill-buffer out)
-           ;; The stderr pipe has a process of its own; let it go with the buffer.
-           (when-let* ((ep (get-buffer-process err))) (delete-process ep))
-           (kill-buffer err)))))))
-
-(defun rata-elfeed-hn--url-retrieve (url max-bytes finish)
-  "Fetch URL with url.el; call FINISH with the result plist.
-Return the response buffer."
-  (url-retrieve url
-                (lambda (status)
-                  (funcall finish (rata-elfeed-hn--read-response status max-bytes))
-                  (kill-buffer (current-buffer)))
-                nil t t))
-
-(defun rata-elfeed-hn--retrieve (url max-bytes callback)
-  "Fetch URL and call CALLBACK with a result plist, from a timer.
-The only function in this module that touches the network: through curl
-when `rata-elfeed-hn-curl-program' is on PATH, else url.el.  The result
-is (:ok t :type CONTENT-TYPE :body STRING) or (:error REASON); CALLBACK
-is called exactly once, even when the request times out or never starts.
-A body over MAX-BYTES (nil: no cap) is an error."
-  (let* ((done nil)
-         (finish (lambda (result)
-                   (unless done
-                     (setq done t)
-                     (run-at-time 0 nil callback result)))))
-    (condition-case err
-        (let* ((curl (and rata-elfeed-hn-curl-program
-                          (executable-find rata-elfeed-hn-curl-program)))
-               (handle (if curl
-                           (rata-elfeed-hn--curl-retrieve curl url max-bytes finish)
-                         (rata-elfeed-hn--url-retrieve url max-bytes finish))))
-          ;; curl enforces --max-time itself; this is the backstop for both,
-          ;; a little later so that curl's own verdict normally wins.
-          (run-at-time (+ rata-elfeed-hn-timeout 2) nil
-                       (lambda ()
-                         (unless done
-                           (funcall finish (list :error "timed out"))
-                           (let ((proc (if (processp handle)
-                                           handle
-                                         (and (buffer-live-p handle)
-                                              (get-buffer-process handle)))))
-                             (when (process-live-p proc) (delete-process proc)))
-                           (when (and (bufferp handle) (buffer-live-p handle))
-                             (kill-buffer handle))))))
-      (error (funcall finish (list :error (error-message-string err)))))))
+  (defvar browse-url-handlers))
 
 (defun rata-elfeed-hn--fetch-json (id callback)
   "Fetch HN item ID from Algolia; call CALLBACK with (:ok JSON) or (:error REASON).
 JSON is parsed with objects as alists and null as nil."
-  (rata-elfeed-hn--retrieve
+  (rata-net-retrieve
    (concat rata-elfeed-hn-api-url (number-to-string id))
    ;; No cap: a few thousand comments is legitimately several megabytes.
    nil
@@ -460,79 +290,30 @@ contents."
     (insert html)
     (libxml-parse-html-region (point-min) (point-max))))
 
-(defcustom rata-elfeed-hn-max-images 40
-  "Most images fetched for one article; the rest keep their placeholder."
-  :type 'integer)
-
-(defcustom rata-elfeed-hn-image-max-bytes (* 5 1024 1024)
-  "Largest image fetched, in bytes."
-  :type 'integer)
-
-(defconst rata-elfeed-hn--image-parallel 6
-  "Images fetched at once.")
+(defun rata-elfeed-hn--image-guard ()
+  "Return the image guard for the current buffer, for `init-net'.
+The same staleness rule as every other reply here: an image drawn into
+the entry buffer after it has moved on to another story is worse than
+no image at all."
+  (let ((buffer (current-buffer)))
+    (lambda (fn) (rata-elfeed-hn--guard buffer fn))))
 
 (defun rata-elfeed-hn--insert-dom (dom width &optional base)
   "Insert DOM at point, rendered by `shr' to WIDTH columns.
 BASE is the URL relative links and images resolve against.
 
-shr fetches images itself, with `url-queue-retrieve' -- url.el, which
-stalls on an unrouted IPv6 address exactly as articles did (FAIL-0024),
-and gives up after `url-queue-timeout'.  So while shr renders, its
-requests are recorded instead of sent, and fetched afterwards through
-`rata-elfeed-hn--retrieve'; each arrival goes back to shr's own
-`shr-replace-image', so placeholders, sizing and image keys stay shr's."
+The images go through `rata-net-with-shr-images' rather than shr's own
+`url-queue-retrieve': url.el stalls on an unrouted IPv6 address exactly
+as articles did (FAIL-0024), and gives up after `url-queue-timeout'."
   (require 'shr)
   (let ((shr-width width)
-        (shr-max-width nil)
-        (requests nil))
-    (cl-letf (((symbol-function 'url-queue-retrieve)
-               (lambda (url _callback cbargs &rest _)
-                 (push (cons url cbargs) requests))))
+        (shr-max-width nil))
+    (rata-net-with-shr-images (rata-elfeed-hn--image-guard)
       ;; `shr-insert-document' binds `shr-base' to nil and takes the base
       ;; only from a <base> element, so binding it around the call does
       ;; nothing: relative images and links stayed relative.
-      (shr-insert-document (if base `(base ((href . ,base)) ,dom) dom)))
-    (unless (bolp) (insert "\n"))
-    (when requests
-      (rata-elfeed-hn--fetch-images (nreverse requests)))))
-
-(defun rata-elfeed-hn--place-image (result buffer start end flags)
-  "Put the image in RESULT between START and END of BUFFER, shr's placeholder.
-A failed fetch leaves the placeholder; so does a placeholder whose text
-has since been deleted."
-  (when (and (plist-get result :ok)
-             (markerp start) (markerp end)
-             (eq (marker-buffer start) buffer)
-             (< start end))
-    (let ((type (plist-get result :type)))
-      (shr-replace-image (if (string-prefix-p "image/" type)
-                             (list (plist-get result :body) (intern type))
-                           (plist-get result :body))
-                         start end flags))))
-
-(defun rata-elfeed-hn--fetch-images (requests)
-  "Fetch shr's image REQUESTS, a few at a time, into the current buffer.
-REQUESTS are (URL BUFFER START END FLAGS), as shr handed them to
-`url-queue-retrieve'.  At most `rata-elfeed-hn-max-images' are fetched.
-Each arrival is guarded like any other reply, so leaving the entry
-stops the queue rather than filling a buffer that has moved on."
-  (let* ((queue (seq-take requests rata-elfeed-hn-max-images))
-         (buffer (current-buffer))
-         next)
-    (setq next
-          (lambda ()
-            (when-let* ((request (pop queue)))
-              (rata-elfeed-hn--retrieve
-               (car request) rata-elfeed-hn-image-max-bytes
-               (rata-elfeed-hn--guard
-                buffer
-                (lambda (result)
-                  (unwind-protect
-                      (pcase-let ((`(,_ ,start ,end ,flags) (cdr request)))
-                        (rata-elfeed-hn--place-image result buffer start end flags))
-                    (funcall next))))))))
-    (dotimes (_ rata-elfeed-hn--image-parallel)
-      (funcall next))))
+      (shr-insert-document (if base `(base ((href . ,base)) ,dom) dom))
+      (unless (bolp) (insert "\n")))))
 
 (defun rata-elfeed-hn--insert-html (html width)
   "Insert HTML at point, rendered by `shr' to WIDTH columns.
@@ -685,7 +466,7 @@ readable text succeeds.  FORCE skips the cache."
   (let ((cached (and (not force) (gethash url rata-elfeed-hn--article-cache))))
     (if cached
         (run-at-time 0 nil callback (list :ok cached))
-      (rata-elfeed-hn--retrieve
+      (rata-net-retrieve
        url rata-elfeed-hn-article-max-bytes
        (lambda (result)
          (funcall callback

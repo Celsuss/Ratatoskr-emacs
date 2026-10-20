@@ -2156,6 +2156,213 @@ and every one of lsp-ui's own placement knobs measures against the frame.
                      (cons 200 500))))))
 
 ;;; ============================================================
+;;; Test — fetching with curl (lisp/init-net.el)
+;;; ============================================================
+;;
+;; The fence below is the whole suite's: `rata-net-retrieve' is the only
+;; function in this config that opens a connection, so overriding it here
+;; fails any test that would reach the network, in this section and in the
+;; elfeed and Hacker News ones below.  A test that needs a reply stubs it.
+
+(require 'init-net)
+
+(advice-add 'rata-net-retrieve :override
+            (lambda (url &rest _)
+              (error "rata-test: `rata-net-retrieve' (%s) would reach the network; stub it in the test"
+                     url))
+            '((name . rata-test-no-network)))
+
+(ert-deftest rata-test-net-read-response ()
+  "url.el's response buffer becomes a result: status, cap, charset."
+  (cl-flet ((response (code ctype body &optional max)
+              (with-temp-buffer
+                (set-buffer-multibyte nil)
+                (insert "HTTP/1.1 " (number-to-string code) " X\nContent-Type: " ctype "\n\n")
+                (setq-local url-http-end-of-headers (1- (point)))
+                (insert (encode-coding-string body 'utf-8))
+                (setq-local url-http-response-status code)
+                (setq-local url-http-content-type ctype)
+                (rata-net--read-response nil max))))
+    (should (equal (response 200 "text/html; charset=UTF-8" "<p>héllo</p>")
+                   '(:ok t :type "text/html" :body "<p>héllo</p>")))
+    (should (equal (response 404 "text/html" "gone") '(:error "HTTP 404")))
+    (should (equal (plist-get (response 200 "text/html" (make-string 3000 ?x) 2048) :error)
+                   "over 2 KB"))
+    (should (equal (rata-net--read-response '(:error (error http 500)) nil)
+                   '(:error "HTTP 500")))))
+
+(ert-deftest rata-test-net-curl-args ()
+  "curl follows redirects, bounds time and, when asked, size; URL comes last."
+  (let ((args (rata-net--curl-args "https://example.com/a" 2048 20)))
+    (should (member "--location" args))
+    (should (equal (cadr (member "--max-time" args)) "20"))
+    (should (equal (cadr (member "--max-filesize" args)) "2048"))
+    (should (equal (last args 2) '("--" "https://example.com/a"))))
+  (should-not (member "--max-filesize" (rata-net--curl-args "https://x" nil 20))))
+
+(ert-deftest rata-test-net-curl-result ()
+  "curl's stdout, exit code and stderr become a result, never a signal."
+  (let ((ok (encode-coding-string "<p>héllo</p>\n200 text/html; charset=UTF-8" 'utf-8)))
+    (should (equal (rata-net--curl-result ok 0 "" nil)
+                   '(:ok t :type "text/html" :body "<p>héllo</p>"))))
+  (should (equal (rata-net--curl-result "gone\n404 text/html" 0 "" nil)
+                 '(:error "HTTP 404")))
+  (should (equal (rata-net--curl-result "%PDF\n200 application/pdf" 0 "" nil)
+                 '(:ok t :type "application/pdf" :body "%PDF")))
+  (should (equal (rata-net--curl-result "" 28 "curl: (28) Operation timed out" nil)
+                 '(:error "timed out")))
+  (should (equal (rata-net--curl-result "" 63 "" 2048) '(:error "over 2 KB")))
+  (should (equal (rata-net--curl-result (concat (make-string 3000 ?x) "\n200 text/html") 0 "" 2048)
+                 '(:error "over 2 KB")))
+  (should (equal (rata-net--curl-result "" 6 "curl: (6) Could not resolve host: x\n" nil)
+                 '(:error "Could not resolve host: x")))
+  (should (equal (rata-net--curl-result "" 7 "" nil) '(:error "curl exited 7")))
+  (should (equal (rata-net--curl-result "no status line" 0 "" nil)
+                 '(:error "no response"))))
+
+(ert-deftest rata-test-net-curl-retrieve-plumbing ()
+  "A real process through `rata-net--curl-retrieve', against a stub curl.
+This is the path that replaced url.el for articles: url.el does not race
+IPv6 against IPv4, so on a network with an unrouted IPv6 address every
+site that publishes an AAAA record timed out."
+  (let* ((program (expand-file-name "tests/fixtures/fake-curl" user-emacs-directory))
+         (args-file (make-temp-file "rata-fake-curl-args"))
+         (process-environment
+          (append (list (concat "RATA_FAKE_CURL_BODY="
+                                (expand-file-name "tests/fixtures/hn/article.html" user-emacs-directory))
+                        (concat "RATA_FAKE_CURL_ARGS=" args-file))
+                  process-environment))
+         result)
+    (unwind-protect
+        (progn
+          (rata-net--curl-retrieve program "https://example.com/post" 4096
+                                         (lambda (r) (setq result r)))
+          (with-timeout (10 (ert-fail "the stub curl never finished"))
+            (while (not result) (accept-process-output nil 0.05)))
+          (should (eq (plist-get result :ok) t))
+          (should (equal (plist-get result :type) "text/html"))
+          (should (string-match-p "three properties we now think" (plist-get result :body)))
+          (should (member "https://example.com/post"
+                          (with-temp-buffer (insert-file-contents args-file)
+                                            (split-string (buffer-string) "\n" t))))
+          ;; A failing curl reports its exit, not a hang and not a signal.
+          (setq result nil)
+          (let ((process-environment (cons "RATA_FAKE_CURL_EXIT=28" process-environment)))
+            (rata-net--curl-retrieve program "https://example.com/post" nil
+                                           (lambda (r) (setq result r)))
+            (with-timeout (10 (ert-fail "the stub curl never finished"))
+              (while (not result) (accept-process-output nil 0.05))))
+          (should (equal result '(:error "timed out")))
+          (should-not (cl-find-if (lambda (b) (string-prefix-p " *rata-net-curl" (buffer-name b)))
+                                  (buffer-list))))
+      (delete-file args-file))))
+
+(ert-deftest rata-test-net-ok-result-keeps-image-bytes ()
+  "Text is decoded; an image, SVG included, is kept as the bytes it is."
+  (let ((png (unibyte-string #x89 ?P ?N ?G #x0d #x0a #x1a #x0a #xff #xd8)))
+    (should (equal (plist-get (rata-net--ok-result "image/png" png) :body) png))
+    (should-not (multibyte-string-p (plist-get (rata-net--ok-result "image/png" png) :body))))
+  (let ((svg (encode-coding-string "<svg>é</svg>" 'utf-8)))
+    (should (equal (plist-get (rata-net--ok-result "image/svg+xml" svg) :body) svg)))
+  (should (equal (plist-get (rata-net--ok-result "text/html; charset=utf-8"
+                                                       (encode-coding-string "é" 'utf-8))
+                            :body)
+                 "é")))
+
+
+
+(defconst rata-test-net--png (unibyte-string #x89 ?P ?N ?G #x0d #x0a #x1a #x0a)
+  "Enough of a PNG header to tell one result from another.")
+
+(defmacro rata-test-net--with-retrieve (routes &rest body)
+  "Run BODY with `rata-net-retrieve' answering from ROUTES, immediately.
+ROUTES is an alist of URL to result plist; an unrouted URL answers
+\(:error \"no route\").  Inside BODY, `asked' is an alist of URL to the
+size cap it was requested with, newest first.  The reply is delivered
+from the call itself rather than a timer, so a test need not drain."
+  (declare (indent 1))
+  `(let ((asked nil))
+     (cl-letf (((symbol-function 'rata-net-retrieve)
+                (lambda (url max callback)
+                  (push (cons url max) asked)
+                  (funcall callback (or (alist-get url ,routes nil nil #'equal)
+                                        '(:error "no route"))))))
+       ,@body)))
+
+(ert-deftest rata-test-net-guard-drops-a-stale-reply ()
+  "A guarded callback runs in its buffer, and only while it is still valid."
+  (let ((buffer (generate-new-buffer " *rata-test-net*"))
+        (valid t)
+        (ran nil))
+    (unwind-protect
+        (let* ((guard (rata-net-make-guard buffer (lambda () valid)))
+               (callback (funcall guard (lambda (x) (push (cons x (current-buffer)) ran)))))
+          (funcall callback 1)
+          (should (equal (car ran) (cons 1 buffer)))
+          ;; Invalid: the buffer has moved on to something else.
+          (setq valid nil)
+          (funcall callback 2)
+          (should (= (length ran) 1))
+          ;; An error in the callback is reported, never signalled: these run
+          ;; from a timer, where a signal is a line nobody reads.
+          (setq valid t)
+          (should-not (condition-case nil
+                          (progn (funcall (funcall guard (lambda (_) (error "boom"))) 3)
+                                 nil)
+                        (error t)))
+          ;; A dead buffer is not written to.
+          (kill-buffer buffer)
+          (funcall callback 4)
+          (should (= (length ran) 1)))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest rata-test-net-with-shr-images-fetches-what-shr-asked-for ()
+  "shr renders; `rata-net-retrieve' fetches; `shr-replace-image' places.
+The point of the macro is that `url-queue-retrieve' -- url.el, which
+cannot reach an AAAA-only host from a network with no IPv6 route -- is
+never called at all."
+  (require 'shr)
+  (with-temp-buffer
+    (let* ((placed nil)
+           (shr-use-fonts nil)
+           (shr-put-image-function
+            (lambda (spec alt &optional _flags)
+              (push (list (car spec) (cadr spec) alt) placed)
+              (insert "[IMG]"))))
+      (rata-test-net--with-retrieve
+          (list (cons "https://example.com/one.png"
+                      (list :ok t :type "image/png" :body rata-test-net--png)))
+        (cl-letf (((symbol-function 'url-queue-retrieve)
+                   (lambda (url &rest _) (error "shr fetched %s itself" url))))
+          (rata-net-with-shr-images (rata-net-make-guard (current-buffer))
+            (shr-insert-document
+             '(html nil (body nil (img ((src . "https://example.com/one.png")
+                                        (alt . "a picture"))))))))
+        (should (equal (car asked) (cons "https://example.com/one.png"
+                                         rata-net-image-max-bytes)))
+        (should (equal placed (list (list rata-test-net--png 'image/png "a picture"))))
+        (should (string-match-p "\\[IMG\\]" (buffer-string)))))))
+
+(ert-deftest rata-test-net-with-shr-images-degrades ()
+  "A failed fetch keeps shr's placeholder; a page with no image fetches nothing."
+  (require 'shr)
+  (with-temp-buffer
+    (let* ((placed nil)
+           (shr-use-fonts nil)
+           (shr-put-image-function (lambda (&rest args) (push args placed))))
+      (rata-test-net--with-retrieve nil
+        (rata-net-with-shr-images (rata-net-make-guard (current-buffer))
+          (shr-insert-document
+           '(html nil (body nil (img ((src . "https://example.com/gone.png")))))))
+        (should (equal (mapcar #'car asked) '("https://example.com/gone.png")))
+        (should-not placed))
+      (rata-test-net--with-retrieve nil
+        (rata-net-with-shr-images (ert-fail "no images, so no guard is needed")
+          (shr-insert-document '(html nil (body nil (p nil "no pictures here")))))
+        (should-not asked)))))
+
+
+;;; ============================================================
 ;;; Elfeed — the feeds.org tag contract
 ;;; ============================================================
 ;;
@@ -2328,22 +2535,86 @@ two upstream entry points have to keep existing across package updates."
   (skip-unless (require 'elfeed-org nil t))
   (should (fboundp 'rmh-elfeed-org-process-advice)))
 
+
+(ert-deftest rata-test-elfeed-insert-html-fetches-images-through-curl ()
+  "An image in an entry is fetched by `init-net', not by shr through url.el.
+
+Every picture in an entry used to be a grey box: shr draws
+`shr-make-placeholder-image' and fetches with `url-queue-retrieve',
+which cannot reach a host that publishes an AAAA record from a network
+with no IPv6 route, and `url-queue-timeout' kills the job after five
+seconds (FAIL-0027).  So the assert that matters is the one that fails
+if url.el is reached at all.
+
+`elfeed-insert-html' binds `url-queue-retrieve' itself, around whatever
+definition is current -- ours, since the advice is outside it -- so the
+recorder has to stay callable the way upstream calls it."
+  (skip-unless (require 'elfeed nil t))
+  (require 'elfeed-show)
+  (require 'shr)
+  (with-temp-buffer
+    (setq-local elfeed-show-entry 'entry-a)
+    (let* ((placed nil)
+           (shr-use-fonts nil)
+           (shr-put-image-function
+            (lambda (spec alt &optional _flags)
+              (push (list (car spec) (cadr spec) alt) placed)
+              (insert "[IMG]"))))
+      (rata-test-net--with-retrieve
+          (list (cons "https://example.com/posts/one.png"
+                      (list :ok t :type "image/png" :body rata-test-net--png)))
+        (cl-letf (((symbol-function 'url-queue-retrieve)
+                   (lambda (url &rest _) (error "shr fetched %s itself" url))))
+          ;; With a base, as `elfeed-show-refresh--mail-style' calls it: a
+          ;; relative src has to resolve before it is fetched.
+          (elfeed-insert-html "<p>words</p><img src=\"one.png\" alt=\"a picture\">"
+                              "https://example.com/posts/"))
+        (should (equal (car asked) (cons "https://example.com/posts/one.png"
+                                         rata-net-image-max-bytes)))
+        (should (equal placed (list (list rata-test-net--png 'image/png "a picture"))))))))
+
+(ert-deftest rata-test-elfeed-insert-html-drops-an-image-for-a-closed-entry ()
+  "elfeed shows every entry in one buffer, so a late image needs a guard.
+Without it, `n' to the next story and the picture from the previous one
+is drawn into it."
+  (skip-unless (require 'elfeed nil t))
+  (require 'elfeed-show)
+  (require 'shr)
+  (with-temp-buffer
+    (setq-local elfeed-show-entry 'entry-a)
+    (let* ((placed nil)
+           (pending nil)
+           (shr-use-fonts nil)
+           (shr-put-image-function (lambda (&rest args) (push args placed))))
+      (cl-letf (((symbol-function 'rata-net-retrieve)
+                 (lambda (url _max callback) (push (cons url callback) pending))))
+        (elfeed-insert-html "<img src=\"https://example.com/one.png\">")
+        (should pending)
+        ;; `n': the buffer now shows another entry.
+        (setq-local elfeed-show-entry 'entry-b)
+        (pcase-dolist (`(,_url . ,callback) pending)
+          (funcall callback (list :ok t :type "image/png" :body rata-test-net--png)))
+        (should-not placed)))))
+
+(ert-deftest rata-test-elfeed-insert-html-advice-is-live ()
+  "The fix is an advice, and an advice on a renamed function is silent.
+`elfeed-insert-html' is the single point every entry renders through --
+the body, `elfeed-show-fetch-link' and readable mode."
+  (should (advice-member-p #'rata-elfeed-insert-html-with-curl-images
+                           'elfeed-insert-html))
+  (skip-unless (require 'elfeed nil t))
+  (should (fboundp 'elfeed-insert-html)))
+
 ;;; ============================================================
 ;;; Test — Hacker News in elfeed (lisp/init-elfeed-hn.el)
 ;;; ============================================================
 ;;
-;; Nothing here reaches hn.algolia.com or an article's site: the fence below
-;; makes `rata-elfeed-hn--retrieve' -- the module's only network function --
-;; fail the calling test, and every test that needs a reply swaps in
-;; `rata-test-hn--with-net', which answers from tests/fixtures/hn/.
+;; Nothing here reaches hn.algolia.com or an article's site: the fence in the
+;; init-net section above fails any test that would, and every test that needs
+;; a reply swaps in `rata-test-hn--with-net', which answers from
+;; tests/fixtures/hn/.
 
 (require 'init-elfeed-hn)
-
-(advice-add 'rata-elfeed-hn--retrieve :override
-            (lambda (url &rest _)
-              (error "rata-test: `rata-elfeed-hn--retrieve' (%s) would reach the network; stub it in the test"
-                     url))
-            '((name . rata-test-no-network)))
 
 (defun rata-test-hn--fixture (name)
   "Return the contents of tests/fixtures/hn/NAME as a string."
@@ -2379,7 +2650,7 @@ reply arrives.  An unrouted URL answers (:error \"no fixture\")."
          (rata-test-hn--requests nil)
          (rata-test-hn--caps nil)
          (rata-test-hn--routes ,routes))
-     (cl-letf (((symbol-function 'rata-elfeed-hn--retrieve)
+     (cl-letf (((symbol-function 'rata-net-retrieve)
                 (lambda (url max callback)
                   (setq rata-test-hn--requests (append rata-test-hn--requests (list url)))
                   (push (cons url max) rata-test-hn--caps)
@@ -2534,25 +2805,6 @@ tests/fixtures/hn/item-8863.json is the Dropbox launch thread, captured
               (funcall g 5)
               (should (equal ran '(1))))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
-
-(ert-deftest rata-test-hn-read-response ()
-  "url.el's response buffer becomes a result: status, cap, charset."
-  (cl-flet ((response (code ctype body &optional max)
-              (with-temp-buffer
-                (set-buffer-multibyte nil)
-                (insert "HTTP/1.1 " (number-to-string code) " X\nContent-Type: " ctype "\n\n")
-                (setq-local url-http-end-of-headers (1- (point)))
-                (insert (encode-coding-string body 'utf-8))
-                (setq-local url-http-response-status code)
-                (setq-local url-http-content-type ctype)
-                (rata-elfeed-hn--read-response nil max))))
-    (should (equal (response 200 "text/html; charset=UTF-8" "<p>héllo</p>")
-                   '(:ok t :type "text/html" :body "<p>héllo</p>")))
-    (should (equal (response 404 "text/html" "gone") '(:error "HTTP 404")))
-    (should (equal (plist-get (response 200 "text/html" (make-string 3000 ?x) 2048) :error)
-                   "over 2 KB"))
-    (should (equal (rata-elfeed-hn--read-response '(:error (error http 500)) nil)
-                   '(:error "HTTP 500")))))
 
 (defconst rata-test-hn--feed-url "https://news.ycombinator.com/rss")
 
@@ -3012,84 +3264,6 @@ renderer's `elfeed-entry-content' marker is not there to find."
                 (should (= (length (rata-test-hn--blocks)) 5))))
           (when (get-buffer "*HN 1000*") (kill-buffer "*HN 1000*")))))))
 
-(ert-deftest rata-test-hn-curl-args ()
-  "curl follows redirects, bounds time and, when asked, size; URL comes last."
-  (let ((args (rata-elfeed-hn--curl-args "https://example.com/a" 2048 20)))
-    (should (member "--location" args))
-    (should (equal (cadr (member "--max-time" args)) "20"))
-    (should (equal (cadr (member "--max-filesize" args)) "2048"))
-    (should (equal (last args 2) '("--" "https://example.com/a"))))
-  (should-not (member "--max-filesize" (rata-elfeed-hn--curl-args "https://x" nil 20))))
-
-(ert-deftest rata-test-hn-curl-result ()
-  "curl's stdout, exit code and stderr become a result, never a signal."
-  (let ((ok (encode-coding-string "<p>héllo</p>\n200 text/html; charset=UTF-8" 'utf-8)))
-    (should (equal (rata-elfeed-hn--curl-result ok 0 "" nil)
-                   '(:ok t :type "text/html" :body "<p>héllo</p>"))))
-  (should (equal (rata-elfeed-hn--curl-result "gone\n404 text/html" 0 "" nil)
-                 '(:error "HTTP 404")))
-  (should (equal (rata-elfeed-hn--curl-result "%PDF\n200 application/pdf" 0 "" nil)
-                 '(:ok t :type "application/pdf" :body "%PDF")))
-  (should (equal (rata-elfeed-hn--curl-result "" 28 "curl: (28) Operation timed out" nil)
-                 '(:error "timed out")))
-  (should (equal (rata-elfeed-hn--curl-result "" 63 "" 2048) '(:error "over 2 KB")))
-  (should (equal (rata-elfeed-hn--curl-result (concat (make-string 3000 ?x) "\n200 text/html") 0 "" 2048)
-                 '(:error "over 2 KB")))
-  (should (equal (rata-elfeed-hn--curl-result "" 6 "curl: (6) Could not resolve host: x\n" nil)
-                 '(:error "Could not resolve host: x")))
-  (should (equal (rata-elfeed-hn--curl-result "" 7 "" nil) '(:error "curl exited 7")))
-  (should (equal (rata-elfeed-hn--curl-result "no status line" 0 "" nil)
-                 '(:error "no response"))))
-
-(ert-deftest rata-test-hn-curl-retrieve-plumbing ()
-  "A real process through `rata-elfeed-hn--curl-retrieve', against a stub curl.
-This is the path that replaced url.el for articles: url.el does not race
-IPv6 against IPv4, so on a network with an unrouted IPv6 address every
-site that publishes an AAAA record timed out."
-  (let* ((program (expand-file-name "tests/fixtures/hn/fake-curl" user-emacs-directory))
-         (args-file (make-temp-file "rata-fake-curl-args"))
-         (process-environment
-          (append (list (concat "RATA_FAKE_CURL_BODY="
-                                (expand-file-name "tests/fixtures/hn/article.html" user-emacs-directory))
-                        (concat "RATA_FAKE_CURL_ARGS=" args-file))
-                  process-environment))
-         result)
-    (unwind-protect
-        (progn
-          (rata-elfeed-hn--curl-retrieve program "https://example.com/post" 4096
-                                         (lambda (r) (setq result r)))
-          (with-timeout (10 (ert-fail "the stub curl never finished"))
-            (while (not result) (accept-process-output nil 0.05)))
-          (should (eq (plist-get result :ok) t))
-          (should (equal (plist-get result :type) "text/html"))
-          (should (string-match-p "three properties we now think" (plist-get result :body)))
-          (should (member "https://example.com/post"
-                          (with-temp-buffer (insert-file-contents args-file)
-                                            (split-string (buffer-string) "\n" t))))
-          ;; A failing curl reports its exit, not a hang and not a signal.
-          (setq result nil)
-          (let ((process-environment (cons "RATA_FAKE_CURL_EXIT=28" process-environment)))
-            (rata-elfeed-hn--curl-retrieve program "https://example.com/post" nil
-                                           (lambda (r) (setq result r)))
-            (with-timeout (10 (ert-fail "the stub curl never finished"))
-              (while (not result) (accept-process-output nil 0.05))))
-          (should (equal result '(:error "timed out")))
-          (should-not (cl-find-if (lambda (b) (string-prefix-p " *rata-elfeed-hn-curl" (buffer-name b)))
-                                  (buffer-list))))
-      (delete-file args-file))))
-
-(ert-deftest rata-test-hn-ok-result-keeps-image-bytes ()
-  "Text is decoded; an image, SVG included, is kept as the bytes it is."
-  (let ((png (unibyte-string #x89 ?P ?N ?G #x0d #x0a #x1a #x0a #xff #xd8)))
-    (should (equal (plist-get (rata-elfeed-hn--ok-result "image/png" png) :body) png))
-    (should-not (multibyte-string-p (plist-get (rata-elfeed-hn--ok-result "image/png" png) :body))))
-  (let ((svg (encode-coding-string "<svg>é</svg>" 'utf-8)))
-    (should (equal (plist-get (rata-elfeed-hn--ok-result "image/svg+xml" svg) :body) svg)))
-  (should (equal (plist-get (rata-elfeed-hn--ok-result "text/html; charset=utf-8"
-                                                       (encode-coding-string "é" 'utf-8))
-                            :body)
-                 "é")))
-
 (defmacro rata-test-hn--with-image-article (images &rest body)
   "Show the edge thread with an article holding two images, replies IMAGES.
 IMAGES is an alist of image URL to fake result.  Inside BODY,
@@ -3126,7 +3300,7 @@ src resolves against the article: `shr-insert-document' ignores a bound
     (should (member "https://example.com/img/one.png" rata-test-hn--requests))
     (should (member "https://cdn.example.net/two.png" rata-test-hn--requests))
     (should (equal (alist-get "https://example.com/img/one.png" rata-test-hn--caps nil nil #'equal)
-                   rata-elfeed-hn-image-max-bytes))
+                   rata-net-image-max-bytes))
     (should (equal (sort (mapcar #'caddr placed) #'string<)
                    '("the new build graph" "the old build graph")))
     (should (cl-every (lambda (p) (and (equal (car p) rata-test-hn--png) (eq (cadr p) 'image/png)))
@@ -3142,9 +3316,9 @@ src resolves against the article: `shr-insert-document' ignores a bound
                                     "https://example.com/posts/part-two")))))
 
 (ert-deftest rata-test-hn-article-images-degrade-and-stop ()
-  "A failed image keeps its placeholder; at most `rata-elfeed-hn-max-images'
+  "A failed image keeps its placeholder; at most `rata-net-max-images'
 are fetched; and leaving the entry stops the queue."
-  (let ((rata-elfeed-hn-max-images 1))
+  (let ((rata-net-max-images 1))
     (rata-test-hn--with-image-article
         (list (cons "https://example.com/img/one.png" (list :error "HTTP 404")))
       (rata-test-hn--flush)

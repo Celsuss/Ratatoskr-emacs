@@ -1,8 +1,13 @@
 ;;; -*- lexical-binding: t; -*-
 ;;; init-elfeed.el --- Elfeed RSS reader configuration
 
+(require 'init-net)
+
 (eval-when-compile
-  (defvar elfeed-search-filter))
+  (defvar elfeed-search-filter)
+  (defvar elfeed-show-entry))
+
+(declare-function elfeed-insert-html "elfeed-show" (html &optional base-url))
 
 (defcustom rata-elfeed-feeds-file
   (expand-file-name "feeds.org" user-emacs-directory)
@@ -184,6 +189,42 @@ Additive — a tag no longer declared for a feed is left in place."
   (rmh-elfeed-org-process-advice)
   (elfeed-apply-autotags-now)
   (elfeed-db-save))
+
+;;; ------------------------------------------------------------
+;;; Images in an entry
+;;; ------------------------------------------------------------
+
+;; Every picture in an entry was a grey box: shr draws
+;; `shr-make-placeholder-image' and then fetches with `url-queue-retrieve',
+;; which is url.el, which cannot reach a host that publishes an AAAA record
+;; from this network -- and `url-queue-timeout' is five seconds, so the job is
+;; killed and the placeholder is permanent (FAIL-0027, the same root cause as
+;; FAIL-0024).  Hacker News entries had pictures because `init-elfeed-hn.el'
+;; already fetched through curl; this gives every other entry the same path.
+;;
+;; `elfeed-insert-html' is the single point: the entry body, `elfeed-show-
+;; fetch-link' and readable mode all render through it.
+
+(defun rata-elfeed--image-guard ()
+  "Return the image guard for the current entry buffer, for `init-net'.
+elfeed renders every entry into the one `*elfeed-entry*' buffer, so an
+image that arrives after `n' or `p' would be drawn under a different
+story; it is dropped instead."
+  (rata-net-make-guard
+   (current-buffer)
+   (let ((entry (bound-and-true-p elfeed-show-entry)))
+     (lambda () (eq (bound-and-true-p elfeed-show-entry) entry)))))
+
+(defun rata-elfeed-insert-html-with-curl-images (fn &rest args)
+  "Call FN with ARGS, fetching the images it renders through `init-net'.
+`:around' advice on `elfeed-insert-html'."
+  (rata-net-with-shr-images (rata-elfeed--image-guard)
+    (apply fn args)))
+
+;; Top level, not in `use-package' :config: advice on a function elfeed has not
+;; defined yet is applied when it is, and a :config body is only as live as the
+;; feature it names.
+(advice-add 'elfeed-insert-html :around #'rata-elfeed-insert-html-with-curl-images)
 
 ;; Upstream moved development to `main' and froze `master' at 2026-02-18, and
 ;; elpaca keeps a clone on whatever branch was the default when it was made.

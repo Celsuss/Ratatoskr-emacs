@@ -113,6 +113,7 @@ normally for a full backtrace.  Otherwise, catch and log them to
 
 (rata-load-module 'init-pkg)
 (rata-load-module 'init-system)
+(rata-load-module 'init-net)          ; curl-based fetching; shr images for elfeed et al.
 (rata-load-module 'init-ui)
 (rata-load-module 'init-evil)        ; includes (elpaca-wait) — general + evil synchronize here
 (rata-load-module 'init-completion)

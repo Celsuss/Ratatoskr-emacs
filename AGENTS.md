@@ -139,7 +139,7 @@ The config follows a modular structure: `early-init.el` → `init.el` → module
 3. Modules are loaded in strict order (dependencies matter):
 
 ```
-init-pkg → init-system → init-ui → init-evil → init-completion →
+init-pkg → init-system → init-net → init-ui → init-evil → init-completion →
 init-dev → init-lang → init-rust → init-go → init-python → init-cpp →
 init-cmake → init-terraform → init-just → init-docker → init-markdown →
 init-yaml → init-ansible → init-jupyter → init-helm → init-pkgbuild →
@@ -152,6 +152,33 @@ init-present → init-dashboard
 **Key modules:**
 - `init-pkg.el` — elpaca config, `use-package-always-ensure t`
 - `init-system.el` — no-littering, exec-path-from-shell, savehist, recentf, ediff, TRAMP, shackle
+- `init-net.el` — one function for fetching a URL (`rata-net-retrieve`) and the glue
+  that makes `shr` use it for a page's images (`rata-net-with-shr-images`). Owns no
+  package. It exists because **url.el does not race IPv6 against IPv4 the way curl
+  does**: on a network that advertises an IPv6 address and a default route but carries
+  no IPv6 traffic — an ordinary RA here, with or without the VPN — every host that
+  publishes an AAAA record is unreachable from url.el, while curl has it in under a
+  second (FAIL-0024, FAIL-0027). Three things are load-bearing. **It is the only
+  function in the config that opens a connection**, so the test suite fences exactly one
+  symbol: `rata-net-retrieve` is advised to fail any test that would reach the network.
+  **Every reply is a result plist delivered from a timer**, `(:ok t :type T :body S)` or
+  `(:error REASON)`, exactly once, never a signal — curl's exit code, a size cap and the
+  backstop timeout all become the same shape. **Images are shr's, not ours**:
+  `rata-net-with-shr-images` records the `url-queue-retrieve` calls shr makes instead of
+  sending them (a five-second `url-queue-timeout` is what turned every picture into a
+  permanent grey `shr-make-placeholder-image`), fetches them here, and hands each arrival
+  back to `shr-replace-image`, so placeholders, sizing and image keys stay upstream's. A
+  caller passes a guard (`rata-net-make-guard`) so a late image is dropped rather than
+  drawn into a buffer that has moved on. Tests: `rata-test-net-*`, against
+  `tests/fixtures/fake-curl`; nothing contacts the network.
+- `init-elfeed.el` — elfeed itself: the `rata-elfeed-views` filter table behind the `f`
+  prefix, `feeds.org` through elfeed-org, and `rata-elfeed-retag`. It also gives every
+  entry its pictures: an `:around` advice on `elfeed-insert-html` — the single point the
+  body, `elfeed-show-fetch-link` and readable mode all render through — wraps the render
+  in `rata-net-with-shr-images`, with a guard keyed on `elfeed-show-entry`, because
+  elfeed shows every entry in the one `*elfeed-entry*` buffer and a late image would
+  otherwise land under the next story. The advice is at top level, not in the
+  `use-package` `:config`.
 - `init-ui.el` — gruvbox-dark-medium theme, relative line numbers, which-key, nerd-icons, golden-ratio
 - `init-evil.el` — evil + evil-collection, `general.el` with `rata-leader` definer (`SPC`), winum; contains `(elpaca-wait)` to synchronize general + evil before downstream modules use them
 - `init-completion.el` — orderless + vertico + marginalia + consult + embark + corfu
@@ -372,12 +399,14 @@ init-present → init-dashboard
   whole thread from the Algolia API in one request. An entry is HN only if its content has
   the shape an HN feed writes or its link is an item URL (`rata-elfeed-hn-item-id`, pure),
   so a blog post linking a discussion is left alone, and every non-HN entry is
-  byte-identical. Four things are load-bearing. **`rata-elfeed-hn--retrieve` is the only
-  network call**, through curl when it is on PATH (url.el does not fall back from an
-  unrouted IPv6 address, so articles timed out; shr's own image fetches are
-  recorded during rendering and sent through it too), always answers from a timer with a result plist, never a signal; the
-  harness overrides it to fail, and tests use `rata-test-hn--with-net` with fixtures under
-  `tests/fixtures/hn/`. **Replies are guarded** (`rata-elfeed-hn--guard`): drawn only if the
+  byte-identical. Four things are load-bearing. **`rata-net-retrieve` (`init-net.el`) is
+  the only network call**, through curl because url.el does not fall back from an
+  unrouted IPv6 address, so articles timed out; the article's images go the same way,
+  through `rata-net-with-shr-images`. It always answers from a timer with a result plist,
+  never a signal; the harness overrides it to fail, and tests use `rata-test-hn--with-net`
+  with fixtures under `tests/fixtures/hn/`.  The fetching used to live here and moved to
+  `init-net.el` when plain elfeed entries turned out to need it too; the old variable
+  names are obsolete aliases. **Replies are guarded** (`rata-elfeed-hn--guard`): drawn only if the
   buffer still shows the same thing under the same `rata-elfeed-hn--generation`, which every
   redraw bumps. **Sections are found by the `rata-elfeed-hn-section` text property** and
   replaced whole, so the article and the thread draw in whichever order they arrive.
