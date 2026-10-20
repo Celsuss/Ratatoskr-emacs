@@ -1,13 +1,19 @@
 ;;; -*- lexical-binding: t; -*-
-;;; init-elfeed-hn.el --- Hacker News stories and comments inside elfeed
+;;; init-elfeed-hn.el --- Aggregator stories and comments inside elfeed
 
-;; An HN entry in elfeed carries no article: the news.ycombinator.com feed's
-;; content is the single word "Comments", hnrss's a list of URLs.  This module
-;; teaches elfeed's own entry buffer to show what the entry is about -- the
-;; story, a readable copy of the linked article, and the whole comment thread
-;; -- through `elfeed-show-update-hook'.  It owns no package: `url-retrieve',
-;; `json-parse-string' and `shr' are built in.  Plan and design:
-;; plans/hackernews-reader.md.
+;; An entry from an aggregator carries no article: Hacker News writes the
+;; single word "Comments" (hnrss a list of URLs), Lobsters writes the same one
+;; link.  This module teaches elfeed's own entry buffer to show what the entry
+;; is about -- the story, a readable copy of the linked article, and the whole
+;; comment thread -- through `elfeed-show-update-hook'.  It owns no package:
+;; `rata-net-retrieve', `json-parse-string' and `shr' do the work.  Plan and
+;; design: plans/hackernews-reader.md.
+;;
+;; Two sites, one renderer.  Everything site-specific -- how an entry is
+;; recognised, where the thread comes from, how that reply becomes the thread
+;; plist, what a permalink looks like -- is a row of `rata-elfeed-hn--sources',
+;; and nothing after that table mentions either site.  The file and its symbols
+;; keep the `hn' name they were born with; Lobsters came second (2026-10-20).
 ;;
 ;; Three rules hold the async part together, the same ones the claude-loop
 ;; follows at a larger size:
@@ -42,12 +48,18 @@
 (declare-function rata-leader "init-evil" (&rest args))
 
 (defgroup rata-elfeed-hn nil
-  "Hacker News story and comments in elfeed's entry buffer."
+  "Aggregator stories and comments in elfeed's entry buffer."
   :group 'rata)
 
 (defcustom rata-elfeed-hn-api-url "https://hn.algolia.com/api/v1/items/"
   "Algolia HN item endpoint; the item id is appended.
 One request returns the story and its whole comment tree, however big."
+  :type 'string)
+
+(defcustom rata-elfeed-hn-lobsters-url "https://lobste.rs/"
+  "Base URL of the Lobsters instance.
+One request to s/ID.json returns the story and every comment, flat,
+each carrying its own depth."
   :type 'string)
 
 ;; Fetching moved to init-net.el when plain elfeed entries turned out to need
@@ -57,30 +69,108 @@ One request returns the story and its whole comment tree, however big."
 (define-obsolete-variable-alias 'rata-elfeed-hn-max-images 'rata-net-max-images "2026-10-20")
 (define-obsolete-variable-alias 'rata-elfeed-hn-image-max-bytes 'rata-net-image-max-bytes "2026-10-20")
 
-(defconst rata-elfeed-hn--item-url-regexp
-  "\\`https?://\\(?:www\\.\\)?news\\.ycombinator\\.com/item\\?id=\\([0-9]+\\)\\'"
-  "Matches a whole HN item URL; group 1 is the id.")
+(defconst rata-elfeed-hn--sources
+  '((hn
+     :name "HN"
+     :label "Hacker News"
+     :numeric-id t
+     :item-url-regexp
+     "\\`https?://\\(?:www\\.\\)?news\\.ycombinator\\.com/item\\?id=\\([0-9]+\\)\\'"
+     :content-regexps
+     (;; news.ycombinator.com/rss: the whole content is this one link.
+      "href=\"https?://\\(?:www\\.\\)?news\\.ycombinator\\.com/item\\?id=\\([0-9]+\\)\"[^>]*>Comments</a>"
+      ;; hnrss.org: "Comments URL: <a href=...>", plain text in older entries.
+      "Comments URL:[ \t]*\\(?:<a href=\"\\)?https?://\\(?:www\\.\\)?news\\.ycombinator\\.com/item\\?id=\\([0-9]+\\)")
+     :api rata-elfeed-hn--hn-api-url
+     :thread rata-elfeed-hn--thread-from-algolia
+     :item-url rata-elfeed-hn--hn-item-url
+     :comment-url rata-elfeed-hn--hn-item-url)
+    (lobsters
+     :name "Lobsters"
+     :label "Lobsters"
+     :numeric-id nil
+     ;; A story URL is /s/ID or /s/ID/slug; the slug is decoration.
+     :item-url-regexp "\\`https?://lobste\\.rs/s/\\([A-Za-z0-9]+\\)\\(?:/[^ \t\n]*\\)?\\'"
+     :content-regexps
+     (;; lobste.rs/rss on a link story: the whole content is this one link.
+      "href=\"https?://lobste\\.rs/s/\\([A-Za-z0-9]+\\)[^\"]*\"[^>]*>Comments</a>")
+     :api rata-elfeed-hn--lobsters-api-url
+     :thread rata-elfeed-hn--thread-from-lobsters
+     :item-url rata-elfeed-hn--lobsters-item-url
+     :comment-url rata-elfeed-hn--lobsters-comment-url))
+  "The aggregators this module reads, as (SOURCE . PLIST).
 
-(defconst rata-elfeed-hn--content-id-regexps
-  '(;; news.ycombinator.com/rss: the whole content is this one link.
-    "href=\"https?://\\(?:www\\.\\)?news\\.ycombinator\\.com/item\\?id=\\([0-9]+\\)\"[^>]*>Comments</a>"
-    ;; hnrss.org: "Comments URL: <a href=...>", plain text in older entries.
-    "Comments URL:[ \t]*\\(?:<a href=\"\\)?https?://\\(?:www\\.\\)?news\\.ycombinator\\.com/item\\?id=\\([0-9]+\\)")
-  "Regexps finding the HN item id in an HN feed's entry content.
-Anchored on the shape each feed writes rather than on any item URL, so
-a blog post that merely links to an HN discussion is not taken for one.")
+Everything that differs between Hacker News and Lobsters is here:
+how an entry is recognised, where the thread is fetched, how that
+reply becomes the thread plist both are drawn from, and what a
+permalink looks like.  Nothing below this table mentions either site.
 
-(defun rata-elfeed-hn-item-id (content link)
-  "Return the HN item id for an entry with CONTENT and LINK, or nil.
-Pure.  LINK wins when it is itself an item URL (an Ask HN entry);
-otherwise CONTENT is searched for the shape an HN feed writes."
-  (cond
-   ((and (stringp link) (string-match rata-elfeed-hn--item-url-regexp link))
-    (string-to-number (match-string 1 link)))
-   ((stringp content)
-    (cl-loop for re in rata-elfeed-hn--content-id-regexps
-             when (string-match re content)
-             return (string-to-number (match-string 1 content))))))
+`:content-regexps' are anchored on the shape each feed writes rather
+than on any item URL, so a blog post that merely links to a discussion
+is not taken for one.  Group 1 is the id in every regexp, including
+`:item-url-regexp'.  `:numeric-id' says whether that id is a number
+\(HN) or a string (Lobsters' base-36 short id).
+
+The `hn' in this file's symbols is where it started, not what it
+covers; renaming 900 lines and their tests would be churn.")
+
+(defun rata-elfeed-hn--spec (source &optional prop)
+  "Return SOURCE's entry in `rata-elfeed-hn--sources', or its PROP."
+  (let ((spec (alist-get source rata-elfeed-hn--sources)))
+    (if prop (plist-get spec prop) spec)))
+
+(defun rata-elfeed-hn--prop (item prop)
+  "Return PROP of the source of ITEM, a (SOURCE . ID) cons."
+  (rata-elfeed-hn--spec (car-safe item) prop))
+
+(defun rata-elfeed-hn--make-item (source id-string)
+  "Return the (SOURCE . ID) cons for the matched ID-STRING."
+  (cons source (if (rata-elfeed-hn--spec source :numeric-id)
+                   (string-to-number id-string)
+                 id-string)))
+
+(defun rata-elfeed-hn-item (content link)
+  "Return (SOURCE . ID) for an entry with CONTENT and LINK, or nil.
+Pure.  LINK wins when it is itself an item URL (an Ask HN entry, a
+Lobsters text post); otherwise CONTENT is searched for the shape each
+feed writes."
+  (or (and (stringp link)
+           (cl-loop for (source . spec) in rata-elfeed-hn--sources
+                    when (string-match (plist-get spec :item-url-regexp) link)
+                    return (rata-elfeed-hn--make-item source (match-string 1 link))))
+      (and (stringp content)
+           (cl-loop for (source . spec) in rata-elfeed-hn--sources
+                    thereis (cl-loop for re in (plist-get spec :content-regexps)
+                                     when (string-match re content)
+                                     return (rata-elfeed-hn--make-item
+                                             source (match-string 1 content)))))))
+
+(defun rata-elfeed-hn--hn-api-url (id)
+  "Return the Algolia URL for HN item ID."
+  (concat rata-elfeed-hn-api-url (number-to-string id)))
+
+(defun rata-elfeed-hn--hn-item-url (id)
+  "Return the HN permalink of item or comment ID."
+  (format "https://news.ycombinator.com/item?id=%s" id))
+
+(defun rata-elfeed-hn--lobsters-api-url (id)
+  "Return the Lobsters JSON URL for story ID."
+  (concat rata-elfeed-hn-lobsters-url "s/" id ".json"))
+
+(defun rata-elfeed-hn--lobsters-item-url (id)
+  "Return the Lobsters permalink of story ID."
+  (concat rata-elfeed-hn-lobsters-url "s/" id))
+
+(defun rata-elfeed-hn--lobsters-comment-url (id)
+  "Return the Lobsters permalink of comment ID.
+A comment has its own short id, on /c/ rather than /s/."
+  (concat rata-elfeed-hn-lobsters-url "c/" id))
+
+(defun rata-elfeed-hn--item-url-p (url)
+  "Non-nil when URL is some source's item URL."
+  (and (stringp url)
+       (cl-loop for (_source . spec) in rata-elfeed-hn--sources
+                thereis (string-match-p (plist-get spec :item-url-regexp) url))))
 
 ;;; ------------------------------------------------------------
 ;;; Network -- one function, results not signals
@@ -94,11 +184,12 @@ otherwise CONTENT is searched for the shape an HN feed writes."
   (defvar shr-base)
   (defvar browse-url-handlers))
 
-(defun rata-elfeed-hn--fetch-json (id callback)
-  "Fetch HN item ID from Algolia; call CALLBACK with (:ok JSON) or (:error REASON).
+(defun rata-elfeed-hn--fetch-json (item callback)
+  "Fetch ITEM's thread; call CALLBACK with (:ok JSON) or (:error REASON).
+ITEM is a (SOURCE . ID) cons; its source says which endpoint to ask.
 JSON is parsed with objects as alists and null as nil."
   (rata-net-retrieve
-   (concat rata-elfeed-hn-api-url (number-to-string id))
+   (funcall (rata-elfeed-hn--prop item :api) (cdr item))
    ;; No cap: a few thousand comments is legitimately several megabytes.
    nil
    (lambda (result)
@@ -118,14 +209,14 @@ JSON is parsed with objects as alists and null as nil."
 ;;; Parsing -- pure
 ;;; ------------------------------------------------------------
 
-(defun rata-elfeed-hn--comment-from-json (node depth)
+(defun rata-elfeed-hn--comment-from-algolia (node depth)
   "Return the comment plist for Algolia NODE at DEPTH, or nil to drop it.
 A comment with no author or no text is deleted or dead.  It is dropped,
 unless it has live replies: then it stays as a `:deleted' placeholder so
 the replies keep their parent."
   (when (equal (alist-get 'type node) "comment")
     (let* ((children (delq nil (mapcar (lambda (c)
-                                         (rata-elfeed-hn--comment-from-json c (1+ depth)))
+                                         (rata-elfeed-hn--comment-from-algolia c (1+ depth)))
                                        (alist-get 'children node))))
            (deleted (not (and (alist-get 'author node) (alist-get 'text node)))))
       (unless (and deleted (null children))
@@ -140,12 +231,14 @@ the replies keep their parent."
                                 sum (+ (if (plist-get c :deleted) 0 1)
                                        (plist-get c :replies))))))))
 
-(defun rata-elfeed-hn--thread-from-json (json)
+(defun rata-elfeed-hn--thread-from-algolia (json)
   "Return the story plist for the Algolia item JSON.
+This and `rata-elfeed-hn--thread-from-lobsters' are the two shapes the
+rest of the module never sees: everything below draws the plist.
 Keys: :id :title :url :author :points :time :text, :comments (the
 top-level comment plists, in order) and :count (live comments in the
 whole tree; deleted placeholders are not counted)."
-  (let ((comments (delq nil (mapcar (lambda (c) (rata-elfeed-hn--comment-from-json c 0))
+  (let ((comments (delq nil (mapcar (lambda (c) (rata-elfeed-hn--comment-from-algolia c 0))
                                     (alist-get 'children json)))))
     (list :id (alist-get 'id json)
           :title (alist-get 'title json)
@@ -159,26 +252,113 @@ whole tree; deleted placeholders are not counted)."
                           sum (+ (if (plist-get c :deleted) 0 1)
                                  (plist-get c :replies))))))
 
-(defvar rata-elfeed-hn--cache (make-hash-table)
-  "Parsed threads by item id, for this session.")
+(defun rata-elfeed-hn--lobsters-time (string)
+  "Return the epoch seconds of Lobsters timestamp STRING, or nil.
+Pure.  Lobsters writes RFC 3339 with an offset; a reply that does not
+parse costs an age, not the comment."
+  (when (stringp string)
+    (ignore-errors (float-time (date-to-time string)))))
 
-(defun rata-elfeed-hn--fetch-thread (id force callback)
-  "Call CALLBACK with (:ok THREAD) or (:error REASON) for HN item ID.
-A cached thread is answered from a timer too, so callers never see a
-synchronous reply; FORCE skips the cache."
-  (let ((cached (and (not force) (gethash id rata-elfeed-hn--cache))))
+(defun rata-elfeed-hn--lobsters-comment (node depth)
+  "Return the comment plist for Lobsters NODE at DEPTH, with no children yet.
+Pure.  A deleted or moderated comment keeps its place -- its replies
+hang off it -- but carries no author and no text."
+  (let ((deleted (or (eq t (alist-get 'is_deleted node))
+                     (eq t (alist-get 'is_moderated node))
+                     (null (alist-get 'commenting_user node)))))
+    (list :id (alist-get 'short_id node)
+          :author (unless deleted (alist-get 'commenting_user node))
+          :time (rata-elfeed-hn--lobsters-time (alist-get 'created_at node))
+          :text (unless deleted (alist-get 'comment node))
+          :depth depth
+          :deleted deleted
+          :children nil
+          :replies 0)))
+
+(defun rata-elfeed-hn--lobsters-tree (comments)
+  "Return Lobsters COMMENTS, a flat depth-ordered list, as a comment tree.
+Pure.  Lobsters sends the thread in reading order with a `depth' on
+each comment instead of nesting, so the nesting is rebuilt from the
+depth sequence: a comment deeper than the one before it is its reply.
+A depth that jumps by more than one is clamped to one level deeper,
+because a gap would otherwise silently drop the comment and its
+replies.  Returns the top-level comments, each with `:children' and
+the `:replies' count the renderer folds on."
+  (let ((roots nil)
+        (stack nil))                    ; innermost first: (DEPTH . COMMENT)
+    (dolist (node comments)
+      (let* ((raw (or (alist-get 'depth node) 0))
+             (want (if (numberp raw) raw (string-to-number (format "%s" raw))))
+             ;; Clamp against the comment before it, which is the head of the
+             ;; stack until the loop below pops back to this one's parent.
+             (depth (min (max want 0) (if stack (1+ (caar stack)) 0))))
+        (while (and stack (>= (caar stack) depth))
+          (pop stack))
+        (let ((comment (rata-elfeed-hn--lobsters-comment node depth)))
+          (if-let* ((parent (cdar stack)))
+              ;; `:children' is in every comment from the start, so this
+              ;; `plist-put' writes through the parent the tree already holds.
+              (plist-put parent :children
+                         (append (plist-get parent :children) (list comment)))
+            (push comment roots))
+          (push (cons depth comment) stack))))
+    (let ((tops (nreverse roots)))
+      (mapc #'rata-elfeed-hn--count-replies tops)
+      tops)))
+
+(defun rata-elfeed-hn--count-replies (comment)
+  "Set COMMENT's `:replies' from its children, depth first.  Returns it."
+  (let ((children (plist-get comment :children)))
+    (mapc #'rata-elfeed-hn--count-replies children)
+    (plist-put comment :replies
+               (cl-loop for c in children
+                        sum (+ (if (plist-get c :deleted) 0 1)
+                               (plist-get c :replies))))))
+
+(defun rata-elfeed-hn--thread-from-lobsters (json)
+  "Return the story plist for a Lobsters s/ID.json reply JSON.
+The same keys `rata-elfeed-hn--thread-from-algolia' returns, so nothing
+downstream knows which site it is looking at.  A Lobsters text post has
+`url' as the empty string rather than absent; that is a text post, not
+an article at \"\"."
+  (let* ((comments (rata-elfeed-hn--lobsters-tree (alist-get 'comments json)))
+         (url (alist-get 'url json)))
+    (list :id (alist-get 'short_id json)
+          :title (alist-get 'title json)
+          :url (unless (or (null url) (string-empty-p url)) url)
+          :author (alist-get 'submitter_user json)
+          :points (alist-get 'score json)
+          :time (rata-elfeed-hn--lobsters-time (alist-get 'created_at json))
+          :text (alist-get 'description json)
+          :comments comments
+          :count (cl-loop for c in comments
+                          sum (+ (if (plist-get c :deleted) 0 1)
+                                 (plist-get c :replies))))))
+
+;;; ------------------------------------------------------------
+;;; Fetching a thread
+;;; ------------------------------------------------------------
+
+(defvar rata-elfeed-hn--cache (make-hash-table :test 'equal)
+  "Parsed threads by (SOURCE . ID), for this session.")
+
+(defun rata-elfeed-hn--fetch-thread (item force callback)
+  "Call CALLBACK with (:ok THREAD) or (:error REASON) for ITEM.
+ITEM is a (SOURCE . ID) cons.  A cached thread is answered from a timer
+too, so callers never see a synchronous reply; FORCE skips the cache."
+  (let ((cached (and (not force) (gethash item rata-elfeed-hn--cache))))
     (if cached
         (run-at-time 0 nil callback (list :ok cached))
       (rata-elfeed-hn--fetch-json
-       id
+       item
        (lambda (result)
          (funcall callback
                   (if (plist-get result :error)
                       result
                     (condition-case err
-                        (let ((thread (rata-elfeed-hn--thread-from-json
-                                       (plist-get result :ok))))
-                          (puthash id thread rata-elfeed-hn--cache)
+                        (let ((thread (funcall (rata-elfeed-hn--prop item :thread)
+                                               (plist-get result :ok))))
+                          (puthash item thread rata-elfeed-hn--cache)
                           (list :ok thread))
                       (error (list :error (format "bad thread: %s"
                                                   (error-message-string err))))))))))))
@@ -216,7 +396,7 @@ An error in FN is reported with `message' and never signalled."
 ;;; ------------------------------------------------------------
 
 (defcustom rata-elfeed-hn-auto t
-  "Non-nil: fetch the thread when an HN entry is opened.
+  "Non-nil: fetch the thread when an aggregator entry is opened.
 Nil: only on \\`, c' (`rata-elfeed-hn-refetch')."
   :type 'boolean)
 
@@ -244,17 +424,17 @@ contents."
   "Faces cycled through for the gutter bar of each depth.")
 
 (defvar-local rata-elfeed-hn--item nil
-  "The HN item id the buffer shows, or nil when it shows no HN item.")
+  "The (SOURCE . ID) the buffer shows, or nil when it shows no thread.")
 
 (defvar rata-elfeed-hn--force nil
   "Non-nil while a redraw should bypass the session cache.")
 
-(defun rata-elfeed-hn--entry-item-id (entry)
-  "Return the HN item id of elfeed ENTRY, or nil."
+(defun rata-elfeed-hn--entry-item (entry)
+  "Return the (SOURCE . ID) of elfeed ENTRY, or nil."
   (when entry
     (let ((content (elfeed-deref (elfeed-entry-content entry))))
-      (rata-elfeed-hn-item-id (and (stringp content) content)
-                              (elfeed-entry-link entry)))))
+      (rata-elfeed-hn-item (and (stringp content) content)
+                           (elfeed-entry-link entry)))))
 
 (defun rata-elfeed-hn--age (time now)
   "Return how long before NOW the epoch second TIME was, as \"3h ago\"."
@@ -557,8 +737,8 @@ FORCE is passed on to an article fetch this starts."
                                   (list :html text)
                                 '(:empty)))))))))
 
-(defun rata-elfeed-hn--load (id force)
-  "Fetch thread ID, and the article when its URL is already known.
+(defun rata-elfeed-hn--load (item force)
+  "Fetch ITEM's thread, and the article when its URL is already known.
 Each is drawn when it arrives, whichever is first.  FORCE bypasses the
 session caches."
   (rata-elfeed-hn--draw-section
@@ -566,7 +746,7 @@ session caches."
   (when rata-elfeed-hn--article-url
     (rata-elfeed-hn--start-article rata-elfeed-hn--article-url force))
   (rata-elfeed-hn--fetch-thread
-   id force
+   item force
    (rata-elfeed-hn--guard
     (current-buffer)
     (lambda (result)
@@ -582,26 +762,27 @@ session caches."
            'article (lambda () (rata-elfeed-hn--insert-article
                                 (list :failed (plist-get result :error)))))))))))
 
-(defun rata-elfeed-hn--draw (id &optional title article-url)
-  "Draw HN item ID's story, article and thread at the end of the buffer.
+(defun rata-elfeed-hn--draw (item &optional title article-url)
+  "Draw ITEM's story, article and thread at the end of the buffer.
+ITEM is a (SOURCE . ID) cons, or nil for an entry from neither site.
 TITLE and ARTICLE-URL are what is known before the thread arrives.
 Bumps the generation, so a reply still in flight for the previous
 drawing is dropped when it arrives."
   (cl-incf rata-elfeed-hn--generation)
-  (setq rata-elfeed-hn--item id
+  (setq rata-elfeed-hn--item item
         rata-elfeed-hn--title title
         rata-elfeed-hn--article-url article-url
         rata-elfeed-hn--article-started nil)
   ;; The keys exist only where there is a thread: elfeed's entry buffer is
-  ;; reused for every entry, HN or not.
-  (rata-elfeed-hn-thread-mode (if id 1 -1))
-  (when id
+  ;; reused for every entry, aggregator or not.
+  (rata-elfeed-hn-thread-mode (if item 1 -1))
+  (when item
     (let ((force (or rata-elfeed-hn--force
                      (memq this-command '(elfeed-show-refresh revert-buffer)))))
       (rata-elfeed-hn--draw-section 'story (lambda () (rata-elfeed-hn--insert-story nil)))
       (rata-elfeed-hn--draw-section 'article (lambda () (rata-elfeed-hn--insert-article '(:waiting))))
       (if (or rata-elfeed-hn-auto force)
-          (rata-elfeed-hn--load id force)
+          (rata-elfeed-hn--load item force)
         (rata-elfeed-hn--draw-section
          'comments (lambda () (rata-elfeed-hn--insert-status ", c to load")))))))
 
@@ -610,7 +791,7 @@ drawing is dropped when it arrives."
 
 (defun rata-elfeed-hn--delete-feed-content ()
   "Delete the entry content elfeed drew, keeping its header.
-For an HN entry that content is the word \"Comments\" or a list of URLs.
+For such an entry that content is the word \"Comments\" or a list of URLs.
 The mail-style renderer marks where it starts; elfeed-goodies' plain one
 draws a newline and then the content."
   (let ((inhibit-read-only t)
@@ -619,27 +800,27 @@ draws a newline and then the content."
                    (point-max))))
 
 (defun rata-elfeed-hn-show-update ()
-  "Draw the HN story, article and thread for the entry just drawn.
+  "Draw the story, article and thread for the entry just drawn.
 On `elfeed-show-update-hook', which `elfeed-show-refresh' runs after every
 redraw: opening an entry, `n'/`p', `g', tagging.  Any other entry is left
 exactly as elfeed drew it."
   (setq rata-elfeed-hn--key elfeed-show-entry)
-  (let* ((id (rata-elfeed-hn--entry-item-id elfeed-show-entry))
-         (link (and id (elfeed-entry-link elfeed-show-entry))))
-    (when id
+  (let* ((item (rata-elfeed-hn--entry-item elfeed-show-entry))
+         (link (and item (elfeed-entry-link elfeed-show-entry))))
+    (when item
       (rata-elfeed-hn--delete-feed-content))
-    (rata-elfeed-hn--draw id
-                          (and id (elfeed-entry-title elfeed-show-entry))
-                          ;; An Ask HN entry links to the item itself: no article.
-                          (and (stringp link)
-                               (not (string-match-p rata-elfeed-hn--item-url-regexp link))
+    (rata-elfeed-hn--draw item
+                          (and item (elfeed-entry-title elfeed-show-entry))
+                          ;; An Ask HN entry, or a Lobsters text post, links to
+                          ;; the item itself: there is no article to fetch.
+                          (and (not (rata-elfeed-hn--item-url-p link))
                                link))))
 
 (defun rata-elfeed-hn-refetch ()
-  "Fetch the current HN thread and article again, bypassing the session cache."
+  "Fetch the current thread and article again, bypassing the session cache."
   (interactive)
   (unless rata-elfeed-hn--item
-    (user-error "No Hacker News thread here"))
+    (user-error "No comment thread here"))
   (let ((rata-elfeed-hn--force t))
     (if (derived-mode-p 'elfeed-show-mode)
         (elfeed-show-refresh)
@@ -786,19 +967,24 @@ Before the first comment, move to the first comment."
 ;;; ------------------------------------------------------------
 
 (defcustom rata-elfeed-hn-route-item-links t
-  "Non-nil: open news.ycombinator.com item links in a `*HN <id>*' buffer.
+  "Non-nil: open an HN or Lobsters item link in a thread buffer of its own.
 Applies to every `browse-url' call -- a link in a comment, in an Org note."
   :type 'boolean)
 
-(defun rata-elfeed-hn--item-url (id)
-  "Return the HN permalink of item ID."
-  (format "https://news.ycombinator.com/item?id=%s" id))
+(defun rata-elfeed-hn--item-url (item)
+  "Return the permalink of ITEM, a (SOURCE . ID) cons."
+  (funcall (rata-elfeed-hn--prop item :item-url) (cdr item)))
+
+(defun rata-elfeed-hn--comment-url (item comment-id)
+  "Return the permalink of COMMENT-ID in ITEM's thread.
+On HN a comment is an item like any other; on Lobsters it has a short
+id of its own, on a different path."
+  (funcall (rata-elfeed-hn--prop item :comment-url) comment-id))
 
 (defun rata-elfeed-hn--route-p (url &rest _)
   "Non-nil when `browse-url' should send URL here."
   (and rata-elfeed-hn-route-item-links
-       (stringp url)
-       (string-match-p rata-elfeed-hn--item-url-regexp url)))
+       (rata-elfeed-hn--item-url-p url)))
 
 (defun rata-elfeed-hn--browse-external (url)
   "Open URL with `browse-url', but never route it back here."
@@ -808,73 +994,86 @@ Applies to every `browse-url' call -- a link in a comment, in an Org note."
     (browse-url url)))
 
 (defun rata-elfeed-hn-browse-url (url &rest _)
-  "`browse-url' handler: show HN item URL in its own buffer."
+  "`browse-url' handler: show the item URL in its own buffer."
   (rata-elfeed-hn-open-item url))
 
 (defun rata-elfeed-hn-open-article ()
-  "Open the story's article in the browser; a text post opens the HN thread."
+  "Open the story's article in the browser; a text post opens the thread."
   (interactive)
   (unless rata-elfeed-hn--item
-    (user-error "No Hacker News thread here"))
+    (user-error "No comment thread here"))
   (rata-elfeed-hn--browse-external
    (or rata-elfeed-hn--article-url
        (plist-get (gethash rata-elfeed-hn--item rata-elfeed-hn--cache) :url)
        (rata-elfeed-hn--item-url rata-elfeed-hn--item))))
 
 (defun rata-elfeed-hn-open-thread-in-browser ()
-  "Open the HN thread in the browser."
+  "Open the thread on its own site, in the browser."
   (interactive)
   (unless rata-elfeed-hn--item
-    (user-error "No Hacker News thread here"))
+    (user-error "No comment thread here"))
   (rata-elfeed-hn--browse-external (rata-elfeed-hn--item-url rata-elfeed-hn--item)))
 
 (defun rata-elfeed-hn-copy-permalink ()
   "Copy the permalink of the comment at point, or of the story."
   (interactive)
   (unless rata-elfeed-hn--item
-    (user-error "No Hacker News thread here"))
-  (let ((url (rata-elfeed-hn--item-url
-              (or (get-text-property (point) 'rata-elfeed-hn-id) rata-elfeed-hn--item))))
+    (user-error "No comment thread here"))
+  (let* ((comment (get-text-property (point) 'rata-elfeed-hn-id))
+         (url (if comment
+                  (rata-elfeed-hn--comment-url rata-elfeed-hn--item comment)
+                (rata-elfeed-hn--item-url rata-elfeed-hn--item))))
     (kill-new url)
     (message "Copied %s" url)))
 
 (defun rata-elfeed-hn--parse-item (input)
-  "Return the item id in INPUT -- an integer, digits or an item URL -- or nil."
-  (cond ((natnump input) input)
+  "Return the (SOURCE . ID) in INPUT, or nil.
+INPUT is an item URL from any source, an HN id as an integer or as
+digits, or a (SOURCE . ID) cons already.  Bare digits are HN: a bare
+Lobsters short id is just a word, and guessing would turn every typo
+into a request."
+  (cond ((and (consp input) (rata-elfeed-hn--spec (car input))) input)
+        ((natnump input) (cons 'hn input))
         ((not (stringp input)) nil)
         ((string-match "\\`[ \t]*\\([0-9]+\\)[ \t]*\\'" input)
-         (string-to-number (match-string 1 input)))
-        ((string-match rata-elfeed-hn--item-url-regexp (string-trim input))
-         (string-to-number (match-string 1 (string-trim input))))))
+         (cons 'hn (string-to-number (match-string 1 input))))
+        (t (let ((url (string-trim input)))
+             (cl-loop for (source . spec) in rata-elfeed-hn--sources
+                      when (string-match (plist-get spec :item-url-regexp) url)
+                      return (rata-elfeed-hn--make-item source (match-string 1 url)))))))
 
-(define-derived-mode rata-elfeed-hn-item-mode special-mode "HN"
-  "Mode for a Hacker News item opened outside elfeed."
+(define-derived-mode rata-elfeed-hn-item-mode special-mode "Thread"
+  "Mode for an HN or Lobsters item opened outside elfeed."
   (setq-local revert-buffer-function
               (lambda (&rest _)
                 (let ((rata-elfeed-hn--force t))
                   (rata-elfeed-hn--redraw)))))
 
 (defun rata-elfeed-hn--redraw ()
-  "Draw the item in the current `*HN <id>*' buffer from scratch."
+  "Draw the item in the current thread buffer from scratch."
   (let ((inhibit-read-only t))
     (erase-buffer))
   (rata-elfeed-hn--draw rata-elfeed-hn--item)
   (goto-char (point-min)))
 
 (defun rata-elfeed-hn-open-item (item)
-  "Show HN ITEM -- an id or an item URL -- in a `*HN <id>*' buffer.
-The story, the article and the thread, with the same keys as in elfeed."
+  "Show ITEM -- an HN id, or an HN or Lobsters item URL -- in its own buffer.
+The story, the article and the thread, with the same keys as in elfeed.
+The buffer is named for the source, so `*HN 8863*' and
+`*Lobsters h0eate*' are different buffers and never collide."
   (interactive
-   (list (read-string "HN item URL or id: "
+   (list (read-string "HN/Lobsters item URL or HN id: "
                       (when-let* ((url (thing-at-point 'url)))
                         (and (rata-elfeed-hn--parse-item url) url)))))
-  (let ((id (or (rata-elfeed-hn--parse-item item)
-                (user-error "Not a Hacker News item: %s" item))))
-    (with-current-buffer (get-buffer-create (format "*HN %d*" id))
+  (let* ((parsed (or (rata-elfeed-hn--parse-item item)
+                     (user-error "Not an HN or Lobsters item: %s" item)))
+         (name (rata-elfeed-hn--prop parsed :name)))
+    (with-current-buffer (get-buffer-create (format "*%s %s*" name (cdr parsed)))
       (unless (derived-mode-p 'rata-elfeed-hn-item-mode)
         (rata-elfeed-hn-item-mode))
-      (setq rata-elfeed-hn--key id
-            rata-elfeed-hn--item id)
+      (setq mode-name name
+            rata-elfeed-hn--key parsed
+            rata-elfeed-hn--item parsed)
       (rata-elfeed-hn--redraw)
       (pop-to-buffer (current-buffer)))))
 
@@ -887,7 +1086,7 @@ The story, the article and the thread, with the same keys as in elfeed."
 normal-state auxiliary map.")
 
 (define-minor-mode rata-elfeed-hn-thread-mode
-  "Comment folding, navigation and HN commands, in a buffer showing a thread.
+  "Comment folding, navigation and thread commands, in a buffer showing one.
 Turned on and off by the drawing itself, so the keys exist exactly where
 there is a thread.  `]]', `[[' and `TAB' are left to elfeed."
   :lighter nil
@@ -925,12 +1124,12 @@ there is a thread.  `]]', `[[' and `TAB' are left to elfeed."
   (apply #'general-define-key
          :states 'normal
          :keymaps 'rata-elfeed-hn-thread-mode-map
-         ","  '(:ignore t :which-key "hacker news")
+         ","  '(:ignore t :which-key "comments")
          (cl-loop for (key command label) in rata-elfeed-hn--keys
                   append (list key (list command :which-key label))))
   (rata-leader
     :states '(normal visual)
-    "arh" '(rata-elfeed-hn-open-item :which-key "HN thread by URL/id")))
+    "arh" '(rata-elfeed-hn-open-item :which-key "HN/Lobsters thread by URL/id")))
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'rata-elfeed-hn-item-mode 'normal)
@@ -950,7 +1149,7 @@ there is a thread.  `]]', `[[' and `TAB' are left to elfeed."
     (display-warning
      'rata-elfeed-hn
      (concat "This elfeed has no `elfeed-show-update-hook', so Hacker News "
-             "entries will not be drawn.  It is upstream's frozen `master' "
+             "and Lobsters entries will not be drawn.  It is upstream's frozen `master' "
              "branch; switch the clone to `main' and run `elpaca-rebuild' "
              "on elfeed (FAIL-0026).")
      :error)))

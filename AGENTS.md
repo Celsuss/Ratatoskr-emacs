@@ -390,16 +390,29 @@ init-present → init-dashboard
   enqueues via `agent-shell-prompt-queue` when busy). `a` jumps to the shell; `f` finishes and cleans up the
   worktree via `rata-agent-worktree-finish-at`. Shackle routes review buffers with `:same t :select t`.
   Tests: `rata-test-agent-review-*` in `tests/run-tests.el`.
-- `init-elfeed-hn.el` — Hacker News inside elfeed's own entry buffer (plan
-  `plans/hackernews-reader.md`). Owns no package. One function on `elfeed-show-update-hook`
+- `init-elfeed-hn.el` — Hacker News **and Lobsters** inside elfeed's own entry buffer
+  (plan `plans/hackernews-reader.md`). Owns no package. One function on
+  `elfeed-show-update-hook`
   (added in `with-eval-after-load 'elfeed-show`, because elfeed's `defvar` of that hook
-  carries its own two functions and an earlier `add-hook` would drop them) replaces an HN
+  carries its own two functions and an earlier `add-hook` would drop them) replaces such an
   entry's useless content — the word "Comments", or hnrss's URL list — with three sections:
   the story, a readable copy of the article (`eww-readable-dom`) or the post text, and the
-  whole thread from the Algolia API in one request. An entry is HN only if its content has
-  the shape an HN feed writes or its link is an item URL (`rata-elfeed-hn-item-id`, pure),
-  so a blog post linking a discussion is left alone, and every non-HN entry is
-  byte-identical. Four things are load-bearing. **`rata-net-retrieve` (`init-net.el`) is
+  whole thread in one request. An entry belongs to a site only if its content has
+  the shape that site's feed writes or its link is an item URL (`rata-elfeed-hn-item`, pure,
+  returns a `(SOURCE . ID)` cons),
+  so a blog post linking a discussion is left alone, and every other entry is
+  byte-identical. **The two sites are one row each in `rata-elfeed-hn--sources`** and
+  nothing after that table mentions either: a row carries the detection regexps, the
+  endpoint, the function turning that site's reply into the shared thread plist, and the
+  permalink shapes. Only the two `:thread` functions differ in substance — Algolia sends a
+  nested tree, Lobsters sends the comments flat in reading order with a `depth` each, so
+  `rata-elfeed-hn--lobsters-tree` rebuilds the nesting (a depth that jumps by more than one
+  is clamped rather than dropping the comment and its replies) and
+  `rata-elfeed-hn--count-replies` fills in the counts folding reads. Ids are a number on HN
+  and a base-36 short id on Lobsters, so the thread cache is an `equal` table and
+  `SPC a r h` takes a URL from either site but reads bare digits as HN only. The file keeps
+  the `hn` name it was born with; Lobsters was added 2026-10-20 and renaming 900 lines and
+  their tests was judged churn. Four things are load-bearing. **`rata-net-retrieve` (`init-net.el`) is
   the only network call**, through curl because url.el does not fall back from an
   unrouted IPv6 address, so articles timed out; the article's images go the same way,
   through `rata-net-with-shr-images`. It always answers from a timer with a result plist,
@@ -415,13 +428,16 @@ init-present → init-dashboard
   buffer is reused for every entry): `za zc zo zM zR` fold replies (invisibility overlays
   computed from `rata-elfeed-hn-depth`), `zj zk zu` move by depth, `, c` refetch, `, o`
   article, `, O` thread in the browser, `, y` permalink; elfeed's `]]` `[[` `TAB` are left
-  alone. `browse-url` routes item URLs to a `*HN <id>*` buffer (`rata-elfeed-hn-open-item`,
-  also `SPC a r h`). Threads over `rata-elfeed-hn-fold-threshold` open folded.
+  alone. `browse-url` routes an item URL from either site to a buffer of its own,
+  `*HN <id>*` or `*Lobsters <id>*` (`rata-elfeed-hn-open-item`, also `SPC a r h`).
+  Threads over `rata-elfeed-hn-fold-threshold` open folded.
   **It needs elfeed's `main` branch** (`:branch "main"` in `init-elfeed.el`): upstream froze
   `master` at 2026-02-18 and only `main` has `elfeed-show-update-hook`. Without it the
   module raises a `display-warning` at `elfeed-show` load rather than binding a hook
   nothing runs. Tests:
-  `rata-test-hn-*`, through the real `elfeed-show-entry` over an in-memory `elfeed-db`.
+  `rata-test-hn-*`, through the real `elfeed-show-entry` over an in-memory `elfeed-db`,
+  for both sites — `rata-test-hn-lobsters-*` parse a thread captured from the live API
+  (`tests/fixtures/hn/lobsters-sqdhu7.json`) and render it end to end.
 - `init-mail.el` — email under `SPC a e`: mu4e reading a Maildir that `mbsync` fills from
   Proton Mail Bridge, `smtpmail` sending through Bridge's SMTP port. Three things
   are structural. **mu4e is not an elpaca package**: its elisp is version-locked to the `mu`

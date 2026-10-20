@@ -2682,35 +2682,52 @@ reply arrives.  An unrouted URL answers (:error \"no fixture\")."
   (concat rata-elfeed-hn-api-url (number-to-string id)))
 
 (ert-deftest rata-test-hn-item-id-from-each-feed-shape ()
-  "The item id comes out of what elfeed already stored, for both HN feeds.
-And only from the shapes those feeds write: a blog post that links to an
-HN discussion is not an HN entry, or its article would be replaced."
+  "The item comes out of what elfeed already stored, for every feed shape.
+And only from the shapes those feeds write: a blog post that links to a
+discussion is not an aggregator entry, or its article would be replaced."
   ;; news.ycombinator.com/rss: the content is the one link.
-  (should (equal (rata-elfeed-hn-item-id
+  (should (equal (rata-elfeed-hn-item
                   "<a href=\"https://news.ycombinator.com/item?id=49283063\">Comments</a>"
                   "https://example.com/article")
-                 49283063))
+                 '(hn . 49283063)))
   ;; hnrss.org, as stored in elfeed-db on 2026-10-06.
-  (should (equal (rata-elfeed-hn-item-id
+  (should (equal (rata-elfeed-hn-item
                   (concat "<p>Article URL: <a href=\"https://www.nature.com/a\">https://www.nature.com/a</a></p>\n"
                           "<p>Comments URL: <a href=\"https://news.ycombinator.com/item?id=49312008\">"
                           "https://news.ycombinator.com/item?id=49312008</a></p>\n<p>Points: 192</p>")
                   "https://www.nature.com/a")
-                 49312008))
+                 '(hn . 49312008)))
   ;; Ask HN: the link is the item itself.
-  (should (equal (rata-elfeed-hn-item-id "<p>What do you use?</p>"
-                                         "https://news.ycombinator.com/item?id=123")
-                 123))
-  ;; Not HN.
-  (should-not (rata-elfeed-hn-item-id
+  (should (equal (rata-elfeed-hn-item "<p>What do you use?</p>"
+                                      "https://news.ycombinator.com/item?id=123")
+                 '(hn . 123)))
+  ;; lobste.rs/rss on a link story, as stored in elfeed-db on 2026-10-20.
+  (should (equal (rata-elfeed-hn-item
+                  "<p><a href=\"https://lobste.rs/s/d7m5j1/setting_up_ssh_keys\">Comments</a></p>"
+                  "https://nmattia.com/posts/ssh-keys/")
+                 '(lobsters . "d7m5j1")))
+  ;; A Lobsters text post: the link is the story, and the content is the
+  ;; post itself -- no "Comments" link anywhere in it.
+  (should (equal (rata-elfeed-hn-item "<p>Hey folks,</p><p>guidelines…</p>"
+                                      "https://lobste.rs/s/h0eate/updates_site_guidelines")
+                 '(lobsters . "h0eate")))
+  (should (equal (rata-elfeed-hn-item nil "https://lobste.rs/s/h0eate")
+                 '(lobsters . "h0eate")))
+  ;; Neither.
+  (should-not (rata-elfeed-hn-item
                "Discussed <a href=\"https://news.ycombinator.com/item?id=5\">on HN</a>."
                "https://blog.example.com/post"))
-  (should-not (rata-elfeed-hn-item-id nil nil))
-  (should-not (rata-elfeed-hn-item-id "" "https://news.ycombinator.com/item?id=5&p=2")))
+  (should-not (rata-elfeed-hn-item
+               "Discussed <a href=\"https://lobste.rs/s/abc123/x\">on Lobsters</a>."
+               "https://blog.example.com/post"))
+  (should-not (rata-elfeed-hn-item nil nil))
+  (should-not (rata-elfeed-hn-item "" "https://news.ycombinator.com/item?id=5&p=2"))
+  (should-not (rata-elfeed-hn-item "" "https://lobste.rs/t/emacs"))
+  (should-not (rata-elfeed-hn-item "" "https://lobste.rs.evil.example/s/abc123")))
 
 (ert-deftest rata-test-hn-parse-thread-edge-cases ()
   "Order, depth, deleted comments and counts from a hand-built reply."
-  (let* ((thread (rata-elfeed-hn--thread-from-json (rata-test-hn--json "thread-edge.json")))
+  (let* ((thread (rata-elfeed-hn--thread-from-algolia (rata-test-hn--json "thread-edge.json")))
          (top (plist-get thread :comments)))
     (should (equal (plist-get thread :title) "Show HN: A test thread"))
     (should (equal (plist-get thread :points) 42))
@@ -2736,7 +2753,7 @@ HN discussion is not an HN entry, or its article would be replaced."
 tests/fixtures/hn/item-8863.json is the Dropbox launch thread, captured
 2026-10-06: 71 comments, none deleted."
   (let* ((json (rata-test-hn--json "item-8863.json"))
-         (thread (rata-elfeed-hn--thread-from-json json)))
+         (thread (rata-elfeed-hn--thread-from-algolia json)))
     (should (equal (plist-get thread :count) 71))
     (should (equal (plist-get thread :author) "dhouston"))
     (should (equal (mapcar (lambda (c) (plist-get c :id)) (plist-get thread :comments))
@@ -2750,7 +2767,7 @@ tests/fixtures/hn/item-8863.json is the Dropbox launch thread, captured
             (cons (rata-test-hn--api 2) (list :error "HTTP 503")))
     (let (got)
       (dolist (id '(1000 1 2))
-        (rata-elfeed-hn--fetch-json id (lambda (r) (push (cons id r) got))))
+        (rata-elfeed-hn--fetch-json (cons 'hn id) (lambda (r) (push (cons id r) got))))
       (rata-test-hn--flush)
       (should (equal (alist-get 'title (plist-get (alist-get 1000 got) :ok))
                      "Show HN: A test thread"))
@@ -2762,18 +2779,18 @@ tests/fixtures/hn/item-8863.json is the Dropbox launch thread, captured
   (rata-test-hn--with-net
       (list (cons (rata-test-hn--api 2000) (rata-test-hn--ok (rata-test-hn--fixture "ask-2000.json"))))
     (let (got)
-      (rata-elfeed-hn--fetch-thread 2000 nil (lambda (r) (push r got)))
+      (rata-elfeed-hn--fetch-thread '(hn . 2000) nil (lambda (r) (push r got)))
       (rata-test-hn--flush)
-      (rata-elfeed-hn--fetch-thread 2000 nil (lambda (r) (push r got)))
+      (rata-elfeed-hn--fetch-thread '(hn . 2000) nil (lambda (r) (push r got)))
       (rata-test-hn--drain)
       (should (= (length got) 2))
       (should (equal (plist-get (plist-get (car got) :ok) :count) 1))
       (should (equal (length rata-test-hn--requests) 1))
-      (rata-elfeed-hn--fetch-thread 2000 t #'ignore)
+      (rata-elfeed-hn--fetch-thread '(hn . 2000) t #'ignore)
       (should (equal (length rata-test-hn--requests) 2))
       ;; Unrouted: the request fails, and the failure arrives as a value.
       (setq got nil)
-      (rata-elfeed-hn--fetch-thread 99 nil (lambda (r) (push r got)))
+      (rata-elfeed-hn--fetch-thread '(hn . 99) nil (lambda (r) (push r got)))
       (rata-test-hn--flush)
       (should (equal got '((:error "no fixture")))))))
 
@@ -2869,10 +2886,18 @@ mail-style renderer into the current window's buffer list, not a popup."
     (nreverse out)))
 
 (defun rata-test-hn--block-text (id)
-  "Return comment ID's block as a string, with its properties."
-  (let* ((start (text-property-any (point-min) (point-max) 'rata-elfeed-hn-id id))
-         (end (next-single-property-change start 'rata-elfeed-hn-id nil (point-max))))
-    (buffer-substring start end)))
+  "Return comment ID's block as a string, with its properties.
+Scanned with `equal': `text-property-any' compares with `eq', and a
+Lobsters comment id is a string."
+  (let ((pos (point-min)) start)
+    (while (and (not start)
+                (setq pos (text-property-not-all pos (point-max) 'rata-elfeed-hn-id nil)))
+      (if (equal (get-text-property pos 'rata-elfeed-hn-id) id)
+          (setq start pos)
+        (setq pos (or (next-single-property-change pos 'rata-elfeed-hn-id) (point-max)))))
+    (unless start (error "No comment block %S in the buffer" id))
+    (buffer-substring start (next-single-property-change
+                             start 'rata-elfeed-hn-id nil (point-max)))))
 
 (ert-deftest rata-test-hn-hook-keeps-elfeeds-own ()
   "Our function joins `elfeed-show-update-hook' without displacing elfeed's.
@@ -3207,22 +3232,44 @@ renderer's `elfeed-entry-content' marker is not there to find."
                               ("https://example.com/post")))))))
 
 (ert-deftest rata-test-hn-item-url-routing ()
-  "Item URLs, and nothing else, route to the HN buffer."
+  "Item URLs, and nothing else, route to a thread buffer."
   (dolist (url '("https://news.ycombinator.com/item?id=1"
                  "http://news.ycombinator.com/item?id=42"
                  "https://www.news.ycombinator.com/item?id=42"))
     (should (rata-elfeed-hn--route-p url))
     (should (equal (rata-elfeed-hn--parse-item url)
-                   (string-to-number (car (last (split-string url "=")))))))
+                   (cons 'hn (string-to-number (car (last (split-string url "="))))))))
+  (dolist (url '("https://lobste.rs/s/h0eate"
+                 "https://lobste.rs/s/h0eate/updates_site_guidelines_ai_llm_tags"
+                 "http://lobste.rs/s/h0eate/x"))
+    (should (rata-elfeed-hn--route-p url))
+    (should (equal (rata-elfeed-hn--parse-item url) '(lobsters . "h0eate"))))
   (dolist (url '("https://news.ycombinator.com/news"
                  "https://news.ycombinator.com/item?id="
                  "https://news.ycombinator.com/item?id=5&p=2"
                  "https://evil.example/news.ycombinator.com/item?id=1"
-                 "https://news.ycombinator.com.evil.example/item?id=1"))
+                 "https://news.ycombinator.com.evil.example/item?id=1"
+                 "https://lobste.rs/t/emacs"
+                 "https://lobste.rs/c/jnsbnk"
+                 "https://evil.example/lobste.rs/s/h0eate"
+                 "https://lobste.rs.evil.example/s/h0eate"))
     (should-not (rata-elfeed-hn--route-p url)))
-  (should (equal (rata-elfeed-hn--parse-item " 8863 ") 8863))
-  (should (equal (rata-elfeed-hn--parse-item 8863) 8863))
+  ;; Bare digits are an HN id; a bare word is not a Lobsters short id,
+  ;; because then every typo would be one.
+  (should (equal (rata-elfeed-hn--parse-item " 8863 ") '(hn . 8863)))
+  (should (equal (rata-elfeed-hn--parse-item 8863) '(hn . 8863)))
+  (should (equal (rata-elfeed-hn--parse-item '(lobsters . "h0eate")) '(lobsters . "h0eate")))
   (should-not (rata-elfeed-hn--parse-item "news"))
+  (should-not (rata-elfeed-hn--parse-item "h0eate"))
+  ;; Permalinks: a comment is an item on HN and a /c/ of its own on Lobsters.
+  (should (equal (rata-elfeed-hn--item-url '(hn . 8863))
+                 "https://news.ycombinator.com/item?id=8863"))
+  (should (equal (rata-elfeed-hn--comment-url '(hn . 8863) 8870)
+                 "https://news.ycombinator.com/item?id=8870"))
+  (should (equal (rata-elfeed-hn--item-url '(lobsters . "h0eate"))
+                 "https://lobste.rs/s/h0eate"))
+  (should (equal (rata-elfeed-hn--comment-url '(lobsters . "h0eate") "jnsbnk")
+                 "https://lobste.rs/c/jnsbnk"))
   (require 'browse-url)
   (should (eq (cdr (cl-find-if (lambda (h) (functionp (car h))) browse-url-handlers
                                :key (lambda (h) (and (eq (cdr h) 'rata-elfeed-hn-browse-url) h))))
@@ -3338,6 +3385,163 @@ are fetched; and leaving the entry stops the queue."
     (rata-test-hn--show (rata-test-hn--blog-entry))
     (rata-test-hn--flush)
     (should-not placed)))
+
+
+;;; --- Lobsters -----------------------------------------------------------
+;;
+;; The second source.  Lobsters sends the thread flat, in reading order, with
+;; a `depth' on each comment instead of nesting, so the tree is rebuilt here
+;; and everything after that is the renderer both sites share.
+
+(defconst rata-test-hn--lobsters-feed-url "https://lobste.rs/rss")
+
+(defun rata-test-hn--lobsters-entry (id title &optional link content)
+  "An elfeed entry shaped like lobste.rs/rss: the content is one link."
+  (elfeed-entry--create
+   :id (cons "lobste.rs" (format "https://lobste.rs/s/%s" id))
+   :title title
+   :link (or link "https://www.openbsd.org/80.html")
+   :date 1700000000
+   ;; A plain string, never `elfeed-ref': a ref writes the content into
+   ;; `elfeed-db-directory', which here is the real database.
+   :content (or content
+                (format "<p><a href=\"https://lobste.rs/s/%s/openbsd_8_0\">Comments</a></p>" id))
+   :content-type 'html
+   :feed-id rata-test-hn--lobsters-feed-url :tags '(lobsters)))
+
+(defun rata-test-hn--lobsters-api (id)
+  "The Lobsters JSON URL for story ID."
+  (format "https://lobste.rs/s/%s.json" id))
+
+(ert-deftest rata-test-hn-lobsters-tree-from-flat-depths ()
+  "A flat depth-ordered list becomes the tree the renderer walks.
+Pure.  The failure this guards is silent: a mis-built tree still draws,
+with replies under the wrong parent or missing entirely."
+  (let* ((flat (list '((short_id . "a") (depth . 0) (commenting_user . "alice")
+                       (comment . "<p>one</p>") (created_at . "2026-10-19T20:46:00.000-05:00"))
+                     '((short_id . "b") (depth . 1) (commenting_user . "bob")
+                       (comment . "<p>two</p>"))
+                     '((short_id . "c") (depth . 2) (commenting_user . "carol")
+                       (comment . "<p>three</p>"))
+                     ;; Back out two levels.
+                     '((short_id . "d") (depth . 0) (commenting_user . "dave")
+                       (comment . "<p>four</p>"))
+                     ;; A gap: depth 2 under a depth-0 comment is clamped to 1
+                     ;; rather than dropped with everything below it.
+                     '((short_id . "e") (depth . 2) (commenting_user . "erin")
+                       (comment . "<p>five</p>"))))
+         (tops (rata-elfeed-hn--lobsters-tree flat)))
+    (should (equal (mapcar (lambda (c) (plist-get c :id)) tops) '("a" "d")))
+    (should (equal (mapcar (lambda (c) (plist-get c :depth)) tops) '(0 0)))
+    (let* ((a (nth 0 tops))
+           (b (car (plist-get a :children)))
+           (c (car (plist-get b :children)))
+           (d (nth 1 tops))
+           (e (car (plist-get d :children))))
+      (should (equal (plist-get b :id) "b"))
+      (should (equal (plist-get c :id) "c"))
+      (should (equal (plist-get c :depth) 2))
+      (should (equal (plist-get e :id) "e"))
+      (should (equal (plist-get e :depth) 1))
+      ;; Replies are counted for folding: a has b and c below it.
+      (should (equal (plist-get a :replies) 2))
+      (should (equal (plist-get b :replies) 1))
+      (should (equal (plist-get d :replies) 1))
+      (should (equal (plist-get a :author) "alice"))
+      (should (equal (plist-get a :text) "<p>one</p>"))
+      (should (equal (plist-get a :time)
+                     (float-time (date-to-time "2026-10-19T20:46:00.000-05:00"))))
+      ;; A timestamp that does not parse costs an age, not the comment.
+      (should-not (plist-get b :time))))
+  ;; A deleted comment keeps its place, carries no author or text, and its
+  ;; replies still hang off it.
+  (let* ((flat (list '((short_id . "x") (depth . 0) (is_deleted . t)
+                       (commenting_user . "ghost") (comment . "<em>removed</em>"))
+                     '((short_id . "y") (depth . 1) (commenting_user . "yves")
+                       (comment . "<p>reply</p>"))
+                     '((short_id . "z") (depth . 0) (is_moderated . t)
+                       (commenting_user . "mod") (comment . "<em>moderated</em>"))))
+         (tops (rata-elfeed-hn--lobsters-tree flat))
+         (x (nth 0 tops)))
+    (should (plist-get x :deleted))
+    (should-not (plist-get x :author))
+    (should-not (plist-get x :text))
+    (should (equal (plist-get (car (plist-get x :children)) :id) "y"))
+    (should (plist-get (nth 1 tops) :deleted)))
+  (should-not (rata-elfeed-hn--lobsters-tree nil)))
+
+(ert-deftest rata-test-hn-lobsters-parse-real-thread ()
+  "A reply captured from the live API parses whole, into the shared shape.
+tests/fixtures/hn/lobsters-sqdhu7.json is the OpenBSD 8.0 thread, captured
+2026-10-20: 18 comments, one removed by its author, nested six deep."
+  (let* ((json (rata-test-hn--json "lobsters-sqdhu7.json"))
+         (thread (rata-elfeed-hn--thread-from-lobsters json)))
+    (should (equal (plist-get thread :id) "sqdhu7"))
+    (should (equal (plist-get thread :title) "OpenBSD 8.0"))
+    (should (equal (plist-get thread :url) "https://www.openbsd.org/80.html"))
+    (should (equal (plist-get thread :author) "dgv"))
+    (should (equal (plist-get thread :points) 68))
+    (should (numberp (plist-get thread :time)))
+    ;; The site's own comment_count, which excludes the removed one.
+    (should (equal (plist-get thread :count) (alist-get 'comment_count json)))
+    (should (equal (length (plist-get thread :comments)) 7))
+    ;; The deep chain survives: 0-1-2-3-4-5-6 under the second top comment.
+    (let ((depths nil))
+      (cl-labels ((walk (c) (push (plist-get c :depth) depths)
+                    (mapc #'walk (plist-get c :children))))
+        (mapc #'walk (plist-get thread :comments)))
+      (should (equal (seq-max depths) 6))
+      ;; Every comment in the reply is somewhere in the tree.
+      (should (equal (length depths) (length (alist-get 'comments json)))))
+    (let ((removed (cl-find-if (lambda (c) (plist-get c :deleted))
+                               (plist-get thread :comments))))
+      (should removed)
+      (should-not (plist-get removed :text)))))
+
+(ert-deftest rata-test-hn-lobsters-text-post-has-no-article ()
+  "A Lobsters text post has `url' as \"\", which is a post, not an article at \"\"."
+  (let ((thread (rata-elfeed-hn--thread-from-lobsters
+                 '((short_id . "h0eate") (title . "Updates") (url . "")
+                   (score . 333) (submitter_user . "355E3B")
+                   (description . "<p>Hey folks,</p>") (comments . nil)))))
+    (should-not (plist-get thread :url))
+    (should (equal (plist-get thread :text) "<p>Hey folks,</p>"))
+    (should (equal (plist-get thread :count) 0))))
+
+(ert-deftest rata-test-hn-lobsters-entry-shows-thread ()
+  "A Lobsters entry is drawn like an HN one: story, article, comments.
+The whole point of the source table is that this needs no code of its
+own -- the renderer, the guard and the article fetch are shared."
+  (rata-test-hn--with-elfeed
+    (puthash rata-test-hn--lobsters-feed-url
+             (elfeed-feed--create :id rata-test-hn--lobsters-feed-url
+                                  :url rata-test-hn--lobsters-feed-url :title "Lobsters")
+             elfeed-db-feeds)
+    (rata-test-hn--with-net
+        (list (cons (rata-test-hn--lobsters-api "sqdhu7")
+                    (rata-test-hn--ok (rata-test-hn--fixture "lobsters-sqdhu7.json")))
+              (cons "https://www.openbsd.org/80.html"
+                    (rata-test-hn--ok (rata-test-hn--fixture "article.html") "text/html")))
+      (with-current-buffer (rata-test-hn--show
+                            (rata-test-hn--lobsters-entry "sqdhu7" "OpenBSD 8.0"))
+        ;; The feed's own content -- the word "Comments" -- is gone.
+        (should (string-match-p "Comments: loading…" (buffer-string)))
+        (rata-test-hn--flush)
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          (should-not (string-match-p "loading…" text))
+          (should (string-match-p "^17 comments · 68 points$" text))
+          (should (string-match-p "^OpenBSD 8\\.0$" text))
+          (should (string-match-p "openbsd\\.org · 68 points · by dgv" text))
+          ;; The article was fetched and rendered above the thread.
+          (should (string-match-p "three properties" (replace-regexp-in-string "\n" " " text))))
+        ;; Comment blocks carry their depth, so folding and navigation work.
+        (let ((blocks (rata-test-hn--blocks)))
+          (should (equal (length blocks) 18))
+          (should (equal (seq-max (mapcar #'cadr blocks)) 6))
+          (should (string-match-p "\\[deleted\\]" (rata-test-hn--block-text "9fbvez"))))
+        ;; And the keys are live, as they are for HN.
+        (should rata-elfeed-hn-thread-mode)
+        (should (equal rata-elfeed-hn--item '(lobsters . "sqdhu7")))))))
 
 ;;; ============================================================
 ;;; Test — dialogic formatting (lisp/init-dialogic.el)
