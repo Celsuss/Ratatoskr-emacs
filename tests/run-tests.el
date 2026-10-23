@@ -263,6 +263,7 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC i o a" . rata-roam-alias-add-to-file)
     ;; agent-shell's context senders are not autoloaded upstream, so these
     ;; resolve only while their symbols stay in init-llm.el's :commands list.
+    ("SPC a i s o" . agent-shell-openai-start-codex)
     ("SPC a i s f" . rata-agent-shell-send-file)
     ("SPC a i s r" . agent-shell-send-region)
     ("SPC a i s d" . agent-shell-send-dwim)

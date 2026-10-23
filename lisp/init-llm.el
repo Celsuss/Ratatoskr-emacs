@@ -272,6 +272,7 @@ spawn time, never at load."
   ;; completion inside the shell is already on by default.
   :commands (agent-shell
              agent-shell-anthropic-start-claude-code
+             agent-shell-openai-start-codex
              agent-shell-pi-start-agent
              agent-shell-send-file
              agent-shell-send-file-to
@@ -449,6 +450,7 @@ With prefix arg NEW-SESSION, always create a fresh vterm session."
     "aisa"  '(agent-shell-antigravity-start-agent       :which-key "antigravity")
     "aisA"  '(rata-agent-antigravity-open-artifact      :which-key "open artifact")
     "aisc"  '(agent-shell-anthropic-start-claude-code   :which-key "claude code")
+    "aiso"  '(agent-shell-openai-start-codex            :which-key "codex")
     "aisp"  '(agent-shell-pi-start-agent                :which-key "pi")
     "aisx"  '(:ignore t                                 :which-key "permissions")
     "aisxt" '(rata-agent-permissions-test               :which-key "test rule (dry-run)")
