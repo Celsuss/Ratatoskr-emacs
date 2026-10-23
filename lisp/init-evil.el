@@ -89,10 +89,13 @@
         (setq display-line-numbers t)
       (setq display-line-numbers 'relative)))
 
-  (defun rata-reload-init-file ()
-    "Reload the Emacs init file."
-    (interactive)
-    (load-file user-init-file))
+  ;; `rata-reload-config' lives in init.el, beside the module loader whose
+  ;; bookkeeping it reads.  The old `rata-reload-init-file' only re-ran
+  ;; init.el, where every `rata-load-module' is a `require' that no-ops on an
+  ;; already-loaded feature -- so an edited module was never re-evaluated and
+  ;; the command silently did nothing.
+  (define-obsolete-function-alias 'rata-reload-init-file
+    'rata-reload-config "2026-10-23")
 
   (rata-leader
    :states '(normal visual motion)
@@ -221,7 +224,8 @@
    "q"   '(:ignore t :which-key "quit")
    "qq"  '(save-buffers-kill-terminal :which-key "quit emacs")
    "qQ"  '(kill-emacs :which-key "quit without saving")
-   "qr"  '(rata-reload-init-file :which-key "reload init.el"))
+   "qr"  '(rata-reload-config :which-key "reload changed config")
+   "qR"  '(rata-reload-module :which-key "reload one module"))
 
   ;; Collapse the SPC w 1..5 column-layout keys into a single which-key entry,
   ;; the same trick winum uses for SPC 0..9 below.  Pushed AFTER the rata-leader

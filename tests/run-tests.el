@@ -273,7 +273,9 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC a e e" . rata-mail)
     ("SPC a e u" . rata-mail-update)
     ("SPC a e d" . rata-mail-doctor)
-    ("SPC a r h" . rata-elfeed-hn-open-item))
+    ("SPC a r h" . rata-elfeed-hn-open-item)
+    ("SPC q r" . rata-reload-config)
+    ("SPC q R" . rata-reload-module))
   "Leader keys that must resolve immediately after init, with their commands.
 Not exhaustive — a contract for the keys most likely to be broken by the
 failure mode in .are/memory/failures/FAIL-0009.md.  Extend it when a
@@ -2185,6 +2187,77 @@ not just the symbol, so an upstream rename or rewrite fails here."
             (should (eq (funcall magit-display-buffer-function diff) other))))
       (kill-buffer status)
       (kill-buffer diff))))
+
+;;; ============================================================
+;;; 12. Reloading a changed configuration (init.el)
+;;; ============================================================
+
+(ert-deftest rata-test-config-module-order-is-what-init-loaded ()
+  "`rata-config-module-order' reads init.el and agrees with the session.
+
+It is read out of the file rather than recorded during startup so that a
+module added since startup is picked up by a reload -- which only works
+if the parse itself is right.  A commented-out `rata-load-module' line
+is how init.el disables a module, so it must not appear."
+  (let ((modules (rata-config-module-order)))
+    (should (> (length modules) 40))
+    (should (equal (seq-take modules 3) '(init-pkg init-system init-net)))
+    ;; Everything it names is really loaded in this very session.
+    (should-not (seq-remove #'featurep modules))
+    ;; init-mcp is commented out in init.el and must stay out.
+    (should-not (memq 'init-mcp modules))
+    (should-not (memq nil (mapcar #'rata-module-file modules)))))
+
+(ert-deftest rata-test-config-reload-sees-only-edited-files ()
+  "Staleness is per file, against the mtime this session loaded it from.
+
+A fresh session has nothing to reload; a file whose recorded mtime
+predates what is on disk is stale; a file this session never loaded is
+not stale, so `local.el' created on a running Emacs stays a restart."
+  (should-not (rata-config-stale-modules))
+  (should-not (rata-config-file-changed-p
+               (expand-file-name "no-such-file.el" user-emacs-directory)))
+  (let ((file (rata-module-file 'init-net)))
+    (should file)
+    (let ((recorded (gethash file rata--config-file-mtimes)))
+      (should recorded)
+      (unwind-protect
+          (progn
+            ;; Pretend it was loaded at the epoch: on disk is now newer.
+            (puthash file '(0 0) rata--config-file-mtimes)
+            (should (rata-config-file-changed-p file))
+            (should (equal (rata-config-stale-modules) '(init-net))))
+        (puthash file recorded rata--config-file-mtimes))))
+  (should-not (rata-config-stale-modules)))
+
+(ert-deftest rata-test-config-reload-report-reads-as-one-line ()
+  "The echoed summary names what moved, and nothing when nothing did."
+  (should (equal (rata--reload-report nil nil nil nil)
+                 "Config: nothing to reload, no file has changed"))
+  (should (equal (rata--reload-report nil '(init-dev init-org) nil nil)
+                 "Config: reloaded init-dev init-org"))
+  (should (equal (rata--reload-report '("local.el") '(init-jira) '(init-new) '(init-bad))
+                 (concat "Config: reloaded local.el init-jira, "
+                         "loaded new init-new, FAILED init-bad"))))
+
+(ert-deftest rata-test-reload-module-reapplies-a-use-package-clause ()
+  "Reloading a module re-applies its `use-package' clauses.
+
+The whole point of `rata-reload-config', and the reason `load' alone is
+not it: `elpaca-use-package' wraps a `use-package' expansion in an
+`elpaca' form, so re-evaluating a module only re-queues its packages and
+every `:custom' clause in it runs when that queue is processed.  Before
+`rata--drain-elpaca' the command looked like it worked and changed
+nothing at all.
+
+`after-init-time' is bound because the harness clears it to put elpaca on
+its startup path (FAIL-0020), and elpaca only re-queues an already-queued
+order when it is non-nil -- a real session always has it set."
+  (let ((after-init-time (or after-init-time (current-time))))
+    (setq magit-display-buffer-function #'magit-display-buffer-traditional)
+    (rata-reload-module 'init-dev)
+    (should (eq magit-display-buffer-function
+                #'magit-display-buffer-same-window-except-diff-v1))))
 
 ;;; ============================================================
 ;;; Test — fetching with curl (lisp/init-net.el)

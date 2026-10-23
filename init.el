@@ -59,7 +59,9 @@
 (elpaca-wait)
 
 ;; --- 4. Module Loader ---
-(add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
+(defvar rata-lisp-directory (expand-file-name "lisp" user-emacs-directory)
+  "Directory holding this configuration's modules.")
+(add-to-list 'load-path rata-lisp-directory)
 
 ;; --- 5. Keep 'custom.el' separate ---
 ;; Two different jobs, deliberately two files, both gitignored:
@@ -83,19 +85,182 @@
 (defvar rata--failed-modules nil
   "List of (MODULE . ERROR-STRING) for modules that failed to load.")
 
+;; --- 6a. What this session loaded, and from when ---
+;; `rata-reload-config' (SPC q r) re-applies an edited file without a restart.
+;; Everything it needs is one record per file of the mtime it was loaded from.
+(defvar rata-init-file (or user-init-file
+                          (expand-file-name "init.el" user-emacs-directory))
+  "This configuration's entry point.
+Not `user-init-file', which Emacs leaves nil under --batch (`just batch',
+the ERT suite) where this file is loaded by hand.")
+
+(defvar rata--config-file-mtimes (make-hash-table :test 'equal)
+  "Absolute file name -> its modification time when this session loaded it.")
+
+(defun rata--note-loaded (file)
+  "Record FILE's modification time as the copy now in memory.  Return FILE."
+  (when (and file (file-exists-p file))
+    (puthash file (file-attribute-modification-time (file-attributes file))
+             rata--config-file-mtimes))
+  file)
+
+(defun rata-config-file-changed-p (file)
+  "Return non-nil if FILE was edited after this session loaded it.
+A file this session never loaded has not changed: creating `local.el' on
+a running Emacs is a restart, not a reload."
+  (let ((loaded (and file (gethash file rata--config-file-mtimes))))
+    (and loaded
+         (file-exists-p file)
+         (time-less-p loaded (file-attribute-modification-time
+                              (file-attributes file))))))
+
+(defun rata-module-file (module)
+  "Return MODULE's source file under `rata-lisp-directory', or nil.
+Deliberately the .el and never a .elc: a reload exists to pick up an
+edit, and `load' handed a bare feature name takes the byte-compiled file
+over a newer source, `load-prefer-newer' being nil by default."
+  (let ((file (expand-file-name (format "%s.el" module) rata-lisp-directory)))
+    (and (file-exists-p file) file)))
+
 (defun rata-load-module (module)
   "Require MODULE with error handling.
 When `init-file-debug' is set (--debug-init), errors propagate
 normally for a full backtrace.  Otherwise, catch and log them to
 `rata--failed-modules' so remaining modules still load."
   (if init-file-debug
-      (require module)
+      (progn (require module)
+             (rata--note-loaded (rata-module-file module)))
     (condition-case err
-        (require module)
+        (progn (require module)
+               (rata--note-loaded (rata-module-file module)))
       (error
        (let ((msg (error-message-string err)))
          (push (cons module msg) rata--failed-modules)
          (message "WARNING: Failed to load %s: %s" module msg))))))
+
+;; --- 6b. Reloading a changed configuration ---
+(defun rata-config-module-order ()
+  "Return the modules `init.el' loads, in the order it loads them.
+Read out of the file rather than recorded during startup, so a module
+added to init.el since Emacs started is picked up by a reload.  A
+commented-out `rata-load-module' line is not a form -- which is how
+init.el disables a module -- so it stays disabled here too."
+  (with-temp-buffer
+    (insert-file-contents rata-init-file)
+    (goto-char (point-min))
+    (let ((eof (make-symbol "eof"))
+          (modules nil)
+          form)
+      (while (not (eq (setq form (condition-case nil
+                                     (read (current-buffer))
+                                   (end-of-file eof)))
+                      eof))
+        (when (and (eq (car-safe form) 'rata-load-module)
+                   (eq (car-safe (cadr form)) 'quote))
+          (push (cadr (cadr form)) modules)))
+      (nreverse modules))))
+
+(defun rata-config-stale-modules ()
+  "Return the loaded modules whose file was edited since, in load order."
+  (let (stale)
+    (dolist (module (rata-config-module-order))
+      (when (and (featurep module)
+                 (rata-config-file-changed-p (rata-module-file module)))
+        (push module stale)))
+    (nreverse stale)))
+
+(defun rata--load-module-source (module)
+  "Re-evaluate MODULE's own source file.  Signal if it has none."
+  (let ((file (or (rata-module-file module)
+                  (user-error "No source file for module %s" module))))
+    (load file nil 'nomessage)
+    (rata--note-loaded file)
+    module))
+
+(defun rata--drain-elpaca ()
+  "Run the package forms a reload has just re-queued.
+Draining the queue is what makes a reload mean anything.
+`elpaca-use-package' wraps the whole expansion of a `use-package' form
+in an `elpaca' form, so re-evaluating a module only re-queues its
+packages: every `:custom', `:config' and `:general' clause in it runs
+when that queue is processed, and after startup nothing drains it but
+elpaca's own interactive timer.  A bare `load' of a module therefore
+appears to do nothing at all."
+  (when (fboundp 'elpaca-process-queues) (elpaca-process-queues)))
+
+(defun rata-reload-module (module)
+  "Re-evaluate MODULE and apply what it declares.
+Interactively, complete over the modules `init.el' loads."
+  (interactive
+   (list (intern (completing-read "Reload module: "
+                                  (rata-config-module-order) nil t))))
+  (prog1 (rata--load-module-source module)
+    (rata--drain-elpaca)
+    (when (called-interactively-p 'interactive)
+      (message "Reloaded %s" module))))
+
+(defun rata--reload-report (files reloaded added failed)
+  "Return the one-line summary `rata-reload-config' echoes.
+FILES are per-machine file names, RELOADED, ADDED and FAILED are modules."
+  (let ((parts (delq nil
+                     (list (and (or files reloaded)
+                                (format "reloaded %s"
+                                        (mapconcat #'identity
+                                                   (append files (mapcar #'symbol-name reloaded))
+                                                   " ")))
+                           (and added (format "loaded new %s"
+                                              (mapconcat #'symbol-name added " ")))
+                           (and failed (format "FAILED %s"
+                                               (mapconcat #'symbol-name failed " ")))))))
+    (concat "Config: "
+            (if parts
+                (mapconcat #'identity parts ", ")
+              "nothing to reload, no file has changed")
+            (and (rata-config-file-changed-p rata-init-file)
+                 " (init.el itself changed: restart for anything but its module list)"))))
+
+(defun rata-reload-config (&optional force)
+  "Reload every part of this configuration that has changed on disk.
+
+Reloads `custom.el' and `local.el' if they were edited, every module
+whose file was edited, and any module added to `init.el' since startup --
+in init.el's own load order.  With a prefix argument FORCE, reload every
+module whether or not it changed.
+
+init.el itself is never re-run: that would replay the elpaca bootstrap
+against a live session.  A change to init.el beyond its
+`rata-load-module' lines is reported as needing a restart, and so does
+installing a package added since startup (`M-x elpaca-try' does that one
+on its own)."
+  (interactive "P")
+  (let ((stale (rata-config-stale-modules))
+        (files nil) (reloaded nil) (added nil) (failed nil))
+    (dolist (file (list custom-file (locate-user-emacs-file "local.el")))
+      (when (rata-config-file-changed-p file)
+        (load (rata--note-loaded file) nil 'nomessage)
+        (push (file-name-nondirectory file) files)))
+    (dolist (module (rata-config-module-order))
+      (cond
+       ((not (featurep module))
+        (rata-load-module module)
+        (if (featurep module)
+            (push module added)
+          (push module failed)))
+       ((or force (memq module stale))
+        (condition-case err
+            (progn (rata--load-module-source module)
+                   (push module reloaded))
+          (error
+           (push module failed)
+           (message "WARNING: reloading %s failed: %s"
+                    module (error-message-string err)))))))
+    (rata--drain-elpaca)
+    (setq files (nreverse files)
+          reloaded (nreverse reloaded)
+          added (nreverse added)
+          failed (nreverse failed))
+    (message "%s" (rata--reload-report files reloaded added failed))
+    (list :files files :reloaded reloaded :added added :failed failed)))
 
 (defun rata-report-init-errors ()
   "Print a summary of any modules that failed to load."
@@ -110,6 +275,11 @@ normally for a full backtrace.  Otherwise, catch and log them to
              (length rata--failed-modules))))
 
 (add-hook 'emacs-startup-hook #'rata-report-init-errors)
+
+;; Section 5 loaded these moments ago and this file is being read right now;
+;; recording them is what lets `rata-reload-config' notice a later edit.
+(mapc #'rata--note-loaded
+      (list rata-init-file custom-file (locate-user-emacs-file "local.el")))
 
 (rata-load-module 'init-pkg)
 (rata-load-module 'init-system)
