@@ -135,7 +135,7 @@ The config follows a modular structure: `early-init.el` → `init.el` → module
 
 **Startup sequence:**
 1. `early-init.el` — disables package.el (elpaca replaces it), removes UI chrome, sets `gc-cons-threshold` to max
-2. `init.el` — bootstraps elpaca, resets GC after startup, adds `lisp/` to load-path, loads `custom.el` then `local.el` (see **Per-machine configuration** below), then requires all modules via `rata-load-module`. It also owns reloading a changed config into a running Emacs (see **Reloading** below).
+2. `init.el` — bootstraps elpaca, resets GC after startup, adds `lisp/` to load-path, loads `custom.el` then `local.el` (see **Per-machine configuration** below), then requires all modules via `rata-load-module`
 3. Modules are loaded in strict order (dependencies matter):
 
 ```
@@ -595,32 +595,6 @@ init-present → init-dashboard
   own output without asking, and the per-speaker `--me` / `--skeptic` / `--newcomer` classes
   are a contract with `rata-dialogic-characters` that nothing checks. 
 - `init-present.el` — reveal.js slide export via `org-re-reveal` under `SPC o p`. Decks are org-roam nodes in the flat roam root, identified by the `rata-reveal-deck-tag` (`:presentation:`) filetag rather than by directory. New decks come from the `presentation` org-roam capture template in `init-org.el` (key `r`) rather than a bespoke command; `rata-reveal-add-header` converts an existing note in place, mirroring `rata-toggle-hastodo-filetag`. `rata-reveal-export-all` finds them with an `org-roam-db-query` mirroring `rata-org-roam-agenda-files` in `init-org.el`. HTML output is redirected to `rata-reveal-export-dir` (outside org-roam) by shadowing `org-export-output-file-name`'s PUB-DIR argument, so no generated file lands in the note tree. Two `ox-html` advices make export non-interactive in this config: one suppresses `set-auto-mode` in `org-html-final-function` (it activates `mhtml-mode`, whose submodes trigger treesit-auto), the other binds `treesit-auto-install` to nil around `org-html-fontify-code` (src-block fontification otherwise prompts to install a missing grammar mid-export). Keybindings sit at top level, not in the deferred `use-package :config`, because `:after (ox general)` would leave them dead until the first manual export. reveal.js assets come from a CDN by default; `rata-reveal-install-local` clones a local copy and `rata-reveal-toggle-root` switches between them for offline presenting. Reuses the `simple-httpd` recipe declared in `init-org.el` to serve decks over HTTP.
-
-**Reloading a changed config without restarting:** `SPC q r`
-(`rata-reload-config`, in `init.el` beside the module loader) re-applies every
-config file edited since this session loaded it — `custom.el`, `local.el`, each
-changed `lisp/init-*.el`, plus any module added to `init.el` since startup — in
-init.el's own load order. `SPC q R` (`rata-reload-module`) does one module;
-`C-u SPC q r` forces them all. Three things are load-bearing. **The elpaca queue
-must be drained** (`rata--drain-elpaca`): `elpaca-use-package` wraps the whole
-expansion of a `use-package` form in an `elpaca` form, so re-evaluating a module
-only *re-queues* its packages, and every `:custom`, `:config` and `:general`
-clause in it runs when that queue is processed — after startup nothing drains it
-but elpaca's own interactive timer, so a bare `load` of a module appears to do
-nothing whatsoever. This is why the predecessor, `rata-reload-init-file` (now an
-obsolete alias), did nothing twice over: re-running `init.el` only re-runs
-`require`, which no-ops on a loaded feature. **Staleness is one mtime per file**,
-recorded by `rata-load-module` as it loads and by every reload; a file this
-session never loaded is never stale, so a `local.el` created on a running Emacs
-is still a restart. **init.el itself is never re-run** — that would replay the
-elpaca bootstrap against a live session — so its module list is *read*
-(`rata-config-module-order`, a text scan, which is also why a commented-out
-`rata-load-module` line stays disabled), and any other change to init.el is
-reported as needing a restart. Installing a package added since startup is a
-restart too, or `M-x elpaca-try`. Tests: `rata-test-config-*` and
-`rata-test-reload-module-reapplies-a-use-package-clause`, which binds
-`after-init-time` because the harness clears it and elpaca only re-queues a
-finished order when it is set.
 
 **Error handling:** `rata-load-module` wraps each require in `condition-case`. Failed modules are logged to `rata--failed-modules` and reported in the `*init-errors*` buffer at startup. With `--debug-init`, errors propagate for full backtraces. Alternatively, use `when (file-exists-p ...)` for optional file loading and provide fallbacks for external dependencies.
 
