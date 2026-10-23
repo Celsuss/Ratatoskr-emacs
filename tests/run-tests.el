@@ -2157,6 +2157,36 @@ and every one of lsp-ui's own placement knobs measures against the frame.
                      (cons 200 500))))))
 
 ;;; ============================================================
+;;; 11. Magit window placement
+;;; ============================================================
+
+(ert-deftest rata-test-magit-opens-in-the-selected-window ()
+  "Magit reuses the current window; a diff and the process buffer do not.
+
+The default `magit-display-buffer-traditional' splits the frame when
+magit is entered from an ordinary file buffer, which is unusable on a
+narrow screen.  The variant set in `init-dev.el' must keep sending a
+`magit-diff-mode' buffer elsewhere, or the diff would be hidden behind
+the commit message being written about it.  Asserting the behaviour and
+not just the symbol, so an upstream rename or rewrite fails here."
+  (require 'magit)
+  (should (eq magit-display-buffer-function
+              #'magit-display-buffer-same-window-except-diff-v1))
+  (let ((status (generate-new-buffer " *rata-test-magit-status*"))
+        (diff (generate-new-buffer " *rata-test-magit-diff*")))
+    (unwind-protect
+        (save-window-excursion
+          (with-current-buffer status (setq major-mode 'magit-status-mode))
+          (with-current-buffer diff (setq major-mode 'magit-diff-mode))
+          (delete-other-windows)
+          (let* ((win (selected-window))
+                 (other (split-window win)))
+            (should (eq (funcall magit-display-buffer-function status) win))
+            (should (eq (funcall magit-display-buffer-function diff) other))))
+      (kill-buffer status)
+      (kill-buffer diff))))
+
+;;; ============================================================
 ;;; Test — fetching with curl (lisp/init-net.el)
 ;;; ============================================================
 ;;

@@ -152,10 +152,22 @@ FRAME, WIDTH, HEIGHT, START-X and START-Y are ORIG's arguments."
   (setq apheleia-remote-algorithm 'cancel))
 
 ;; --- Magit ---
+;; Magit opens in the window you are already in.  The default,
+;; `magit-display-buffer-traditional', calls `display-buffer' with no action
+;; when it is entered from an ordinary file buffer, so the frame gets split --
+;; pleasant on a wide screen, unusable when there is no room left for another
+;; window.  The `-except-diff-v1' variant rather than plain same-window: a
+;; `magit-diff-mode' or `magit-process-mode' buffer still goes elsewhere, which
+;; is what lets the diff stay visible while the commit message is written.
+;; `*Agent Review:' is a `magit-diff-mode' child, but its shackle rule (`:same
+;; t', `init-system.el') is matched before this action runs and wins, so the
+;; review hub keeps opening in place.
 (use-package magit
   :after general
   :commands (magit-status magit-blame magit-log magit-find-file magit-diff-buffer-file
-             magit-worktree))
+             magit-worktree)
+  :custom
+  (magit-display-buffer-function #'magit-display-buffer-same-window-except-diff-v1))
 
 ;; Git leader keys at top level so they are live from startup (FAIL-0009).
 (with-eval-after-load 'general
