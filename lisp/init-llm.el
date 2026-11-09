@@ -282,6 +282,9 @@ spawn time, never at load."
              agent-shell-toggle
              agent-shell-switch-buffer)
   :custom
+  ;; Replay the conversation when restoring, so earlier turns remain readable.
+  ;; Upstream's `minimal' default resumes with only the session title.
+  (agent-shell-session-restore-verbosity 'full)
   (agent-shell-anthropic-claude-acp-command '("claude-agent-acp"))
   (agent-shell-pi-acp-command '("pi-acp")))
 
