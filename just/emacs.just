@@ -45,8 +45,16 @@ compile:
     #!/usr/bin/env bash
     set -euo pipefail
     errors=0
-    for f in init.el lisp/init-*.el; do
+    for f in init.el lisp/init-*.el lisp/rata-beads.el; do
         echo "Compiling $f..."
+        # The lazily loaded Beads UI expands Magit section macros.  Its
+        # compile needs those libraries, without loading the full config.
+        extra_load_path=()
+        if [[ "$f" == lisp/rata-beads.el ]]; then
+            for dep in magit-section compat cond-let llama; do
+                extra_load_path+=(-L "elpaca/builds/$dep")
+            done
+        fi
         # use-package-ensure-function ignore: plain --batch runs package.el, and
         # compiling `:ensure t' installs at compile time -- it contacted
         # elpa.gnu.org for every module and hung for minutes per file when that
@@ -55,7 +63,7 @@ compile:
         # -L lisp: init.el adds lisp/ to load-path at runtime, but each file is
         # compiled in its own bare process, so a module that requires a sibling
         # (init-agent-worktree -> init-agent-center) could not be found.
-        if ! {{emacs_bin}} --init-directory {{init_dir}} --batch -L lisp \
+        if ! {{emacs_bin}} --init-directory {{init_dir}} --batch -L lisp "${extra_load_path[@]}" \
             --eval "(setq byte-compile-error-on-warn nil)" \
             --eval "(setq use-package-ensure-function #'ignore)" \
             -f batch-byte-compile "$f" < /dev/null 2>&1; then

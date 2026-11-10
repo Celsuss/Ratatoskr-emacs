@@ -118,6 +118,7 @@ normally for a full backtrace.  Otherwise, catch and log them to
 (rata-load-module 'init-evil)        ; includes (elpaca-wait) — general + evil synchronize here
 (rata-load-module 'init-completion)
 (rata-load-module 'init-dev)
+(rata-load-module 'init-beads)        ; read-only project tasks, loaded on demand
 (rata-load-module 'init-lang)         ; treesit + dap-mode + combobulate
 (rata-load-module 'init-rust)
 (rata-load-module 'init-go)

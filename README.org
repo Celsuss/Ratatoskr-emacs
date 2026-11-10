@@ -19,6 +19,7 @@ A modular, Evil-based Emacs configuration built for speed and productivity.
 - *Org-mode* — org-roam, org-super-agenda, org-kanban, org-download, org-transclusion, ox-hugo (blog export), org-re-reveal (reveal.js slides)
 - *Kubernetes* — kubel integration for cluster management
 - *Git* — magit, diff-hl (gutter indicators), browse-at-remote
+- *Beads* — read-only task dashboard with Magit sections (=SPC g t=)
 - *LLM tools* — gptel, ellama, aidermacs (Ollama at home, any OpenAI-compatible endpoint such as LiteLLM per machine via =local.el=), agent-shell
 - *Claude Code task loop* — work a =- [ ]= checklist file top to bottom, one headless =claude -p= run per task
 - *SQL client* — ejc-sql with a Snowflake JDBC connection
@@ -248,6 +249,7 @@ target is still =just <name>= with no module prefix.
 | =init-evil=       | Evil + evil-collection, general.el, winum               |
 | =init-completion= | Orderless, vertico, marginalia, consult, embark         |
 | =init-dev=        | LSP, corfu, flycheck, magit, projectile, vterm, dirvish |
+| =init-beads=      | Read-only Beads task dashboard, lazy-loaded Magit sections |
 | =init-lang=       | Cross-cutting infra: tree-sitter (treesit-auto), dap-mode core, combobulate |
 | =init-<lang>=     | Per-language files loaded after init-lang: rust, go, python, cpp, cmake, terraform, just, docker, markdown, yaml, ansible, jupyter, helm, pkgbuild |
 | =init-casual=     | Casual transient menus for built-in utility modes       |

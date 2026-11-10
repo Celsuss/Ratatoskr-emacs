@@ -19,6 +19,7 @@
 - [Mail](mail.md)
 - [Hacker News reader](hackernews.md)
 - [Jira](jira.md)
+- [Beads tasks](beads.md)
 
 # Reference
 

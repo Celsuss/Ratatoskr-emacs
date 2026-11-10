@@ -140,7 +140,7 @@ The config follows a modular structure: `early-init.el` → `init.el` → module
 
 ```
 init-pkg → init-system → init-net → init-ui → init-evil → init-completion →
-init-dev → init-lang → init-rust → init-go → init-python → init-cpp →
+init-dev → init-beads → init-lang → init-rust → init-go → init-python → init-cpp →
 init-cmake → init-terraform → init-just → init-docker → init-markdown →
 init-yaml → init-ansible → init-jupyter → init-helm → init-pkgbuild →
 init-casual → init-sql → init-k8s → init-gamedev → init-snippets →
@@ -183,6 +183,13 @@ init-present → init-dashboard
 - `init-evil.el` — evil + evil-collection, `general.el` with `rata-leader` definer (`SPC`), winum; contains `(elpaca-wait)` to synchronize general + evil before downstream modules use them
 - `init-completion.el` — orderless + vertico + marginalia + consult + embark + corfu
 - `init-dev.el` — lsp-mode, apheleia (formatting), flycheck, magit, projectile, vterm, diff-hl
+- `init-beads.el` — `SPC g t` opens a read-only, project-local Beads dashboard.
+  Autoloads `rata-beads.el`, which uses Magit's existing `magit-section` dependency
+  for status groups, folding and task details. Every query is an asynchronous
+  `bd --readonly --json` process, with a timeout and a generation guard; refresh
+  failures preserve the previous display. No database files are read directly.
+  Tests: `tests/beads-tests.el`, loaded by the main ERT suite, against
+  `tests/fixtures/fake-bd`; no real database or network is used.
 - `init-lang.el` — cross-cutting language infrastructure: tree-sitter (treesit-auto + grammar sources), dap-mode core, combobulate. Per-language config lives in dedicated `init-<lang>.el` files that load after this one.
 - `init-<lang>.el` — one file per language: `init-rust`, `init-go`, `init-python`, `init-cpp`, `init-cmake`, `init-terraform`, `init-just`, `init-docker`, `init-markdown`, `init-yaml`, `init-ansible`, `init-jupyter`, `init-helm`, `init-pkgbuild`. Each contains the `use-package` forms, mode-local keybindings, and helper functions for that one language.
 - `init-llm.el` — gptel, ellama, aidermacs and agent-shell under `SPC a i`. **The three

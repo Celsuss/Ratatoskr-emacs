@@ -247,6 +247,7 @@ so deferred packages (loaded via :commands) pass correctly."
     ("SPC p k" . projectile-kill-buffers)
     ("SPC b b" . consult-buffer)
     ("SPC f f" . find-file)
+    ("SPC g t" . rata-beads)
     ("SPC j d" . xref-find-definitions)
     ("SPC J j" . jira-issues)
     ("SPC a i o" . rata-agent-center-toggle)
@@ -6922,6 +6923,6 @@ C-<escape> sends ESC to the terminal, and <escape> enters normal mode."
 ;;; Run all tests
 ;;; ============================================================
 
+(load (expand-file-name "tests/beads-tests.el" user-emacs-directory) nil t)
+
 (ert-run-tests-batch-and-exit)
-
-

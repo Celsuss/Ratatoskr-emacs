@@ -1,0 +1,126 @@
+;;; -*- lexical-binding: t; -*-
+;;; beads-tests.el --- Beads rendering and CLI lifecycle tests
+
+(require 'ert)
+(require 'cl-lib)
+(require 'rata-beads)
+
+(defconst rata-test-beads--cli
+  (expand-file-name "fixtures/fake-bd" (file-name-directory load-file-name)))
+
+(defun rata-test-beads--wait ()
+  "Wait for the current Beads query, with a test deadline."
+  (let ((deadline (+ (float-time) 4)))
+    (while (and rata-beads--process (< (float-time) deadline))
+      (accept-process-output nil 0.02))
+    (should-not rata-beads--process)))
+
+(ert-deftest rata-test-beads-cli-arguments ()
+  (with-temp-buffer
+    (rata-beads-mode)
+    (should (equal (rata-beads--arguments)
+                   '("--readonly" "--json" "list" "--limit" "0")))
+    (setq rata-beads--view "ready")
+    (should (member "--ready" (rata-beads--arguments)))
+    (setq rata-beads--view "closed")
+    (should (equal (last (rata-beads--arguments) 2) '("--status" "closed")))
+    (setq rata-beads--view "all")
+    (should (member "--all" (rata-beads--arguments)))
+    (setq rata-beads--id "--strange-id")
+    (should (equal (rata-beads--arguments)
+                   '("--readonly" "--json" "show" "--id=--strange-id")))))
+
+(ert-deftest rata-test-beads-json-validation ()
+  (should-not (rata-beads--parse "[]"))
+  (dolist (text '("null" "{}" "[{}]" "oops" "[{\"id\":4,\"title\":\"bad\"}]"))
+    (should-error (rata-beads--parse text))))
+
+(ert-deftest rata-test-beads-render-folding-and-details ()
+  (with-temp-buffer
+    (rata-beads-mode)
+    (let* ((issue '((id . "t-1") (title . "First\nline") (status . "open")
+                    (priority . 0) (description . "Description")))
+           (issues (list issue '((id . "t-2") (title . "Second")
+                                 (status . "open") (priority . 3)))))
+      (rata-beads--render issues)
+      (goto-char (point-min))
+      (search-forward "First line")
+      (should (equal (rata-beads--current-id) "t-1"))
+      (let ((section (magit-current-section)))
+        (should (oref section hidden))
+        (magit-section-toggle section)
+        (should-not (oref section hidden))
+        (rata-beads--render issues)
+        (should-not (oref (magit-current-section) hidden)))
+      (setq rata-beads--id "t-1")
+      (rata-beads--render (list issue))
+      (goto-char (point-min))
+      (search-forward "Description")
+      (should-not (invisible-p (1- (point))))
+      (rata-beads--render nil)
+      (should (string-match-p "No tasks" (buffer-string))))))
+
+(ert-deftest rata-test-beads-async-success-failures-and-timeout ()
+  (let ((rata-beads-executable rata-test-beads--cli)
+        (rata-beads-timeout 2)
+        (process-environment (copy-sequence process-environment)))
+    (with-temp-buffer
+      (rata-beads-mode)
+      (rata-beads-refresh)
+      (rata-test-beads--wait)
+      (should (string-match-p "A task" (buffer-string)))
+      (let ((previous (buffer-string)))
+        (dolist (mode '("error" "invalid" "slow"))
+          (when (equal mode "slow") (setq rata-beads-timeout 0.05))
+          (setenv "RATA_TEST_BD_MODE" mode)
+          (rata-beads-refresh)
+          (rata-test-beads--wait)
+          (should (equal previous (buffer-string)))
+          (should (string-match-p "failed" mode-line-process)))))))
+
+(ert-deftest rata-test-beads-refresh-invalidates-old-query ()
+  (let ((rata-beads-executable rata-test-beads--cli)
+        (process-environment (copy-sequence process-environment)))
+    (with-temp-buffer
+      (rata-beads-mode)
+      (setenv "RATA_TEST_BD_MODE" "slow")
+      (rata-beads-refresh)
+      (let ((old rata-beads--process))
+        (setenv "RATA_TEST_BD_MODE" "ok")
+        (rata-beads-refresh)
+        (rata-test-beads--wait)
+        (should-not (process-live-p old))
+        (should (string-match-p "A task" (buffer-string)))))))
+
+(ert-deftest rata-test-beads-buffer-kill-cancels-query ()
+  (let ((rata-beads-executable rata-test-beads--cli)
+        (process-environment (copy-sequence process-environment))
+        process)
+    (setenv "RATA_TEST_BD_MODE" "slow")
+    (let ((buffer (generate-new-buffer " *beads-kill-test*")))
+      (unwind-protect
+          (with-current-buffer buffer
+            (rata-beads-mode)
+            (rata-beads-refresh)
+            (setq process rata-beads--process))
+        (kill-buffer buffer)))
+    (accept-process-output nil 0.05)
+    (should-not (process-live-p process))))
+
+(ert-deftest rata-test-beads-missing-cli ()
+  (let ((rata-beads-executable "/nonexistent/bd"))
+    (with-temp-buffer
+      (rata-beads-mode)
+      (should-error (rata-beads-refresh) :type 'user-error))))
+
+(ert-deftest rata-test-beads-evil-bindings ()
+  (when (featurep 'evil)
+    (with-temp-buffer
+      (rata-beads-mode)
+      (evil-local-mode 1)
+      (evil-normal-state)
+      (should (eq (key-binding (kbd "RET")) #'rata-beads-show))
+      (should (eq (key-binding (kbd "TAB")) #'magit-section-toggle))
+      (should (eq (key-binding (kbd "gr")) #'rata-beads-refresh)))))
+
+(provide 'beads-tests)
