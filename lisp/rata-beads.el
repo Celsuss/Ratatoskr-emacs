@@ -17,6 +17,52 @@
   "Inspect Beads tasks."
   :group 'tools :prefix "rata-beads-")
 
+(defface rata-beads-status-open
+  '((t :foreground "#83a598"))
+  "Blue for open tasks." :group 'rata-beads)
+(defface rata-beads-status-in-progress
+  '((t :foreground "#fabd2f"))
+  "Yellow for tasks in progress." :group 'rata-beads)
+(defface rata-beads-status-blocked
+  '((t :foreground "#fb4934"))
+  "Red for blocked tasks." :group 'rata-beads)
+(defface rata-beads-status-deferred
+  '((t :foreground "#d3869b"))
+  "Purple for deferred tasks." :group 'rata-beads)
+(defface rata-beads-status-closed
+  '((t :foreground "#b8bb26"))
+  "Green for closed tasks." :group 'rata-beads)
+
+(defface rata-beads-priority-0
+  '((t :foreground "#fb4934" :weight bold))
+  "Bold red for critical priority." :group 'rata-beads)
+(defface rata-beads-priority-1
+  '((t :foreground "#fe8019"))
+  "Orange for high priority." :group 'rata-beads)
+(defface rata-beads-priority-2
+  '((t :foreground "#fabd2f"))
+  "Yellow for medium priority." :group 'rata-beads)
+(defface rata-beads-priority-3
+  '((t :foreground "#83a598"))
+  "Blue for low priority." :group 'rata-beads)
+(defface rata-beads-priority-4
+  '((t :foreground "#928374"))
+  "Muted gray for backlog priority." :group 'rata-beads)
+
+(defconst rata-beads--status-faces
+  '(("open" . rata-beads-status-open)
+    ("in_progress" . rata-beads-status-in-progress)
+    ("blocked" . rata-beads-status-blocked)
+    ("deferred" . rata-beads-status-deferred)
+    ("closed" . rata-beads-status-closed))
+  "Faces used for Beads status values.")
+
+(defconst rata-beads--priority-faces
+  '((0 . rata-beads-priority-0) (1 . rata-beads-priority-1)
+    (2 . rata-beads-priority-2) (3 . rata-beads-priority-3)
+    (4 . rata-beads-priority-4))
+  "Faces used for Beads priority levels.")
+
 (defcustom rata-beads-executable "bd"
   "Beads executable, resolved when opening or refreshing the dashboard."
   :type 'string :group 'rata-beads)
@@ -29,9 +75,10 @@
 (defvar-local rata-beads--id nil)
 (defvar-local rata-beads--process nil)
 (defvar-local rata-beads--generation 0)
+(defvar-local rata-beads--detail-buffer nil
+  "Task detail buffer opened by this dashboard.")
 
 (defclass rata-beads-root (magit-section) ())
-(defclass rata-beads-status (magit-section) ())
 (defclass rata-beads-issue (magit-section) ())
 (defclass rata-beads-relations (magit-section) ())
 
@@ -66,17 +113,63 @@
   "Make VALUE safe for a single heading line."
   (replace-regexp-in-string "[\n\r\t]+" " " (format "%s" (or value ""))))
 
-(defun rata-beads--insert-issue (issue)
-  "Insert ISSUE as a section, with its description folded initially."
-  (magit-insert-section (rata-beads-issue (alist-get 'id issue) t)
+(defun rata-beads--status-text (status)
+  "Format STATUS with its face, leaving unknown values uncolored."
+  (let ((text (rata-beads--line status)))
+    (if-let* ((face (cdr (assoc status rata-beads--status-faces))))
+        ;; Font lock clears `face' on redisplay.  Like Magit's headings, keep
+        ;; directly rendered colors in `font-lock-face' so they survive it.
+        (propertize text 'font-lock-face face)
+      text)))
+
+(defun rata-beads--priority-text (priority)
+  "Format PRIORITY with its face, leaving unknown levels uncolored."
+  (let ((text (format "P%s" (or priority "?"))))
+    (if-let* ((face (cdr (assq priority rata-beads--priority-faces))))
+        (propertize text 'font-lock-face face)
+      text)))
+
+(defun rata-beads--row-format (issues)
+  "Return a column format wide enough for the metadata in ISSUES."
+  (let ((widths
+         (mapcar (lambda (column)
+                   (apply #'max (length (cdr column))
+                          (mapcar (lambda (issue)
+                                    (string-width
+                                     (rata-beads--line (alist-get (car column) issue))))
+                                  issues)))
+                 '((id . "ID") (status . "Status") (priority . "Pri")
+                   (issue_type . "Type")))))
+    (concat (mapconcat (lambda (width) (format "%%-%ds" width)) widths "  ")
+            "  %s")))
+
+(defun rata-beads--insert-issue (issue row-format)
+  "Insert exactly one row for ISSUE using ROW-FORMAT."
+  (magit-insert-section (rata-beads-issue (alist-get 'id issue))
+    (let ((start (point)))
+      (insert (format row-format
+                      (rata-beads--line (alist-get 'id issue))
+                      (rata-beads--status-text (alist-get 'status issue))
+                      (rata-beads--priority-text (alist-get 'priority issue))
+                      (rata-beads--line (alist-get 'issue_type issue))
+                      (rata-beads--line (alist-get 'title issue)))
+              "\n")
+      (add-text-properties start (point)
+                           '(mouse-face highlight help-echo "Show task details")))))
+
+(defun rata-beads--insert-details (issue)
+  "Insert the full text and metadata of ISSUE."
+  (magit-insert-section (rata-beads-issue (alist-get 'id issue))
     (magit-insert-heading
-      (format "  %-18s P%s %-9s %s%s"
-              (rata-beads--line (alist-get 'id issue))
-              (or (alist-get 'priority issue) "?")
-              (rata-beads--line (alist-get 'issue_type issue))
-              (rata-beads--line (alist-get 'title issue))
-              (if-let* ((owner (alist-get 'assignee issue)))
-                  (format "  @%s" (rata-beads--line owner)) "")))
+      (rata-beads--line (alist-get 'title issue)))
+    (insert (format "ID: %s\nStatus: %s   Pri: %s   Type: %s\n"
+                    (alist-get 'id issue)
+                    (rata-beads--status-text (alist-get 'status issue))
+                    (rata-beads--priority-text (alist-get 'priority issue))
+                    (or (alist-get 'issue_type issue) "")))
+    (dolist (field '(assignee created_at updated_at))
+      (when-let* ((text (alist-get field issue)))
+        (insert (format "%s: %s\n" field text))))
     (dolist (field '(description design acceptance_criteria notes))
       (when-let* ((text (alist-get field issue))
                   ((not (equal text ""))))
@@ -94,35 +187,26 @@
       (magit-insert-heading
         (format "Beads: %s" (or rata-beads--id rata-beads--view)))
       (insert default-directory "\n\n"
-              "RET details   TAB fold   g r refresh   f view   y copy ID   q quit\n\n")
+              "RET/click details   g r refresh   f view   y copy ID   q quit\n\n")
       (if rata-beads--id
           (dolist (issue issues)
-            (rata-beads--insert-issue issue)
-            (magit-section-show (car (last (oref magit-root-section children))))
-            (insert (format "Status: %s   Created: %s   Updated: %s\n\n"
-                            (alist-get 'status issue)
-                            (or (alist-get 'created_at issue) "")
-                            (or (alist-get 'updated_at issue) "")))
+            (rata-beads--insert-details issue)
             (dolist (field '(dependencies dependents))
               (magit-insert-section (rata-beads-relations field)
                 (magit-insert-heading (capitalize (symbol-name field)))
-                (dolist (relation (alist-get field issue))
-                  (rata-beads--insert-issue relation))
+                (let* ((relations (alist-get field issue))
+                       (row-format (rata-beads--row-format relations)))
+                  (dolist (relation relations)
+                    (rata-beads--insert-issue relation row-format)))
                 (insert "\n"))))
-        (let ((statuses (delete-dups
-                         (append '("in_progress" "open" "blocked" "deferred" "closed")
-                                 (mapcar (lambda (i) (alist-get 'status i)) issues)))))
-          (dolist (status statuses)
-            (let ((group (cl-remove-if-not
-                          (lambda (i) (equal status (alist-get 'status i))) issues)))
-              (when group
-                (magit-insert-section (rata-beads-status status)
-                  (magit-insert-heading
-                    (format "%s (%d)" (or status "Unknown") (length group)))
-                  (dolist (issue (cl-stable-sort
-                                 (copy-sequence group) #'<
-                                 :key (lambda (i) (or (alist-get 'priority i) 5))))
-                    (rata-beads--insert-issue issue))))))))
+        (let ((row-format (rata-beads--row-format issues)))
+          (insert (propertize (format row-format "ID" "Status" "Pri" "Type" "Title")
+                              'font-lock-face 'magit-section-heading)
+                  "\n")
+          (dolist (issue (cl-stable-sort
+                         (copy-sequence issues) #'<
+                         :key (lambda (i) (or (alist-get 'priority i) 5))))
+            (rata-beads--insert-issue issue row-format))))
       (unless issues (insert "No tasks in this view.\n")))
     (goto-char (min position (point-max)))))
 
@@ -215,27 +299,61 @@
   (message "Copied %s" (current-kill 0)))
 
 (defun rata-beads-show ()
-  "Show full details of the task at point in a separate buffer."
+  "Show and focus the task at point in the project's right side window."
   (interactive)
   (let ((directory default-directory)
         (id (rata-beads--current-id)))
-    (pop-to-buffer (get-buffer-create (format "*Beads %s: %s*" directory id)))
-    (unless (derived-mode-p 'rata-beads-mode) (rata-beads-mode))
-    (setq default-directory directory rata-beads--id id)
-    (rata-beads-refresh)))
+    (let ((buffer (get-buffer-create (format "*Beads details: %s*" directory))))
+      (unless rata-beads--id
+        (setq rata-beads--detail-buffer buffer))
+      (with-current-buffer buffer
+        (unless (derived-mode-p 'rata-beads-mode) (rata-beads-mode))
+        (unless (equal rata-beads--id id)
+          ;; Never show the previous task's text while the new query is pending.
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (setq magit-root-section nil)
+            (insert (format "Loading task %s…\n" id))))
+        (setq default-directory directory rata-beads--id id)
+        (setq-local truncate-lines nil)
+        (rata-beads-refresh))
+      ;; Call the side-window function directly so Shackle cannot replace the
+      ;; dashboard's window.  One slot also keeps repeated selections in place.
+      (let ((window (display-buffer-in-side-window
+                     buffer '((side . right) (slot . 1) (window-width . 0.45)))))
+        (set-window-point window (with-current-buffer buffer (point-min)))
+        (select-window window)))))
+
+(defun rata-beads-quit ()
+  "Quit this window, also closing this dashboard's task windows.
+In a task detail buffer, quit only that window to return to the dashboard."
+  (interactive)
+  (let ((window (selected-window)))
+    (when (and (not rata-beads--id) (buffer-live-p rata-beads--detail-buffer))
+      (dolist (detail-window (get-buffer-window-list rata-beads--detail-buffer))
+        (quit-window nil detail-window)))
+    (quit-window nil window)))
+
+(defun rata-beads-mouse-show (event)
+  "Show the task clicked on by mouse EVENT."
+  (interactive "e")
+  (mouse-set-point event)
+  (rata-beads-show))
 
 (defvar rata-beads-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map magit-section-mode-map)
     (define-key map (kbd "RET") #'rata-beads-show)
+    (define-key map [mouse-1] #'rata-beads-mouse-show)
     (define-key map (kbd "g") #'rata-beads-refresh)
     (define-key map (kbd "f") #'rata-beads-filter)
     (define-key map (kbd "y") #'rata-beads-copy-id)
-    (define-key map (kbd "q") #'quit-window)
+    (define-key map (kbd "q") #'rata-beads-quit)
     map))
 
 (define-derived-mode rata-beads-mode magit-section-mode "Beads"
-  "Inspect Beads tasks with collapsible Magit sections."
+  "Inspect Beads tasks in single rows with details in a side window."
+  (setq-local truncate-lines t)
   (setq-local revert-buffer-function (lambda (&rest _) (rata-beads-refresh)))
   (add-hook 'kill-buffer-hook #'rata-beads--cancel nil t)
   (add-hook 'change-major-mode-hook #'rata-beads--cancel nil t))
@@ -247,7 +365,7 @@
     (kbd "gr") #'rata-beads-refresh
     (kbd "f") #'rata-beads-filter
     (kbd "y") #'rata-beads-copy-id
-    (kbd "q") #'quit-window))
+    (kbd "q") #'rata-beads-quit))
 
 ;;;###autoload
 (defun rata-beads (&optional directory)
@@ -262,7 +380,7 @@ With a prefix argument, prompt for DIRECTORY.  All queries are read-only."
     (unless root (user-error "No .beads project here; use C-u SPC g t to select one"))
     (setq root (file-name-as-directory (expand-file-name root)))
     (when (file-remote-p root) (user-error "Beads dashboard supports local projects only"))
-    (pop-to-buffer (get-buffer-create (format "*Beads: %s*" root)))
+    (pop-to-buffer-same-window (get-buffer-create (format "*Beads: %s*" root)))
     (unless (derived-mode-p 'rata-beads-mode) (rata-beads-mode))
     (setq default-directory root)
     (rata-beads-refresh)))
