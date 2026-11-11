@@ -81,6 +81,7 @@
 (defclass rata-beads-root (magit-section) ())
 (defclass rata-beads-issue (magit-section) ())
 (defclass rata-beads-relations (magit-section) ())
+(defclass rata-beads-group (magit-section) ())
 
 (defun rata-beads--arguments ()
   "Return query arguments for the current buffer."
@@ -178,6 +179,70 @@
       (insert (format "\nLabels: %s\n" (string-join labels ", "))))
     (insert "\n")))
 
+(defun rata-beads--parent (issue)
+  "Return ISSUE's explicit parent ID, ignoring blocking dependencies."
+  (or (alist-get 'parent issue)
+      (alist-get 'depends_on_id
+                 (cl-find "parent-child" (alist-get 'dependencies issue)
+                          :key (lambda (dep) (alist-get 'type dep))
+                          :test #'equal))))
+
+(defun rata-beads--group-id (issue index)
+  "Find ISSUE's epic in INDEX, or a parent absent from the current view.
+Follow explicit parents only, never infer ancestry from an issue ID.
+Malformed cycles and chains without an epic have no group."
+  (let (seen result)
+    (while (and issue (not result)
+                (not (member (alist-get 'id issue) seen)))
+      (push (alist-get 'id issue) seen)
+      (if (equal (alist-get 'issue_type issue) "epic")
+          (setq result (alist-get 'id issue))
+        (let ((parent (rata-beads--parent issue)))
+          (setq issue (gethash parent index))
+          (when (and parent (not issue)) (setq result parent)))))
+    result))
+
+(defun rata-beads--insert-groups (issues row-format)
+  "Insert ISSUES grouped by epic using ROW-FORMAT for task rows.
+Keep priority order within each group and between epic rows.  A parent
+outside the filtered view is identified by ID without adding hidden tasks."
+  (let ((index (make-hash-table :test #'equal))
+        (groups (make-hash-table :test #'equal))
+        order)
+    (dolist (issue issues)
+      (puthash (alist-get 'id issue) issue index))
+    (dolist (issue (cl-stable-sort
+                   (copy-sequence issues) #'<
+                   :key (lambda (i) (or (alist-get 'priority i) 5))))
+      (let ((id (rata-beads--group-id issue index)))
+        (unless (gethash id groups) (push id order))
+        (push issue (gethash id groups))))
+    ;; Epic groups follow their own priority, not their most urgent child's.
+    (setq order
+          (cl-stable-sort
+           (nreverse order) #'<
+           :key (lambda (id)
+                  (if id (or (alist-get 'priority (gethash id index)) 5) 6))))
+    (dolist (id order)
+      (let* ((epic (gethash id index))
+             (rows (nreverse (gethash id groups)))
+             (heading (cond
+                       (epic (format "Epic: %s — %s" id
+                                     (rata-beads--line (alist-get 'title epic))))
+                       (id (format "Parent: %s (outside this view)" id))
+                       (t "Other tasks"))))
+        (if (and (null id) (= (hash-table-count groups) 1))
+            ;; Preserve the compact flat list for projects without epics.
+            (dolist (issue rows) (rata-beads--insert-issue issue row-format))
+          (insert "\n")
+          (magit-insert-section (rata-beads-group id)
+            (magit-insert-heading (concat "── " heading " ──"))
+            ;; Keep the epic itself selectable and ahead of its children.
+            (when epic (rata-beads--insert-issue epic row-format))
+            (dolist (issue rows)
+              (unless (eq issue epic)
+                (rata-beads--insert-issue issue row-format)))))))))
+
 (defun rata-beads--render (issues)
   "Render ISSUES in the current dashboard or detail buffer."
   (let ((inhibit-read-only t)
@@ -203,10 +268,7 @@
           (insert (propertize (format row-format "ID" "Status" "Pri" "Type" "Title")
                               'font-lock-face 'magit-section-heading)
                   "\n")
-          (dolist (issue (cl-stable-sort
-                         (copy-sequence issues) #'<
-                         :key (lambda (i) (or (alist-get 'priority i) 5))))
-            (rata-beads--insert-issue issue row-format))))
+          (rata-beads--insert-groups issues row-format)))
       (unless issues (insert "No tasks in this view.\n")))
     (goto-char (min position (point-max)))))
 

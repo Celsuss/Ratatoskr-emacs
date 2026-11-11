@@ -185,7 +185,8 @@ init-present → init-dashboard
 - `init-dev.el` — lsp-mode, apheleia (formatting), flycheck, magit, projectile, vterm, diff-hl
 - `init-beads.el` — `SPC g t` opens a read-only, project-local Beads dashboard.
   Autoloads `rata-beads.el`, which uses Magit's existing `magit-section` dependency
-  for single-row tasks (ID, Status, Pri, Type, Title) and task details in a
+  for single-row tasks (ID, Status, Pri, Type, Title), grouped under foldable epic
+  dividers using explicit parent links, and task details in a
   reusable right side window. Every query is an asynchronous
   `bd --readonly --json` process, with a timeout and a generation guard; refresh
   failures preserve the previous display. No database files are read directly.

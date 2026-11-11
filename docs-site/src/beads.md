@@ -5,7 +5,16 @@ the current window, like Magit status.
 Use `C-u SPC g t` to choose a project directory. Each project has its own buffer.
 The Beads CLI (`bd`) must be installed; Emacs startup works without it.
 
-The dashboard shows one row per task, sorted by priority, with columns in this
+The dashboard groups tasks under epic headings, separated by a divider and blank
+line. Press `TAB` on a heading to fold or expand its tasks. Each epic's own row
+comes first; its tasks follow in priority order, including nested subtasks.
+Epics are ordered by their own priority. Tasks without an epic appear under
+**Other tasks**. Projects without groups keep the compact flat list.
+Grouping follows explicit parent links, never ID prefixes or blocking dependencies.
+If a filter excludes a parent, its children stay together under **Parent: ID
+(outside this view)**, without adding excluded tasks.
+
+The dashboard shows one row per task, with columns in this
 order: **ID, Status, Pri, Type, Title**. Long titles are truncated at the window
 edge so tasks always occupy one screen row. The default view contains
 non-closed tasks; `f` offers open, ready, closed, and all. Ready uses Beads'
@@ -23,6 +32,7 @@ and `rata-beads-priority-*` faces to change them. Unknown values stay uncolored.
 | `RET` / mouse click | Show task text and details in the right side window |
 | `g r` | Refresh (`g` in Emacs state) |
 | `f` | Choose dashboard view |
+| `TAB` | Fold or expand an epic group |
 | `y` | Copy task ID |
 | `q` | Close task details; in the dashboard, close both windows |
 
