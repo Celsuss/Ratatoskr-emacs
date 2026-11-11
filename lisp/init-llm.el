@@ -296,6 +296,8 @@ spawn time, never at load."
 
 (declare-function agent-shell-shell-buffer "agent-shell")
 (declare-function agent-shell-send-file "agent-shell")
+(declare-function agent-shell-markdown-link-url-at-point "agent-shell-markdown")
+(declare-function agent-shell-markdown--open-link "agent-shell-markdown")
 (declare-function rata-agent-permissions-responder "init-agent-permissions")
 (declare-function rata-agent-permissions-test "init-agent-permissions")
 (declare-function rata-agent-permissions-toggle "init-agent-permissions")
@@ -340,6 +342,22 @@ spawn time, never at load."
                   #'agent-shell-ui-toggle-fragment)
     (message "init-llm: agent-shell predates `agent-shell-ui-fragment-map'; GUI Enter will not fold sections until it is updated (FAIL-0019)")))
 
+(defun rata-agent-shell-follow-link ()
+  "Open the rendered agent-shell link at point.
+File links open in Emacs, preserving line references; web links open in
+the browser.  Signal a user error when point is not on a link."
+  (interactive)
+  (unless (and (require 'agent-shell-markdown nil t)
+               (fboundp 'agent-shell-markdown-link-url-at-point)
+               (fboundp 'agent-shell-markdown--open-link))
+    (user-error "Update agent-shell to enable following rendered links"))
+  (let ((url (agent-shell-markdown-link-url-at-point)))
+    (unless url
+      (user-error "No link at point"))
+    ;; Upstream has no public follow-link command.  Keep its private opener
+    ;; here so file locations and URL handling stay consistent with clicking.
+    (agent-shell-markdown--open-link url)))
+
 ;; Local leader in the shell buffer.  agent-shell ships no evil bindings at
 ;; all, so these are ours to keep: the only copy of a key you rely on must not
 ;; be one evaluated by hand in a long-running daemon (L-065).  Scoped with
@@ -364,6 +382,7 @@ spawn time, never at load."
     ("f" agent-shell-fork                                "fork session")
     ("u" agent-shell-show-usage                          "show usage")
     ("o" agent-shell-other-buffer                        "shell <-> viewport")
+    ("l" rata-agent-shell-follow-link                    "follow link at point")
     ("A" rata-agent-antigravity-open-artifact            "open artifact"))
   "Local-leader keys in `agent-shell-mode-map': (KEY COMMAND LABEL).")
 

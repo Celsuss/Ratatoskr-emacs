@@ -4243,9 +4243,9 @@ simulation, interrupt here) must survive `,' becoming a prefix in this map."
                     (mapcar (pcase-lambda (`(,key ,command ,_)) (cons key command))
                             rata-agent-shell-local-keys)))
         failures)
-    ;; The table is the source for this test, so pin the two keys it exists
-    ;; for: an edit that drops them from the table would otherwise pass.
-    (dolist (key '("R" "S"))
+    ;; The table is the source for this test, so pin these essential keys:
+    ;; an edit that drops them from the table would otherwise pass.
+    (dolist (key '("R" "S" "l"))
       (unless (assoc key rata-agent-shell-local-keys)
         (push (format ", %s is missing from `rata-agent-shell-local-keys'" key)
               failures)))
@@ -4269,6 +4269,76 @@ simulation, interrupt here) must survive `,' becoming a prefix in this map."
     (when failures
       (ert-fail (concat "agent-shell local-leader keys have regressed:\n"
                         (mapconcat #'identity (nreverse failures) "\n"))))))
+
+(ert-deftest rata-test-agent-shell-follow-link-file-locations ()
+  "Rendered plan links keep upstream's file and location handling."
+  (require 'agent-shell)
+  (require 'agent-shell-markdown)
+  (let* ((file (make-temp-file "rata-link-plan-" nil ".md" "one\ntwo\nthree\n"))
+         (default-directory (file-name-directory file)))
+    (unwind-protect
+        (dolist (case `((,(file-name-nondirectory file) nil nil nil)
+                        (,(concat file "#L2-L3") 2 3 nil)
+                        (,(concat file ":2:3") 2 nil 3)))
+          (pcase-let ((`(,url ,line ,end ,column) case))
+            (with-temp-buffer
+              (use-local-map agent-shell-mode-map)
+              (insert (agent-shell-markdown-convert (format "[plan](%s)" url)))
+              (goto-char (point-min))
+              (evil-local-mode 1)
+              (evil-normal-state)
+              (evil-normalize-keymaps)
+              (let (visited)
+                (cl-letf (((symbol-function 'agent-shell-markdown-visit-file)
+                           (lambda (&rest args) (setq visited args)))
+                          ((symbol-function 'browse-url)
+                           (lambda (&rest _) (ert-fail "File link opened a browser"))))
+                  (call-interactively (key-binding (kbd ", l"))))
+                (should (equal (plist-get visited :file) file))
+                (should (equal (plist-get visited :line-start) line))
+                (should (equal (plist-get visited :line-end) end))
+                (should (equal (plist-get visited :column) column))))))
+      (delete-file file))))
+
+(ert-deftest rata-test-agent-shell-follow-link-web ()
+  "A rendered web link delegates to the browser without submitting input."
+  (require 'agent-shell-markdown)
+  (with-temp-buffer
+    (insert (agent-shell-markdown-convert "[docs](https://example.com/guide)"))
+    (goto-char (point-min))
+    (let (opened)
+      (cl-letf (((symbol-function 'browse-url)
+                 (lambda (url &rest _) (setq opened url)))
+                ((symbol-function 'agent-shell-submit)
+                 (lambda (&rest _) (ert-fail "Following a link submitted input"))))
+        (call-interactively #'rata-agent-shell-follow-link))
+      (should (equal opened "https://example.com/guide")))))
+
+(ert-deftest rata-test-agent-shell-follow-link-off-link ()
+  "Ordinary text and the end of a link never trigger an open or submit."
+  (require 'agent-shell-markdown)
+  (with-temp-buffer
+    (insert (agent-shell-markdown-convert "[docs](https://example.com) plain text"))
+    (cl-letf (((symbol-function 'agent-shell-markdown--open-link)
+               (lambda (&rest _) (ert-fail "Opened when point was off a link")))
+              ((symbol-function 'agent-shell-submit)
+               (lambda (&rest _) (ert-fail "Submitted when point was off a link"))))
+      (dolist (pos (list 5 (point-max)))
+        (goto-char pos)
+        (should (equal (cadr (should-error (rata-agent-shell-follow-link)
+                                          :type 'user-error))
+                       "No link at point"))))))
+
+(ert-deftest rata-test-agent-shell-follow-link-compatibility ()
+  "A missing upstream entry point disables only following links."
+  (require 'agent-shell-markdown)
+  (dolist (missing '(agent-shell-markdown-link-url-at-point
+                     agent-shell-markdown--open-link))
+    (cl-letf (((symbol-function missing) nil))
+      (should (string-match-p
+               "Update agent-shell"
+               (cadr (should-error (rata-agent-shell-follow-link)
+                                   :type 'user-error)))))))
 
 ;;; ============================================================
 ;;; Test — every snippet in snippets/ expands without error

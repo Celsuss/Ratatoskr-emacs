@@ -37,5 +37,9 @@ Local-leader (`,`) commands in an agent-shell buffer:
 | `f` | fork |
 | `u` | usage |
 | `o` | shell ↔ viewport |
+| `l` | follow link at point (file in Emacs, web URL in browser) |
+
+In normal state, move onto a rendered link and press `, l` to open it.
+Enter keeps its existing behavior.
 
 See [Agents panel](generated/agents.md) for managing many sessions at once, including one git worktree per task and the prompt library.
