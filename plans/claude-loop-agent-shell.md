@@ -1,8 +1,37 @@
 # claude-loop over agent-shell (ACP) — plan
 
-Status: **proposed, awaiting operator approval** (2026-10-01). Nothing is implemented.
+Status: **phases 0–2 complete; phases 3–4 deferred; tracked in Beads** (reconciled 2026-11-11).
 Risk tier: **CRITICAL** (`lisp/init-claude-loop.el`). Requires `just are-verify full`,
 a new `tests/claude-loop-e2e.el` case, and operator approval per phase.
+
+
+## Beads tracking (2026-11-11)
+
+Epic: `emacs-fjw`. Use `bd show <id>` for scope, evidence and acceptance criteria,
+and `bd ready` for work whose prerequisites are satisfied. Beads tracks execution;
+the original phase text below remains the design reference. Closed issues record
+existing implementation, not a claim that live GUI/service behavior was tested.
+
+| Plan item | Beads issue | Status |
+|---|---|---|
+| Claude loop: ACP adapter design spike | `emacs-fjw.1` | closed |
+| Claude loop: Backend seam and normalized attempt record | `emacs-fjw.2` | closed |
+| Claude loop: ACP backend with deny policy | `emacs-fjw.3` | closed |
+| Add ACP ask policy, timeout pause and live-shell takeover | `emacs-fjw.4` | deferred |
+| Reconcile ACP backend docs after takeover policy is implemented | `emacs-fjw.5` | deferred |
+
+Reconciliation: the recorded spike findings and existing backend code establish
+completion of phases 0–2. The consolidated roadmap explicitly parks D13, so
+operator takeover and its follow-up documentation are deferred. `AGENTS.md`
+already documents the current deny backend; preserve it. The old clean-tree
+precondition is historical, not an assertion about the current checkout.
+
+Verification commands in the original text that name `just are-verify` and
+`.are/` refer to removed infrastructure. Use current `AGENTS.md` and `just test`;
+loop changes also require the dedicated CLI/ACP fixture suites. This import
+passed `just lint`; `just test` stopped in compilation because sandboxed Snap
+Emacs cannot start (`cap_dac_override` unavailable). No live agent, external
+service or private-data checks were performed during reconciliation.
 
 ## 1. Question
 

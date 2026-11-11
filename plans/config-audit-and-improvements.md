@@ -1,7 +1,7 @@
 # Plan — Ratatoskr-emacs Audit & Core Improvements (`plans/config-audit-and-improvements.md`)
 
-Status: **proposed** (written 2026-10-14). Future implementation sessions will execute
-this plan phase by phase. No code was implemented during the initial audit session.
+Status: **five phases outstanding; tracked in Beads** (reconciled 2026-11-11).
+Originally proposed 2026-10-14; the initial audit session implemented no code.
 Each `## Phase N` below is one self-contained unit of work, designed to be implemented
 and verified incrementally.
 
@@ -18,6 +18,34 @@ with neither marker is the next phase. Nothing is committed autonomously (SAFETY
 so git history is not the progress record — this file is.
 
 ---
+
+
+## Beads tracking (2026-11-11)
+
+Epic: `emacs-1nv`. Use `bd show <id>` for scope, evidence and acceptance criteria,
+and `bd ready` for work whose prerequisites are satisfied. Beads tracks execution;
+the original phase text below remains the design reference. Closed issues record
+existing implementation, not a claim that live GUI/service behavior was tested.
+
+| Plan item | Beads issue | Status |
+|---|---|---|
+| Unify org-roam paths and fix protocol/httpd setup | `emacs-1nv.1` | open |
+| Add Corfu documentation, Elisp CAPF and xref fallback | `emacs-1nv.2` | open |
+| Add Smerge leader keys and fix Magit commit window cleanup | `emacs-1nv.3` | open |
+| Add an interactive project Just recipe runner | `emacs-1nv.4` | open |
+| Add optional Org reading typography and margins | `emacs-1nv.5` | open |
+
+Reconciliation: the shared path move, active HTTP server recipe correction,
+protocol setup, completion additions, Git ergonomics, Just runner and reading
+typography remain outstanding in the code. Existing Cape file/dabbrev completion
+is baseline only. Phases 2–5 depend on Phase 1 as the plan diagram specifies.
+
+Verification commands in the original text that name `just are-verify` and
+`.are/` refer to removed infrastructure. Use current `AGENTS.md` and `just test`;
+loop changes also require the dedicated CLI/ACP fixture suites. This import
+passed `just lint`; `just test` stopped in compilation because sandboxed Snap
+Emacs cannot start (`cap_dac_override` unavailable). No live agent, external
+service or private-data checks were performed during reconciliation.
 
 ## How to run this plan
 

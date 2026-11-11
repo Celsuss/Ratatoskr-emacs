@@ -1,11 +1,36 @@
 # Plan — AI control center (`init-agent-center.el`)
 
-Status: **phases 1–6 done** (phases 1–4 2026-09-30; phases 5–6 2026-10-14).
+Status: **phases 1–6 complete; live operator verification outstanding; tracked in Beads** (reconciled 2026-11-11).
 Each `## Phase N` below is one unit of work, done in interactive Claude Code.
 **This file is the progress record:** a phase is closed by appending ` [done]` to its
 heading, or ` [blocked: <reason>]` when it needs the operator. The first heading
 with neither marker is the next phase. Nothing is committed autonomously
 (SAFETY_RULES), so git history is not the progress record — this file is.
+
+
+## Beads tracking (2026-11-11)
+
+Epic: `emacs-qhs`. Use `bd show <id>` for scope, evidence and acceptance criteria,
+and `bd ready` for work whose prerequisites are satisfied. Beads tracks execution;
+the original phase text below remains the design reference. Closed issues record
+existing implementation, not a claim that live GUI/service behavior was tested.
+
+| Plan item | Beads issue | Status |
+|---|---|---|
+| Control center: State model and registry | `emacs-qhs.1` | closed |
+| Control center: Side-window panel | `emacs-qhs.2` | closed |
+| Control center: Navigation and actions | `emacs-qhs.3` | closed |
+| Control center: Ambient mode-line signal | `emacs-qhs.4` | closed |
+| Control center: Permission actions from panel | `emacs-qhs.5` | closed |
+| Control center: Throttled activity line | `emacs-qhs.6` | closed |
+| Verify control center with live agents and GUI layouts | `emacs-qhs.7` | open |
+
+Verification commands in the original text that name `just are-verify` and
+`.are/` refer to removed infrastructure. Use current `AGENTS.md` and `just test`;
+loop changes also require the dedicated CLI/ACP fixture suites. This import
+passed `just lint`; `just test` stopped in compilation because sandboxed Snap
+Emacs cannot start (`cap_dac_override` unavailable). No live agent, external
+service or private-data checks were performed during reconciliation.
 
 ## How to run this plan
 

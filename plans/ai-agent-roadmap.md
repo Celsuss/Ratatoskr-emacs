@@ -1,6 +1,6 @@
 # Plan — AI agent roadmap (consolidated)
 
-Status: **proposed** (consolidated 2026-10-15).
+Status: **baseline implemented; roadmap phases outstanding; tracked in Beads** (reconciled 2026-11-11).
 Replaces four earlier plans, deleted 2026-10-15: `ai-agent-powerhouse.md` (round 1,
 labels `A`–`D`), `agent-powerhouse-herdr.md` (round 2, labels `H1`–`H8`), `ai-agent-pillars.md`
 (Pillars I–III) and `mcp-servers.md` (MCP client plumbing). Only the first and third were
@@ -10,6 +10,49 @@ committed; their longer design notes are still in git history. **This file is th
 Done predecessor: `plans/ai-control-center.md` (Phases 1–6, the `*Agents*` panel).
 
 ---
+
+
+## Beads tracking (2026-11-11)
+
+Epic: `emacs-7xk`. Use `bd show <id>` for scope, evidence and acceptance criteria,
+and `bd ready` for work whose prerequisites are satisfied. Beads tracks execution;
+the original phase text below remains the design reference. Closed issues record
+existing implementation, not a claim that live GUI/service behavior was tested.
+
+| Plan item | Beads issue | Status |
+|---|---|---|
+| Context senders and error feedback | `emacs-7xk.1` | open |
+| Public agent and worktree lifecycle hooks | `emacs-7xk.2` | open |
+| Stalled agent state and attention timer | `emacs-7xk.3` | open |
+| Per-turn snapshots and diff review | `emacs-7xk.4` | open |
+| Handoff, queued follow-ups and broadcast | `emacs-7xk.5` | open |
+| Session history, restore and recently closed agents | `emacs-7xk.6` | open |
+| Start worktree agents from Org/Jira task specifications | `emacs-7xk.7` | open |
+| Opt-in repository dev logs and troubleshooting capture | `emacs-7xk.8` | open |
+| Isolate loop shells before enabling the MCP registry | `emacs-7xk.9` | open |
+| Build org-roam MCP configuration and pure server specs | `emacs-7xk.10` | open |
+| Register org-roam MCP lazily with graceful executable probing | `emacs-7xk.11` | open |
+| Add MCP export, status cockpit, toggles and documentation | `emacs-7xk.12` | open |
+| Spike the Emacs MCP transport and expose scoped read tools | `emacs-7xk.13` | open |
+| Expose lead-scoped agent list, read and wait MCP tools | `emacs-7xk.14` | open |
+| Add confirmed and capped helper spawn/send MCP tools | `emacs-7xk.15` | open |
+| Nest helper agents under their lead in the control center | `emacs-7xk.16` | open |
+| Verify host setup and live interactive-only MCP access | `emacs-7xk.17` | open |
+
+Reconciliation: `init-mcp.el` remains an experimental stub and its load in
+`init.el` is commented out. The operator-setup paragraph below claiming the
+org-roam bridge is implemented is stale; Phase 9 is outstanding. Existing panel,
+worktree, prompt-library, branch-review and permission features are baseline,
+not completion of the remaining phases. The Parked table stays unscheduled;
+ACP takeover is tracked as deferred under the separate claude-loop epic.
+Check current keybindings before implementation: `SPC a i s o` now starts Codex.
+
+Verification commands in the original text that name `just are-verify` and
+`.are/` refer to removed infrastructure. Use current `AGENTS.md` and `just test`;
+loop changes also require the dedicated CLI/ACP fixture suites. This import
+passed `just lint`; `just test` stopped in compilation because sandboxed Snap
+Emacs cannot start (`cap_dac_override` unavailable). No live agent, external
+service or private-data checks were performed during reconciliation.
 
 ## Goal & Strategic Vision (The Three Pillars)
 
