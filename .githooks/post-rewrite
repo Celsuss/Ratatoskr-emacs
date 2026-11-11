@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# A pull with rebase rewrites commits instead of invoking post-merge.
+set -euo pipefail
+[[ "${1:-}" == rebase ]] || exit 0
+exec "$(dirname "$0")/../scripts/beads-git-sync.sh" pull

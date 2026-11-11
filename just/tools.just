@@ -44,7 +44,15 @@ repomix:
         exit 1
     fi
 
-# Configure git to use .githooks/ for hooks (one-time setup)
+# Configure verification and Beads sync hooks (one-time setup per checkout)
 install-hooks:
     git config core.hooksPath .githooks
     @echo "Git hooks installed from .githooks/"
+
+# Pull code and tasks even when Git reports that code is already up to date.
+[positional-arguments]
+pull *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    RATA_BEADS_SYNC_ACTIVE=1 git pull "$@"
+    ./scripts/beads-git-sync.sh pull

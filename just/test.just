@@ -35,5 +35,9 @@ test-claude-loop:
 test-claude-loop-acp:
     RATA_ROOT={{init_dir}} {{emacs_bin}} -Q --batch -l tests/claude-loop-acp-e2e.el
 
-# Run all tests (lint + compile + startup + ERT)
-test: lint compile batch test-ert test-work-agenda
+# Exercise Git hooks in throwaway repos with a fake bd (no network or database).
+test-git-hooks:
+    python3 tests/git-hooks-tests.py
+
+# Run all tests (lint + compile + startup + ERT + Git hooks)
+test: lint compile batch test-ert test-work-agenda test-git-hooks

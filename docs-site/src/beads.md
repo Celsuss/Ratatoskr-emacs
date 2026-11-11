@@ -43,3 +43,36 @@ This is an inspection interface: task creation, updates and closing stay in the
 CLI. It never reads the database or JSONL exports directly, and leaves database
 discovery and redirects to `bd`. Remote TRAMP projects are not supported.
 The command interface was checked against Beads 1.3.4.
+
+## Synchronization between machines
+
+Tasks synchronize through the Dolt remote named `origin`, stored on GitHub under
+`refs/dolt/data`. Source branches and task history travel separately; JSONL
+exports are not used for synchronization.
+
+On a fresh clone, install Beads 1.3.4 (or a compatible version) and Dolt, ensure
+GitHub SSH access works, then run `bd bootstrap` and `just install-hooks`.
+For an existing database, first configure its Dolt remote to the same task
+history; do not initialize a second empty database to replace existing tasks.
+
+The versioned hooks provide:
+
+- Before `git push origin`, `bd sync --remote origin` pulls, checks conflicts,
+  and pushes tasks. Failure blocks the code push. Pushes to other remote names
+  are left alone. Task publication happens first, so a later code-push failure
+  does not roll back task publication.
+- After a successful merge (including a fast-forward pull) or rebase,
+  `bd dolt pull --remote origin` retrieves tasks. A failure prints an explicit
+  recovery command; Git has already updated code and cannot roll that back.
+- A recursion guard prevents Dolt's internal Git commands from syncing again.
+  Missing Beads or an uninitialized checkout produces an actionable error.
+
+Git has no post-pull hook. An already-up-to-date `git pull` does not invoke the
+merge/rebase hooks, even if tasks have changed. Use `just pull` (or
+`just pull --rebase`) to always pull both code and tasks, including that case.
+It suppresses the task hooks during its code pull and pulls tasks once after
+success. A plain `git fetch` does not synchronize tasks. These hooks use the
+task remote `origin` even when code is merged from another source.
+
+Run `just test-git-hooks` to exercise hooks without contacting GitHub or using
+a real Beads database. Existing pre-commit lint and compilation checks remain.

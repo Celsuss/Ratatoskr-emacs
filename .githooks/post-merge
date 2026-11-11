@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Pull tasks after a successful merge, including a fast-forward pull.
+set -euo pipefail
+exec "$(dirname "$0")/../scripts/beads-git-sync.sh" pull

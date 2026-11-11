@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Synchronize tasks before publishing code.  Install with: just install-hooks
+set -euo pipefail
+exec "$(dirname "$0")/../scripts/beads-git-sync.sh" push "$@"

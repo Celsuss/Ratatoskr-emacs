@@ -199,6 +199,24 @@ To install icon fonts and tree-sitter grammars:
   just install-grammars
 #+end_src
 
+*** Beads tasks on another machine
+
+Install Beads (=bd=, version 1.3.4 or compatible), Dolt, and =just=, and set up
+SSH access to this GitHub repository.  In a fresh clone, run:
+
+#+begin_src sh
+  cd Ratatoskr-emacs
+  bd bootstrap
+  just install-hooks
+  bd list
+#+end_src
+
+=bd bootstrap= downloads the existing tasks and configures their remote.
+After setup, =git push origin= synchronizes tasks before pushing code.  Use
+=just pull= to pull both code and tasks, even when the code is already up to
+date.  Tasks are stored separately on the same GitHub remote; no JSONL export
+or manual task-file commit is needed.
+
 ** Commands
 
 The recipes live in =just/*.just=, imported flat by the root =justfile= — every
@@ -224,7 +242,8 @@ target is still =just <name>= with no module prefix.
 | =just install-grammars= | Install tree-sitter grammars (one-time)      |
 | =just install-deps=     | Install system dependencies (detects the OS) |
 | =just check-deps=       | Report which dependency binaries are present |
-| =just install-hooks=    | Install git pre-commit hook (one-time)       |
+| =just install-hooks=    | Install verification and Beads sync hooks (per checkout) |
+| =just pull=             | Pull code and Beads tasks, even when code is up to date |
 | =just docs-build=       | Build the documentation site (mdBook + pandoc) |
 | =just docs-serve=       | Build and serve the site on localhost:3000   |
 | =just docs-clean=       | Delete the generated site                    |
